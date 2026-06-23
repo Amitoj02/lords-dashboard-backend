@@ -1,0 +1,239 @@
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { Test, TestingModule } from '@nestjs/testing';
+import { getRepositoryToken } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { MemberRole, MemberStatus } from '../common/enums';
+import { Member } from '../members/entities/member.entity';
+import { Regiment } from '../regiments/entities/regiment.entity';
+import { AuthService } from './auth.service';
+import { DiscordOAuthService } from './discord-oauth.service';
+import { DiscordIdentity } from './entities/discord-identity.entity';
+import { AuthenticatedUser } from './types/authenticated-user.interface';
+import { JwtPayload } from './types/jwt-payload.interface';
+
+type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
+const repoMock = <T extends object>(): MockRepo<T> => ({
+  findOne: jest.fn(),
+  create: jest.fn((x: unknown) => x),
+  save: jest.fn((x: unknown) => Promise.resolve(x)),
+});
+
+const TOKEN = {
+  access_token: 'access-token',
+  refresh_token: 'refresh-token',
+  token_type: 'Bearer',
+  expires_in: 604800,
+  scope: 'identify email guilds',
+};
+
+const NEW_PROFILE = {
+  id: '999000111222',
+  username: 'newbie',
+  global_name: 'New Bie',
+  discriminator: '0',
+  avatar: 'avatarhash',
+  email: 'newbie@example.com',
+};
+
+describe('AuthService', () => {
+  let service: AuthService;
+  let identities: MockRepo<DiscordIdentity>;
+  let members: MockRepo<Member>;
+  let regiments: MockRepo<Regiment>;
+  let discord: jest.Mocked<
+    Pick<DiscordOAuthService, 'exchangeCode' | 'fetchUser' | 'isMemberOfGuild' | 'buildAvatarUrl'>
+  >;
+  let jwt: { signAsync: jest.Mock };
+
+  beforeEach(async () => {
+    identities = repoMock<DiscordIdentity>();
+    members = repoMock<Member>();
+    regiments = repoMock<Regiment>();
+    discord = {
+      exchangeCode: jest.fn().mockResolvedValue(TOKEN),
+      fetchUser: jest.fn().mockResolvedValue(NEW_PROFILE),
+      isMemberOfGuild: jest.fn().mockResolvedValue(true),
+      buildAvatarUrl: jest.fn().mockReturnValue('https://cdn/avatar.png'),
+    };
+    jwt = { signAsync: jest.fn().mockResolvedValue('signed.jwt.token') };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AuthService,
+        { provide: getRepositoryToken(DiscordIdentity), useValue: identities },
+        { provide: getRepositoryToken(Member), useValue: members },
+        { provide: getRepositoryToken(Regiment), useValue: regiments },
+        { provide: DiscordOAuthService, useValue: discord },
+        { provide: JwtService, useValue: jwt },
+        {
+          provide: ConfigService,
+          useValue: { get: jest.fn().mockReturnValue({ guildId: 'guild-1' }) },
+        },
+      ],
+    }).compile();
+
+    service = module.get(AuthService);
+  });
+
+  describe('signInWithDiscord', () => {
+    it('creates a Discord identity (the user record) for a brand-new sign-in and issues an Applicant JWT', async () => {
+      identities.findOne!.mockResolvedValue(null); // no existing identity
+      identities.save!.mockImplementation((x: DiscordIdentity) =>
+        Promise.resolve({ ...x, id: 'identity-new' }),
+      );
+      members.findOne!.mockResolvedValue(null); // not on the roster
+      regiments.findOne!.mockResolvedValue({ id: 'regiment-1' });
+
+      const result = await service.signInWithDiscord('code', '1.2.3.4');
+
+      // A proper user record was created from the Discord profile.
+      expect(identities.create).toHaveBeenCalled();
+      const saved = identities.save!.mock.calls[0][0] as DiscordIdentity;
+      expect(saved).toMatchObject({
+        discordUserId: '999000111222',
+        discordTag: '@newbie',
+        globalName: 'New Bie',
+        email: 'newbie@example.com',
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        guildMember: true,
+        lastSignInIp: '1.2.3.4',
+      });
+      expect(saved.tokenExpiresAt).toBeInstanceOf(Date);
+
+      // No roster member yet.
+      expect(result.isMember).toBe(false);
+      expect(result.member).toBeNull();
+      expect(members.save).not.toHaveBeenCalled();
+
+      // JWT carries Applicant role and a null member id.
+      const payload = jwt.signAsync.mock.calls[0][0] as JwtPayload;
+      expect(payload).toMatchObject({
+        sub: 'identity-new',
+        mid: null,
+        did: '999000111222',
+        role: MemberRole.Applicant,
+        rid: 'regiment-1',
+      });
+      expect(result.token).toBe('signed.jwt.token');
+    });
+
+    it('links an existing roster member and issues a JWT with the member role', async () => {
+      const existingIdentity = { id: 'identity-owner', discordUserId: '100000000000000001' };
+      identities.findOne!.mockResolvedValue(existingIdentity);
+      identities.save!.mockImplementation((x: DiscordIdentity) => Promise.resolve(x));
+      const member = {
+        id: 'member-owner',
+        role: MemberRole.Owner,
+        status: MemberStatus.Active,
+        regimentId: 'regiment-1',
+        discordLinked: false,
+        rank: { name: 'General' },
+      } as unknown as Member;
+      members.findOne!.mockResolvedValue(member);
+      members.save!.mockImplementation((x: Member) => Promise.resolve(x));
+
+      const result = await service.signInWithDiscord('code', null);
+
+      expect(result.isMember).toBe(true);
+      expect(result.member).toBe(member);
+      // Returning member's last-seen + link flag are refreshed.
+      const savedMember = members.save!.mock.calls[0][0] as Member;
+      expect(savedMember.discordLinked).toBe(true);
+      expect(savedMember.lastSeenAt).toBeInstanceOf(Date);
+
+      const payload = jwt.signAsync.mock.calls[0][0] as JwtPayload;
+      expect(payload).toMatchObject({
+        mid: 'member-owner',
+        role: MemberRole.Owner,
+        rid: 'regiment-1',
+      });
+      // Existing regiment came from the member — no default lookup needed.
+      expect(regiments.findOne).not.toHaveBeenCalled();
+    });
+
+    it('does not check guild membership when no guild is configured', async () => {
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          AuthService,
+          { provide: getRepositoryToken(DiscordIdentity), useValue: identities },
+          { provide: getRepositoryToken(Member), useValue: members },
+          { provide: getRepositoryToken(Regiment), useValue: regiments },
+          { provide: DiscordOAuthService, useValue: discord },
+          { provide: JwtService, useValue: jwt },
+          { provide: ConfigService, useValue: { get: () => ({ guildId: '' }) } },
+        ],
+      }).compile();
+      const svc = module.get(AuthService);
+
+      identities.findOne!.mockResolvedValue(null);
+      identities.save!.mockImplementation((x: DiscordIdentity) =>
+        Promise.resolve({ ...x, id: 'i' }),
+      );
+      members.findOne!.mockResolvedValue(null);
+      regiments.findOne!.mockResolvedValue({ id: 'regiment-1' });
+
+      await svc.signInWithDiscord('code', null);
+      expect(discord.isMemberOfGuild).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCurrentUser', () => {
+    it('returns the member projection when the user is enrolled', async () => {
+      members.findOne!.mockResolvedValue({
+        id: 'member-1',
+        name: 'Lord Commander',
+        role: MemberRole.Owner,
+        discordLinked: true,
+        avatarUrl: 'https://cdn/a.png',
+        rank: { name: 'General' },
+      });
+      const user: AuthenticatedUser = {
+        identityId: 'identity-1',
+        memberId: 'member-1',
+        discordUserId: 'd',
+        role: MemberRole.Owner,
+        regimentId: 'regiment-1',
+      };
+
+      await expect(service.getCurrentUser(user)).resolves.toEqual({
+        id: 'member-1',
+        name: 'Lord Commander',
+        rank: 'General',
+        role: MemberRole.Owner,
+        discordTag: null,
+        discordLinked: true,
+        avatarUrl: 'https://cdn/a.png',
+        isMember: true,
+      });
+    });
+
+    it('returns the identity projection when there is no linked member', async () => {
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-1',
+        globalName: 'New Bie',
+        discordTag: '@newbie',
+        avatarUrl: 'https://cdn/a.png',
+      });
+      const user: AuthenticatedUser = {
+        identityId: 'identity-1',
+        memberId: null,
+        discordUserId: 'd',
+        role: MemberRole.Applicant,
+        regimentId: 'regiment-1',
+      };
+
+      await expect(service.getCurrentUser(user)).resolves.toEqual({
+        id: 'identity-1',
+        name: 'New Bie',
+        rank: null,
+        role: MemberRole.Applicant,
+        discordTag: '@newbie',
+        discordLinked: false,
+        avatarUrl: 'https://cdn/a.png',
+        isMember: false,
+      });
+    });
+  });
+});

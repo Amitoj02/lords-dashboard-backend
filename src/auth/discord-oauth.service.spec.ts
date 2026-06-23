@@ -1,0 +1,79 @@
+import { UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { AppConfig } from '../config/configuration';
+import { DiscordOAuthService } from './discord-oauth.service';
+
+const fakeResponse = (ok: boolean, body: unknown, status = 200) =>
+  ({ ok, status, json: () => Promise.resolve(body) }) as unknown as Response;
+
+describe('DiscordOAuthService', () => {
+  let service: DiscordOAuthService;
+
+  const config = {
+    get: jest.fn().mockReturnValue({
+      clientId: 'cid',
+      clientSecret: 'sec',
+      callbackUrl: 'http://localhost/cb',
+      scopes: ['identify', 'guilds'],
+      guildId: 'gid',
+    }),
+  } as unknown as ConfigService<AppConfig, true>;
+
+  beforeEach(() => {
+    service = new DiscordOAuthService(config);
+    jest.restoreAllMocks();
+  });
+
+  it('buildAuthorizeUrl includes client_id, scope, state', () => {
+    const url = service.buildAuthorizeUrl('st8');
+    expect(url).toContain('client_id=cid');
+    expect(url).toContain('scope=identify+guilds');
+    expect(url).toContain('state=st8');
+    expect(url).toContain('response_type=code');
+  });
+
+  it('exchangeCode returns the token payload on success', async () => {
+    const token = {
+      access_token: 'at',
+      token_type: 'Bearer',
+      expires_in: 604800,
+      scope: 'identify',
+    };
+    jest.spyOn(global, 'fetch').mockResolvedValue(fakeResponse(true, token));
+    await expect(service.exchangeCode('code')).resolves.toEqual(token);
+  });
+
+  it('exchangeCode throws Unauthorized on a non-ok response', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(fakeResponse(false, {}, 400));
+    await expect(service.exchangeCode('bad')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('fetchUser returns the Discord profile', async () => {
+    const user = { id: '42', username: 'newbie' };
+    jest.spyOn(global, 'fetch').mockResolvedValue(fakeResponse(true, user));
+    await expect(service.fetchUser('at')).resolves.toEqual(user);
+  });
+
+  it('fetchUser throws Unauthorized when Discord rejects the token', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(fakeResponse(false, {}, 401));
+    await expect(service.fetchUser('bad')).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('isMemberOfGuild reflects guild membership', async () => {
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(fakeResponse(true, [{ id: 'gid', name: 'Lords' }]));
+    await expect(service.isMemberOfGuild('at', 'gid')).resolves.toBe(true);
+
+    jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(fakeResponse(true, [{ id: 'other', name: 'Elsewhere' }]));
+    await expect(service.isMemberOfGuild('at', 'gid')).resolves.toBe(false);
+  });
+
+  it('buildAvatarUrl picks gif for animated, png otherwise, null when missing', () => {
+    expect(service.buildAvatarUrl('42', 'a_anim')).toContain('/42/a_anim.gif');
+    expect(service.buildAvatarUrl('42', 'static')).toContain('/42/static.png');
+    expect(service.buildAvatarUrl('42', null)).toBeNull();
+  });
+});
