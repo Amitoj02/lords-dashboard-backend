@@ -2,11 +2,15 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ApplicationsModule } from './applications/applications.module';
+import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
+import { AuthzModule } from './authz/authz.module';
 import configuration from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
 import { HealthModule } from './health/health.module';
+import { MembersModule } from './members/members.module';
 
 @Module({
   imports: [
@@ -26,14 +30,17 @@ import { HealthModule } from './health/health.module';
     HealthModule,
     AuthModule,
 
+    // ── Cross-cutting infrastructure (global) ────────────────────────────
+    AuthzModule,
+    AuditModule,
+
     // ── Feature modules (added as the schema is implemented) ─────────────
-    // MembersModule,
+    MembersModule,
+    ApplicationsModule,
     // RanksModule,
     // MedalsModule,
     // EventsModule,
     // GalleryModule,
-    // ApplicationsModule,
-    // AuditModule,
     // SettingsModule,
   ],
   providers: [
