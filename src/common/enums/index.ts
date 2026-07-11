@@ -139,4 +139,5 @@ export enum Capability {
   RsvpToEvents = 'rsvp_to_events',
   ViewMembersDirectory = 'view_members_directory',
   ApplyToJoin = 'apply_to_join',
+  ManageNotifications = 'manage_notifications',
 }

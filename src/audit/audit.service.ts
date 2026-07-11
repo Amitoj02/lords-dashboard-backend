@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -109,19 +109,8 @@ export class AuditService {
     regimentId: string,
     query: AuditQueryDto,
   ): Promise<PaginatedResponseDto<AuditLogEntryDto>> {
-    const where: FindOptionsWhere<AuditLogEntry> = { regimentId };
-    if (query.severity) where.severity = query.severity;
-    if (query.action) where.action = query.action;
-    if (query.actorMemberId) where.actorMemberId = query.actorMemberId;
-
-    const from = query.from ? new Date(query.from) : null;
-    const to = query.to ? new Date(query.to) : null;
-    if (from && to) where.occurredAt = Between(from, to);
-    else if (from) where.occurredAt = MoreThanOrEqual(from);
-    else if (to) where.occurredAt = LessThanOrEqual(to);
-
     const [rows, total] = await this.entries.findAndCount({
-      where,
+      where: this.buildWhere(regimentId, query),
       order: { occurredAt: 'DESC', id: 'DESC' },
       skip: query.skip,
       take: query.limit,
@@ -133,6 +122,71 @@ export class AuditService {
       query.page,
       query.limit,
     );
+  }
+
+  /** Fetch a single ledger entry, regiment-scoped. 404 when it does not exist. */
+  async findOne(regimentId: string, id: string): Promise<AuditLogEntryDto> {
+    const row = await this.entries.findOneBy({ id, regimentId });
+    if (!row) throw new NotFoundException('Audit entry not found');
+    return AuditLogEntryDto.from(row);
+  }
+
+  /**
+   * Export the filtered ledger as a CSV string. Applies the same filters as
+   * {@link findEntries} but is un-paginated (capped at 10k rows, newest first).
+   * Every field is quote-escaped so commas, quotes, and newlines stay contained.
+   */
+  async exportCsv(regimentId: string, query: AuditQueryDto): Promise<string> {
+    const rows = await this.entries.find({
+      where: this.buildWhere(regimentId, query),
+      order: { occurredAt: 'DESC', id: 'DESC' },
+      take: 10000,
+    });
+
+    const header =
+      'occurredAt,action,severity,actorType,actorLabel,actorMemberId,targetType,targetId,targetLabel,detail';
+    const lines = [header];
+    for (const row of rows) {
+      lines.push(
+        [
+          row.occurredAt.toISOString(),
+          row.action,
+          row.severity,
+          row.actorType,
+          row.actorLabel,
+          row.actorMemberId,
+          row.targetType,
+          row.targetId,
+          row.targetLabel,
+          row.detail,
+        ]
+          .map((field) => this.escapeCsvField(field))
+          .join(','),
+      );
+    }
+    return lines.join('\n');
+  }
+
+  /** Compose the shared filter WHERE clause used by both list and export reads. */
+  private buildWhere(regimentId: string, query: AuditQueryDto): FindOptionsWhere<AuditLogEntry> {
+    const where: FindOptionsWhere<AuditLogEntry> = { regimentId };
+    if (query.severity) where.severity = query.severity;
+    if (query.action) where.action = query.action;
+    if (query.actorMemberId) where.actorMemberId = query.actorMemberId;
+
+    const from = query.from ? new Date(query.from) : null;
+    const to = query.to ? new Date(query.to) : null;
+    if (from && to) where.occurredAt = Between(from, to);
+    else if (from) where.occurredAt = MoreThanOrEqual(from);
+    else if (to) where.occurredAt = LessThanOrEqual(to);
+
+    return where;
+  }
+
+  /** CSV-escape one field: null→empty, CR/LF→space, `"`→`""`, always quoted. */
+  private escapeCsvField(value: string | null): string {
+    const text = (value ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
+    return `"${text}"`;
   }
 
   /** Resolve an action's configured default severity (Info when unknown). */

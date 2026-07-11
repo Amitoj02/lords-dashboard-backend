@@ -1,8 +1,10 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuditActorType, AuditSeverity, MemberRole } from '../common/enums';
 import { AuditService } from './audit.service';
+import { AuditQueryDto } from './dto/audit-query.dto';
 import { AuditAction } from './entities/audit-action.entity';
 import { AuditLogEntry } from './entities/audit-log-entry.entity';
 
@@ -12,6 +14,8 @@ describe('AuditService', () => {
     create: jest.fn((x: Partial<AuditLogEntry>) => x),
     save: jest.fn((x: Partial<AuditLogEntry>) => Promise.resolve(x)),
     findAndCount: jest.fn(),
+    find: jest.fn(),
+    findOneBy: jest.fn(),
   };
   const actionsRepo = { find: jest.fn() };
 
@@ -83,6 +87,89 @@ describe('AuditService', () => {
       type: AuditActorType.Member,
       label: null,
       ip: '1.2.3.4',
+    });
+  });
+
+  describe('findOne', () => {
+    it('returns the entry projection scoped to the regiment', async () => {
+      entriesRepo.findOneBy.mockResolvedValue({
+        id: '42',
+        regimentId: 'r1',
+        occurredAt: new Date('2026-06-22T18:30:00.000Z'),
+        action: 'rank.change',
+        severity: AuditSeverity.Warn,
+        actorType: AuditActorType.Member,
+        actorMemberId: 'm1',
+        actorLabel: 'Sgt. Rock',
+        targetType: 'member',
+        targetId: 'm2',
+        targetMemberId: 'm2',
+        targetLabel: 'Pvt. Snafu',
+        detail: null,
+        beforeValue: null,
+        afterValue: null,
+      });
+
+      const dto = await service.findOne('r1', '42');
+
+      expect(entriesRepo.findOneBy).toHaveBeenCalledWith({ id: '42', regimentId: 'r1' });
+      expect(dto.id).toBe('42');
+      expect(dto.occurredAt).toBe('2026-06-22T18:30:00.000Z');
+      expect(dto.action).toBe('rank.change');
+    });
+
+    it('throws NotFound for a missing/wrong-regiment entry', async () => {
+      entriesRepo.findOneBy.mockResolvedValue(null);
+      await expect(service.findOne('r1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('exportCsv', () => {
+    const query = { page: 1, limit: 25 } as AuditQueryDto;
+
+    it('emits the header row and un-paginated, 10k-capped, newest-first read', async () => {
+      entriesRepo.find.mockResolvedValue([]);
+
+      const csv = await service.exportCsv('r1', query);
+
+      expect(entriesRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { regimentId: 'r1' },
+          order: { occurredAt: 'DESC', id: 'DESC' },
+          take: 10000,
+        }),
+      );
+      expect(csv).toBe(
+        'occurredAt,action,severity,actorType,actorLabel,actorMemberId,targetType,targetId,targetLabel,detail',
+      );
+    });
+
+    it('quote-escapes commas and quotes and renders nulls as empty cells', async () => {
+      entriesRepo.find.mockResolvedValue([
+        {
+          occurredAt: new Date('2026-06-22T18:30:00.000Z'),
+          action: 'settings.update',
+          severity: AuditSeverity.Info,
+          actorType: AuditActorType.Member,
+          actorLabel: 'Cmdr "Ace"',
+          actorMemberId: 'm1',
+          targetType: 'settings',
+          targetId: null,
+          targetLabel: null,
+          detail: 'changed name, tag',
+        },
+      ]);
+
+      const csv = await service.exportCsv('r1', query);
+      const lines = csv.split('\n');
+
+      // Header still present ahead of the single data row.
+      expect(lines).toHaveLength(2);
+      // A field with a comma stays inside one quoted cell; embedded quotes are doubled.
+      expect(lines[1]).toContain('"changed name, tag"');
+      expect(lines[1]).toContain('"Cmdr ""Ace"""');
+      // Null fields become empty quoted cells.
+      expect(lines[1]).toContain('"settings","",""');
     });
   });
 });
