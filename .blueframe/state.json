@@ -2,9 +2,9 @@
   "version": 1,
   "project": "lords-dashboard-backend",
   "lastSyncedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
-  "lastSyncedAt": "2026-07-11T01:15:00Z",
-  "notesForNextSession": "bf-init reverse-engineered this repo against project-plan/PLAN.md (the 15-day master plan), then it was re-scoped for the two-repo Blueframe workspace \"lords-dashboard\" (backend: this repo; frontend: `lords-regiment-dashboard` at ../lords-regiment-dashboard). SHIPPED so far: project skeleton, config+Joi, common infra (crypto/filters/interceptors/DTOs), the full 28-table data model (entities + initial migration + 7 seeders), Discord OAuth2+JWT auth (unit+e2e), and health. EVERYTHING ELSE IS UNBUILT: every feature module is entities-only and commented out in app.module.ts. Recommended start = Phase 01 foundations (T-0006 CapabilitiesGuard, T-0007 AuditService) since almost every feature task dependsOn them, then Members (T-0010). Bot (T-0020/21/22) needs discord.js + a NEW migration that does not exist yet. NOTE: the frontend integration + missing admin UI were previously (wrongly) tracked HERE as T-0023/T-0024 with area:\"frontend\" and ../lords-regiment-dashboard/ paths -- that made the backend render a bogus \"frontend\" planet. They now live in the FRONTEND repo where the work physically sits (lords-regiment-dashboard T-0011/T-0012/T-0017); this repo references them via cross-repo deps (see T-0025). Answer the three questionnaire tasks (T-0026/27/28) before seeding the rank ladder / building the bot.",
-  "nextIdCounter": 29,
+  "lastSyncedAt": "2026-07-11T02:30:00Z",
+  "notesForNextSession": "PLAN RE-PRIORITIZED via bf-plan (2026-07-11) into MVP-first tiers under a hard Docker-first + no-XAMPP mandate. OWNER DECISIONS LOCKED: (1) MVP = core dashboard; the Discord BOT is DEFERRED to a post-MVP milestone. (2) ONE unified docker-compose in THIS repo runs api + MySQL 8 `db` + `web` (frontend build context ../lords-regiment-dashboard). (3) Fully-containerized dev with dev/prod IMAGE parity (base compose + docker-compose.override.yml[dev] + docker-compose.prod.yml). XAMPP / local MySQL is being removed entirely (T-0029). PRIORITY TIERS (build in order): TIER 0 Docker-first foundation + shared plumbing (MVP gate) = T-0009 unified compose stack -> T-0030 containerized db bootstrap -> T-0031 devcontainer/hot-reload -> T-0029 purge XAMPP; plus T-0006 CapabilitiesGuard + T-0007 AuditService; T-0008 CI on containers. TIER 1 MVP feature core = T-0010 Members/roster+admin-actions -> T-0014 Applications(apply->approve->member); T-0011 Ranks + T-0012 Medals + T-0013 regiment stats. Frontend MVP: lords-regiment-dashboard T-0013 env -> T-0022 frontend Dockerfile; T-0011 core HTTP + T-0012 real OAuth2->JWT -> T-0023 member admin-action modal. TIER 2 MVP GO-LIVE = T-0032 deploy unified prod compose (TLS, smoke). *** MVP SHIPS HERE. *** TIER 3 post-MVP features = T-0015 Events, T-0016 Gallery, T-0017 Audit read, T-0018 Notifications, T-0019 Settings+permissions-matrix. Frontend: T-0025 wire remaining services + T-0017 settings/announcements/invite UI. TIER 4 Discord bot milestone = T-0020 bot foundation+new migration -> T-0021 core sync+control API -> T-0022 onboarding+slash. Frontend: T-0024 bot admin UI. TIER 5 hardening & full go-live = T-0025 security review + cross-stack E2E incl. bot + re-deploy. Answer questionnaires T-0026/27/28 before seeding the rank ladder (T-0011) and building the bot (T-0020). SHIPPED already: T-0001..T-0005 (skeleton, crypto, 28-table schema, Discord OAuth2+JWT, health).",
+  "nextIdCounter": 33,
   "connections": [],
   "tasks": [
     {
@@ -17,17 +17,36 @@
       "sizeWeight": 3,
       "area": "config",
       "repo": "",
-      "paths": ["src/main.ts", "src/app.module.ts", "src/config/configuration.ts", "src/config/env.validation.ts", ".env.example"],
+      "paths": [
+        "src/main.ts",
+        "src/app.module.ts",
+        "src/config/configuration.ts",
+        "src/config/env.validation.ts",
+        ".env.example"
+      ],
       "dependsOn": [],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "app boots and serves /api/docs + /api/health", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "app boots and serves /api/docs + /api/health",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "deployed", "by": "claude", "note": "created during bf-init; shipped skeleton" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "deployed",
+          "by": "claude",
+          "note": "created during bf-init; shipped skeleton"
+        }
+      ]
     },
     {
       "id": "T-0002",
@@ -39,17 +58,43 @@
       "sizeWeight": 3,
       "area": "common",
       "repo": "",
-      "paths": ["src/common/crypto/encryption.transformer.ts", "src/common/filters/all-exceptions.filter.ts", "src/common/interceptors/logging.interceptor.ts", "src/common/dto/pagination-query.dto.ts", "src/common/dto/paginated-response.dto.ts", "src/common/enums/index.ts"],
+      "paths": [
+        "src/common/crypto/encryption.transformer.ts",
+        "src/common/filters/all-exceptions.filter.ts",
+        "src/common/interceptors/logging.interceptor.ts",
+        "src/common/dto/pagination-query.dto.ts",
+        "src/common/dto/paginated-response.dto.ts",
+        "src/common/enums/index.ts"
+      ],
       "dependsOn": [],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "encryption.transformer.spec round-trips encrypt/decrypt", "status": "passed" }],
-      "regressionRisk": [{ "desc": "encryption transformer is shared by identities/events/applications; a key or algorithm change breaks decryption of stored ciphertext", "status": "open", "notedAt": "2026-07-11T00:50:59Z" }],
+      "testPlan": [
+        {
+          "desc": "encryption.transformer.spec round-trips encrypt/decrypt",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "encryption transformer is shared by identities/events/applications; a key or algorithm change breaks decryption of stored ciphertext",
+          "status": "open",
+          "notedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
       "skippedByClaude": [],
       "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "deployed", "by": "claude", "note": "created during bf-init; shipped infra" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "deployed",
+          "by": "claude",
+          "note": "created during bf-init; shipped infra"
+        }
+      ]
     },
     {
       "id": "T-0003",
@@ -61,17 +106,42 @@
       "sizeWeight": 5,
       "area": "database",
       "repo": "",
-      "paths": ["src/database/migrations/1782177187006-InitialSchema.ts", "src/database/data-source.ts", "src/database/seeds/", "src/database/scripts/create-database.ts", "SCHEMA.md"],
+      "paths": [
+        "src/database/migrations/1782177187006-InitialSchema.ts",
+        "src/database/data-source.ts",
+        "src/database/seeds/",
+        "src/database/scripts/create-database.ts",
+        "SCHEMA.md"
+      ],
       "dependsOn": [],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "db:setup (create -> migrate -> seed) runs idempotently against MySQL 8", "status": "pending" }],
-      "regressionRisk": [{ "desc": "the seeded rank ladder may not match the canonical ladder (see T-0026 Q1); reseeding after correction is destructive", "status": "open", "notedAt": "2026-07-11T00:50:59Z" }],
+      "testPlan": [
+        {
+          "desc": "db:setup (create -> migrate -> seed) runs idempotently against MySQL 8",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the seeded rank ladder may not match the canonical ladder (see T-0026 Q1); reseeding after correction is destructive",
+          "status": "open",
+          "notedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
       "skippedByClaude": [],
       "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "deployed", "by": "claude", "note": "created during bf-init; schema shipped, feature modules on top not yet built" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "deployed",
+          "by": "claude",
+          "note": "created during bf-init; schema shipped, feature modules on top not yet built"
+        }
+      ]
     },
     {
       "id": "T-0004",
@@ -83,17 +153,40 @@
       "sizeWeight": 5,
       "area": "auth",
       "repo": "",
-      "paths": ["src/auth/auth.controller.ts", "src/auth/auth.service.ts", "src/auth/discord-oauth.service.ts", "src/auth/strategies/jwt.strategy.ts", "src/auth/guards/", "src/auth/dto/current-user.dto.ts", "test/auth.e2e-spec.ts"],
-      "dependsOn": ["T-0003"],
+      "paths": [
+        "src/auth/auth.controller.ts",
+        "src/auth/auth.service.ts",
+        "src/auth/discord-oauth.service.ts",
+        "src/auth/strategies/jwt.strategy.ts",
+        "src/auth/guards/",
+        "src/auth/dto/current-user.dto.ts",
+        "test/auth.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0003"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "auth.e2e drives full sign-in: new identity persists encrypted, returning sign-in resolves linked member", "status": "passed" }],
+      "testPlan": [
+        {
+          "desc": "auth.e2e drives full sign-in: new identity persists encrypted, returning sign-in resolves linked member",
+          "status": "passed"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "deployed", "by": "claude", "note": "created during bf-init; shipped auth" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "deployed",
+          "by": "claude",
+          "note": "created during bf-init; shipped auth"
+        }
+      ]
     },
     {
       "id": "T-0005",
@@ -105,39 +198,87 @@
       "sizeWeight": 1,
       "area": "health",
       "repo": "",
-      "paths": ["src/health/health.controller.ts", "src/health/health.module.ts"],
-      "dependsOn": ["T-0003"],
+      "paths": [
+        "src/health/health.controller.ts",
+        "src/health/health.module.ts"
+      ],
+      "dependsOn": [
+        "T-0003"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "GET /api/health returns ok and reports DB reachable", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "GET /api/health returns ok and reports DB reachable",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "review", "by": "claude", "note": "created during bf-init; exists but no test" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "created during bf-init; exists but no test"
+        }
+      ]
     },
     {
       "id": "T-0006",
-      "title": "Capability authorization layer",
-      "summary": "CapabilitiesGuard + @RequireCapability() decorator reading the seeded role_permissions matrix (capability-based, stricter than the coarse RolesGuard). The matrix data + entity exist; the guard/decorator that enforce it do not.",
+      "title": "Capability authorization layer + capabilities on /auth/me",
+      "summary": "CapabilitiesGuard + @RequireCapability() decorator reading the seeded role_permissions matrix (capability-based, stricter than the coarse RolesGuard). Also project the caller's effective capabilities into the CurrentUser DTO returned by /auth/me, so the frontend can gate UI by capability instead of coarse role. The matrix data + entity exist; the guard/decorator/projection do not.",
       "status": "planned",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "authz",
       "repo": "",
-      "paths": ["src/authz/", "src/auth/guards/"],
-      "dependsOn": ["T-0004"],
+      "paths": [
+        "src/authz/",
+        "src/auth/guards/",
+        "src/auth/dto/current-user.dto.ts"
+      ],
+      "dependsOn": [
+        "T-0004"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "guard allows/denies by role_permissions row, not by role membership", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "guard allows/denies by role_permissions row, not by role membership",
+          "status": "pending"
+        },
+        {
+          "desc": "/auth/me returns the caller's effective capabilities array derived from role_permissions",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 01" }]
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 01"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan verify: also expose effective capabilities on /auth/me so the frontend (lords-regiment-dashboard:T-0023) can capability-gate the admin action UI"
+        }
+      ]
     },
     {
       "id": "T-0007",
@@ -149,61 +290,147 @@
       "sizeWeight": 3,
       "area": "audit",
       "repo": "",
-      "paths": ["src/audit/", "src/common/interceptors/"],
-      "dependsOn": ["T-0003"],
+      "paths": [
+        "src/audit/",
+        "src/common/interceptors/"
+      ],
+      "dependsOn": [
+        "T-0003"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "a mutation produces exactly one audit row with before/after captured", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "a mutation produces exactly one audit row with before/after captured",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 01" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 01"
+        }
+      ]
     },
     {
       "id": "T-0008",
-      "title": "CI pipeline (GitHub Actions)",
-      "summary": ".github/workflows/ci.yml running lint -> unit -> e2e (against a MySQL 8 service container) -> build on every push, gating the definition-of-done for each phase. Does not exist yet.",
+      "title": "CI pipeline on containers (GitHub Actions)",
+      "summary": ".github/workflows/ci.yml running lint -> unit -> e2e (against a MySQL 8 service container) -> build on every push. Builds BOTH images the stack ships: the API image, and the web image (checking out the sibling lords-regiment-dashboard repo into a second path so the compose `web` build context ../lords-regiment-dashboard resolves in CI). Keeps dev/CI/prod in parity and gates the definition-of-done for each phase. Does not exist yet.",
       "status": "planned",
       "type": "infra",
-      "size": "S",
-      "sizeWeight": 2,
+      "size": "M",
+      "sizeWeight": 3,
       "area": "infra",
       "repo": "",
-      "paths": [".github/workflows/ci.yml"],
-      "dependsOn": [],
+      "paths": [
+        ".github/workflows/ci.yml"
+      ],
+      "dependsOn": [
+        "T-0009",
+        "lords-regiment-dashboard:T-0022"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "CI green on a clean push: lint + unit + e2e + build", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "CI green on a clean push: lint + unit + e2e + build",
+          "status": "pending"
+        },
+        {
+          "desc": "CI builds the API image AND the web image with both repos checked out (sibling context resolves)",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 01" }]
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 01"
+        },
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan re-scope: build the Docker image in CI for dev/CI/prod parity; depends on the unified stack (T-0009)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan verify: the web build context is the sibling repo, so CI must check out lords-regiment-dashboard:T-0022 and build the web image too"
+        }
+      ]
     },
     {
       "id": "T-0009",
-      "title": "Docker (app + MySQL)",
-      "summary": "Dockerfile for the API plus docker-compose.yml running the app and MySQL 8 for local + prod parity (docker compose up should serve /api/health and /api/docs). Does not exist yet.",
+      "title": "Unified Docker Compose stack (api + MySQL 8 + web, dev/prod parity)",
+      "summary": "A single docker-compose at the backend repo root that runs the whole product: api (this repo), db (MySQL 8), and web (the Angular frontend, build context ../lords-regiment-dashboard). Multi-stage Dockerfile (deps -> build -> slim runtime) plus a base docker-compose.yml + docker-compose.override.yml (dev: bind mounts, hot reload, exposed ports) + docker-compose.prod.yml (prod: built images, no mounts, restart policies), with healthcheck-gated startup so api waits for db. `docker compose up` serves /api/health, /api/docs and the SPA. Does not exist yet.",
       "status": "planned",
       "type": "infra",
-      "size": "S",
-      "sizeWeight": 2,
+      "size": "L",
+      "sizeWeight": 5,
       "area": "infra",
       "repo": "",
-      "paths": ["Dockerfile", "docker-compose.yml"],
-      "dependsOn": [],
+      "paths": [
+        "Dockerfile",
+        ".dockerignore",
+        "docker-compose.yml",
+        "docker-compose.override.yml",
+        "docker-compose.prod.yml"
+      ],
+      "dependsOn": [
+        "lords-regiment-dashboard:T-0022"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "docker compose up serves /api/health", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "docker compose up serves /api/health and /api/docs",
+          "status": "pending"
+        },
+        {
+          "desc": "the web service serves the SPA and reaches the api over the compose network",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 01" }]
+      "updatedAt": "2026-07-11T02:30:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 01"
+        },
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan re-scope: expanded from app+MySQL to the unified api+db+web stack with dev/prod parity (owner picked one unified compose in this repo); XAMPP removed via T-0029"
+        }
+      ]
     },
     {
       "id": "T-0010",
@@ -215,17 +442,35 @@
       "sizeWeight": 5,
       "area": "members",
       "repo": "",
-      "paths": ["src/members/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/members/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "each admin action is capability-gated and writes an audit row", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "each admin action is capability-gated and writes an audit row",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 02" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 02"
+        }
+      ]
     },
     {
       "id": "T-0011",
@@ -237,17 +482,42 @@
       "sizeWeight": 3,
       "area": "ranks",
       "repo": "",
-      "paths": ["src/ranks/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/ranks/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007",
+        "T-0026"
+      ],
       "blocks": [],
-      "questions": [{ "q": "What is the canonical rank ladder to enforce/seed (admin ladder vs member/roster data disagree)?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }],
-      "testPlan": [{ "desc": "reorder updates precedence transactionally; CRUD is capability-gated + audited", "status": "pending" }],
+      "questions": [
+        {
+          "q": "What is the canonical rank ladder to enforce/seed (admin ladder vs member/roster data disagree)?",
+          "answer": null,
+          "askedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "reorder updates precedence transactionally; CRUD is capability-gated + audited",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 02" }]
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 02"
+        }
+      ]
     },
     {
       "id": "T-0012",
@@ -259,17 +529,42 @@
       "sizeWeight": 3,
       "area": "medals",
       "repo": "",
-      "paths": ["src/medals/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/medals/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007",
+        "T-0026"
+      ],
       "blocks": [],
-      "questions": [{ "q": "Can a medal be awarded more than once to the same member? Current UNIQUE(member_id, medal_id) forbids it.", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }],
-      "testPlan": [{ "desc": "CRUD capability-gated + audited; holders_count computed", "status": "pending" }],
+      "questions": [
+        {
+          "q": "Can a medal be awarded more than once to the same member? Current UNIQUE(member_id, medal_id) forbids it.",
+          "answer": null,
+          "askedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "CRUD capability-gated + audited; holders_count computed",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 02" }]
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 02"
+        }
+      ]
     },
     {
       "id": "T-0013",
@@ -281,17 +576,36 @@
       "sizeWeight": 2,
       "area": "regiments",
       "repo": "",
-      "paths": ["src/regiments/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/regiments/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007",
+        "T-0028"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "stats respect public_stats visibility toggle", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "stats respect public_stats visibility toggle",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 02" }]
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 02"
+        }
+      ]
     },
     {
       "id": "T-0014",
@@ -303,17 +617,37 @@
       "sizeWeight": 5,
       "area": "applications",
       "repo": "",
-      "paths": ["src/applications/"],
-      "dependsOn": ["T-0006", "T-0007", "T-0010"],
+      "paths": [
+        "src/applications/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007",
+        "T-0010",
+        "T-0028"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "e2e: apply -> approve -> new member appears on roster with service-record + audit", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "e2e: apply -> approve -> new member appears on roster with service-record + audit",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 03" }]
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 03"
+        }
+      ]
     },
     {
       "id": "T-0015",
@@ -325,17 +659,35 @@
       "sizeWeight": 5,
       "area": "events",
       "repo": "",
-      "paths": ["src/events/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/events/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "e2e: RSVP counts, reveal gating + audit row, public redaction of password/attendees", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "e2e: RSVP counts, reveal gating + audit row, public redaction of password/attendees",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 04" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 04"
+        }
+      ]
     },
     {
       "id": "T-0016",
@@ -347,17 +699,35 @@
       "sizeWeight": 3,
       "area": "gallery",
       "repo": "",
-      "paths": ["src/gallery/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/gallery/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "e2e: submit -> moderate -> public visibility; like idempotency", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "e2e: submit -> moderate -> public visibility; like idempotency",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 05" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 05"
+        }
+      ]
     },
     {
       "id": "T-0017",
@@ -369,17 +739,35 @@
       "sizeWeight": 3,
       "area": "audit",
       "repo": "",
-      "paths": ["src/audit/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/audit/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "filters + CSV export are capability-gated (view_audit_log)", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "filters + CSV export are capability-gated (view_audit_log)",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 06" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 06"
+        }
+      ]
     },
     {
       "id": "T-0018",
@@ -391,17 +779,35 @@
       "sizeWeight": 3,
       "area": "notifications",
       "repo": "",
-      "paths": ["src/notifications/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/notifications/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "unread-count reflects per-member read state", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "unread-count reflects per-member read state",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 06" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 06"
+        }
+      ]
     },
     {
       "id": "T-0019",
@@ -413,17 +819,42 @@
       "sizeWeight": 5,
       "area": "settings",
       "repo": "",
-      "paths": ["src/regiments/entities/regiment-settings.entity.ts", "src/authz/"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/regiments/entities/regiment-settings.entity.ts",
+        "src/authz/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "e2e: editing the permission matrix immediately changes CapabilitiesGuard decisions", "status": "pending" }],
-      "regressionRisk": [{ "desc": "editing role_permissions live can lock out capabilities for all roles including Owner; needs a floor/guard", "status": "open", "notedAt": "2026-07-11T00:50:59Z" }],
+      "testPlan": [
+        {
+          "desc": "e2e: editing the permission matrix immediately changes CapabilitiesGuard decisions",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "editing role_permissions live can lock out capabilities for all roles including Owner; needs a floor/guard",
+          "status": "open",
+          "notedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 06" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 06"
+        }
+      ]
     },
     {
       "id": "T-0020",
@@ -435,17 +866,50 @@
       "sizeWeight": 8,
       "area": "discord",
       "repo": "",
-      "paths": ["src/discord/", "src/database/migrations/", "src/config/configuration.ts", ".env.example"],
-      "dependsOn": ["T-0006", "T-0007"],
+      "paths": [
+        "src/discord/",
+        "src/database/migrations/",
+        "src/config/configuration.ts",
+        ".env.example"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007"
+      ],
       "blocks": [],
-      "questions": [{ "q": "Confirm production bot will have the GUILD_MEMBERS privileged intent enabled and sit above every role it manages.", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }],
-      "testPlan": [{ "desc": "bot connects to a test guild; status + heartbeat persist; wizard connection check passes", "status": "pending" }],
-      "regressionRisk": [{ "desc": "in-process bot shares the web process lifecycle; login/reconnect/shutdown must not crash the API", "status": "open", "notedAt": "2026-07-11T00:50:59Z" }],
+      "questions": [
+        {
+          "q": "Confirm production bot will have the GUILD_MEMBERS privileged intent enabled and sit above every role it manages.",
+          "answer": null,
+          "askedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "bot connects to a test guild; status + heartbeat persist; wizard connection check passes",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "in-process bot shares the web process lifecycle; login/reconnect/shutdown must not crash the API",
+          "status": "open",
+          "notedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 07 — new schema + net-new bot runtime" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 07 — new schema + net-new bot runtime"
+        }
+      ]
     },
     {
       "id": "T-0021",
@@ -457,17 +921,38 @@
       "sizeWeight": 8,
       "area": "discord",
       "repo": "",
-      "paths": ["src/discord/"],
-      "dependsOn": ["T-0020", "T-0010", "T-0011", "T-0012", "T-0015"],
+      "paths": [
+        "src/discord/"
+      ],
+      "dependsOn": [
+        "T-0020",
+        "T-0010",
+        "T-0011",
+        "T-0012",
+        "T-0015"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "e2e (gateway mocked): rank change enqueues -> drains -> audits with sync status; failures surface as resolvable bot_operations", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "e2e (gateway mocked): rank change enqueues -> drains -> audits with sync status; failures surface as resolvable bot_operations",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 08" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 08"
+        }
+      ]
     },
     {
       "id": "T-0022",
@@ -479,125 +964,574 @@
       "sizeWeight": 5,
       "area": "discord",
       "repo": "",
-      "paths": ["src/discord/"],
-      "dependsOn": ["T-0020"],
+      "paths": [
+        "src/discord/"
+      ],
+      "dependsOn": [
+        "T-0020"
+      ],
       "blocks": [],
-      "questions": [{ "q": "Confirm slash set (/roster /event /apply /whoami), guild-scoped vs global, ephemeral responses; and whether reaction-roles are in scope for v1.", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }],
-      "testPlan": [{ "desc": "join a test guild -> welcome + join role fire; each slash command returns correct data", "status": "pending" }],
+      "questions": [
+        {
+          "q": "Confirm slash set (/roster /event /apply /whoami), guild-scoped vs global, ephemeral responses; and whether reaction-roles are in scope for v1.",
+          "answer": null,
+          "askedAt": "2026-07-11T00:50:59Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "join a test guild -> welcome + join role fire; each slash command returns correct data",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
       "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 09" }]
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 09"
+        }
+      ]
     },
     {
       "id": "T-0025",
-      "title": "Hardening, cross-stack E2E & production deploy",
-      "summary": "Full cross-stack E2E (dashboard action -> API -> bot -> Discord), the /security-review skill (helmet, CORS allowlist, rate limits, secret handling, token/password encryption, privileged-intent scoping), production Docker build + deploy (MySQL, TLS/domain, secrets, Discord production app), seed/demo data, smoke test and a launch checklist. Depends cross-repo on the frontend integration (see the lords-regiment-dashboard refs below).",
+      "title": "Post-MVP hardening, cross-stack E2E & full go-live",
+      "summary": "After the MVP is live (T-0032), the full-stack hardening pass: cross-stack E2E including the Discord bot (dashboard action -> API -> bot -> Discord), the /security-review skill (helmet, CORS allowlist, rate limits, secret handling, token/password encryption, privileged-intent scoping), Discord production-app config, and a re-deploy of the unified prod compose with the bot enabled. Depends on the bot milestone and the frontend bot/admin UI.",
       "status": "planned",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
       "area": "infra",
       "repo": "",
-      "paths": ["Dockerfile", "docker-compose.yml", "project-plan/"],
-      "dependsOn": ["T-0021", "T-0022", "lords-regiment-dashboard:T-0011", "lords-regiment-dashboard:T-0012", "lords-regiment-dashboard:T-0017"],
+      "paths": [
+        "docker-compose.prod.yml",
+        "project-plan/"
+      ],
+      "dependsOn": [
+        "T-0032",
+        "T-0021",
+        "T-0022",
+        "lords-regiment-dashboard:T-0017",
+        "lords-regiment-dashboard:T-0024",
+        "lords-regiment-dashboard:T-0025"
+      ],
       "blocks": [],
       "questions": [],
-      "testPlan": [{ "desc": "post-deploy smoke: real Discord sign-in works and one role sync is visible in the live guild", "status": "pending" }],
+      "testPlan": [
+        {
+          "desc": "post-deploy smoke: real Discord sign-in works and one role sync is visible in the live guild",
+          "status": "pending"
+        }
+      ],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T01:15:00Z",
+      "updatedAt": "2026-07-11T02:30:00Z",
       "history": [
-        { "at": "2026-07-11T00:50:59Z", "from": null, "to": "planned", "by": "claude", "note": "created during bf-init; Phase 12" },
-        { "at": "2026-07-11T01:15:00Z", "from": "planned", "to": "planned", "by": "claude", "note": "workspace re-scope: replaced local frontend deps T-0023/T-0024 with cross-repo refs to lords-regiment-dashboard T-0011/T-0012/T-0017" }
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-init; Phase 12"
+        },
+        {
+          "at": "2026-07-11T01:15:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "workspace re-scope: replaced local frontend deps T-0023/T-0024 with cross-repo refs to lords-regiment-dashboard T-0011/T-0012/T-0017"
+        },
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan re-scope: now the POST-MVP full go-live (depends on MVP deploy T-0032); split MVP deploy into T-0032; updated frontend deps to T-0017/T-0024/T-0025"
+        }
       ]
     },
     {
       "id": "T-0026",
       "title": "Questionnaire — domain model decisions",
       "summary": "Open product decisions that shape seeding and validation before Phase 02 builds on them.",
-      "status": "questionnaire",
+      "status": "in_progress",
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
       "area": "members",
       "repo": "",
-      "paths": ["SCHEMA.md", "project-plan/PLAN.md"],
+      "paths": [
+        "SCHEMA.md",
+        "project-plan/PLAN.md"
+      ],
       "dependsOn": [],
-      "blocks": [],
+      "blocks": [
+        "T-0011",
+        "T-0012"
+      ],
       "questions": [
-        { "q": "Rank ladder mismatch: the admin ladder (General..Recruit, incl. 'Private, First Class') differs from member/roster data (which uses 'Lieutenant'). What is the canonical ladder to seed?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Can a medal be awarded more than once to the same member? Current UNIQUE(member_id, medal_id) forbids it.", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Final gallery limits (12MB image / 80MB video / 10 per submission vs 50MB / 20) and audit retention months (default 12)?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }
+        {
+          "q": "Rank ladder mismatch: the admin ladder (General..Recruit, incl. 'Private, First Class') differs from member/roster data (which uses 'Lieutenant'). What is the canonical ladder to seed?",
+          "answer": "It doesn't matter, just lay out dummy ranks for now, i will figure out it with the regiment owner later.",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:41:20.278Z"
+        },
+        {
+          "q": "Can a medal be awarded more than once to the same member? Current UNIQUE(member_id, medal_id) forbids it.",
+          "answer": "Yes it can be, and the frontend will show how many time certain medal was achieved.",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:41:47.689Z"
+        },
+        {
+          "q": "Final gallery limits (12MB image / 80MB video / 10 per submission vs 50MB / 20) and audit retention months (default 12)?",
+          "answer": "sounds good",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:42:07.173Z"
+        }
       ],
       "testPlan": [],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "questionnaire", "by": "claude", "note": "created during bf-init; PLAN.md Deliverable F (domain)" }]
+      "updatedAt": "2026-07-11T02:42:07.173Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "questionnaire",
+          "by": "claude",
+          "note": "created during bf-init; PLAN.md Deliverable F (domain)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "questionnaire",
+          "to": "questionnaire",
+          "by": "claude",
+          "note": "bf-plan verify: now gates MVP Ranks (T-0011, Q1 ladder) + Medals (T-0012, Q2 award-repeatable)"
+        },
+        {
+          "at": "2026-07-11T02:42:07.173Z",
+          "from": "questionnaire",
+          "to": "in_progress",
+          "by": "human",
+          "note": "all questions answered"
+        }
+      ]
     },
     {
       "id": "T-0027",
       "title": "Questionnaire — Discord / bot decisions",
       "summary": "Open decisions that shape the Discord bot phases (07-09) and the new migration.",
-      "status": "questionnaire",
+      "status": "in_progress",
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
       "area": "discord",
       "repo": "",
-      "paths": ["project-plan/PLAN.md"],
+      "paths": [
+        "project-plan/PLAN.md"
+      ],
       "dependsOn": [],
       "blocks": [],
       "questions": [
-        { "q": "Channel routing: which channels receive announcements, event reminders, application notifications, and welcomes? (#drill-hall is currently hard-coded in the design.)", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Join role: which Discord role does the bot auto-assign on join — Applicant, a 'Guest', or none?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Reaction-roles: in scope for v1 or defer? (Drives the optional discord_reaction_roles table.)", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Should an app-side ban/suspend also remove the member's synced Discord roles (a sync action, not moderation)?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Announcements: does composing a dispatch always cross-post to Discord, or is it a per-dispatch toggle?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }
+        {
+          "q": "Channel routing: which channels receive announcements, event reminders, application notifications, and welcomes? (#drill-hall is currently hard-coded in the design.)",
+          "answer": "#announcements for now (it should be configurable through admin panel)",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:42:39.092Z"
+        },
+        {
+          "q": "Join role: which Discord role does the bot auto-assign on join — Applicant, a 'Guest', or none?",
+          "answer": "Guest",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:42:44.752Z"
+        },
+        {
+          "q": "Reaction-roles: in scope for v1 or defer? (Drives the optional discord_reaction_roles table.)",
+          "answer": "Defer",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:42:54.644Z"
+        },
+        {
+          "q": "Should an app-side ban/suspend also remove the member's synced Discord roles (a sync action, not moderation)?",
+          "answer": "Yes, it kick the person from discord too. (This is very sensitive, i want to recheck everytime you work on this scope)",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:43:39.021Z"
+        },
+        {
+          "q": "Announcements: does composing a dispatch always cross-post to Discord, or is it a per-dispatch toggle?",
+          "answer": "I have no idea what is dispatch mean here. But whatever that is, just follow best practice and keep the discord api ratelimit in mind.",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:44:36.791Z"
+        }
       ],
       "testPlan": [],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "questionnaire", "by": "claude", "note": "created during bf-init; PLAN.md Deliverable F (discord/bot)" }]
+      "updatedAt": "2026-07-11T02:44:36.791Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "questionnaire",
+          "by": "claude",
+          "note": "created during bf-init; PLAN.md Deliverable F (discord/bot)"
+        },
+        {
+          "at": "2026-07-11T02:44:36.791Z",
+          "from": "questionnaire",
+          "to": "in_progress",
+          "by": "human",
+          "note": "all questions answered"
+        }
+      ]
     },
     {
       "id": "T-0028",
       "title": "Questionnaire — product flows & ops/deploy",
       "summary": "Open product-flow and deployment decisions needed before Phase 12 (and some feature phases).",
-      "status": "questionnaire",
+      "status": "in_progress",
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
       "area": "infra",
       "repo": "",
-      "paths": ["project-plan/PLAN.md"],
+      "paths": [
+        "project-plan/PLAN.md"
+      ],
       "dependsOn": [],
-      "blocks": [],
+      "blocks": [
+        "T-0013",
+        "T-0014"
+      ],
       "questions": [
-        { "q": "Open recruitment off: reject new applications with what message/behavior?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Auto-approve 'trusted' gallery members: how is 'trusted' defined?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Invite Mercenary: what should this flow do (generate a Discord invite, pre-create an Applicant, email)?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Landing stats / Officers' Mess: real computed data or curated values?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Hosting target: VPS + Docker Compose or managed (Railway/Render/Fly)? MySQL managed or self-hosted? Domain + TLS provider?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" },
-        { "q": "Data migration: greenfield seed only, or existing regiment/roster data to import?", "answer": null, "askedAt": "2026-07-11T00:50:59Z" }
+        {
+          "q": "Open recruitment off: reject new applications with what message/behavior?",
+          "answer": "We are not accepting any current applications for now, thank you for your interest etc.",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:45:01.522Z"
+        },
+        {
+          "q": "Auto-approve 'trusted' gallery members: how is 'trusted' defined?",
+          "answer": "Admin role only",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:45:33.303Z"
+        },
+        {
+          "q": "Invite Mercenary: what should this flow do (generate a Discord invite, pre-create an Applicant, email)?",
+          "answer": "just take it is game fun site, i dont want him to think it is real  military regiment.",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:46:20.289Z"
+        },
+        {
+          "q": "Landing stats / Officers' Mess: real computed data or curated values?",
+          "answer": "real",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:46:33.058Z"
+        },
+        {
+          "q": "Hosting target: VPS + Docker Compose or managed (Railway/Render/Fly)? MySQL managed or self-hosted? Domain + TLS provider?",
+          "answer": "Im thinking to go with digital ocean instance. Mysql is going to be part of docker instance. Domain will be lordsofholdfast.com",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:49:01.393Z"
+        },
+        {
+          "q": "Data migration: greenfield seed only, or existing regiment/roster data to import?",
+          "answer": "greenfield",
+          "askedAt": "2026-07-11T00:50:59Z",
+          "answeredAt": "2026-07-11T02:49:49.649Z"
+        }
       ],
       "testPlan": [],
       "regressionRisk": [],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
-      "history": [{ "at": "2026-07-11T00:50:59Z", "from": null, "to": "questionnaire", "by": "claude", "note": "created during bf-init; PLAN.md Deliverable F (product/ops)" }]
+      "updatedAt": "2026-07-11T02:49:49.649Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:50:59Z",
+          "from": null,
+          "to": "questionnaire",
+          "by": "claude",
+          "note": "created during bf-init; PLAN.md Deliverable F (product/ops)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "questionnaire",
+          "to": "questionnaire",
+          "by": "claude",
+          "note": "bf-plan verify: recruitment-off gates Applications (T-0014); landing-stats gates regiment stats (T-0013)"
+        },
+        {
+          "at": "2026-07-11T02:49:49.649Z",
+          "from": "questionnaire",
+          "to": "in_progress",
+          "by": "human",
+          "note": "all questions answered"
+        }
+      ]
+    },
+    {
+      "id": "T-0029",
+      "title": "Containerize all config + purge XAMPP (zero-config `up`)",
+      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology — DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
+      "status": "planned",
+      "type": "chore",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "config",
+      "repo": "",
+      "paths": [
+        ".env.example",
+        "README.md",
+        "CLAUDE.md",
+        "SCHEMA.md",
+        "src/config/configuration.ts",
+        "src/config/env.validation.ts",
+        "project-plan/"
+      ],
+      "dependsOn": [
+        "T-0009"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` — no XAMPP, no host MySQL/Node, no hand-edited secrets",
+          "status": "pending"
+        },
+        {
+          "desc": "the OAuth callback + frontend redirects + CORS resolve through the proxy origin (not split localhost ports)",
+          "status": "pending"
+        },
+        {
+          "desc": "grep finds no XAMPP/localhost:3306 defaults left in code or docs",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "DB_HOST now resolves the compose `db` service; any stale .env or host-run tooling using localhost:3306 will fail to connect",
+          "status": "open",
+          "notedAt": "2026-07-11T02:30:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T02:30:00Z",
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; Docker-first migration (MVP foundation)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan verify: widened from DB-only to all env (auth/redirect/CORS/cookie for the proxied topology) + Joi-valid dev secrets for zero-config up + residual XAMPP purge (SCHEMA.md, config defaults)"
+        }
+      ]
+    },
+    {
+      "id": "T-0030",
+      "title": "Containerized DB bootstrap & migration workflow (dev + prod)",
+      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id — the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
+      "status": "planned",
+      "type": "infra",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        "docker-compose.yml",
+        "docker-compose.prod.yml",
+        "src/database/scripts/",
+        "src/database/data-source.ts",
+        "package.json"
+      ],
+      "dependsOn": [
+        "T-0009"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "dev: `docker compose run --rm api npm run db:setup` creates+migrates+seeds the MySQL 8 container idempotently (a re-run is a no-op)",
+          "status": "pending"
+        },
+        {
+          "desc": "prod: the slim image runs migrate+seed with NO ts-node (compiled JS) via the init service, then api starts",
+          "status": "pending"
+        },
+        {
+          "desc": "a fresh prod deploy has a legitimate Owner (real Discord id), not just the dev owner seed",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T02:30:00Z",
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; Docker-first migration (MVP foundation)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan verify: added a ts-node-free PROD migrate/seed path (slim image can't run ts-node), a one-shot init service, and real-Owner provisioning for fresh prod deploys"
+        }
+      ]
+    },
+    {
+      "id": "T-0031",
+      "title": "Fully-containerized dev workflow (devcontainer + hot reload, api + web)",
+      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too — bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
+      "status": "planned",
+      "type": "infra",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "infra",
+      "repo": "",
+      "paths": [
+        "docker-compose.override.yml",
+        ".devcontainer/devcontainer.json",
+        "package.json"
+      ],
+      "dependsOn": [
+        "T-0009",
+        "T-0030",
+        "lords-regiment-dashboard:T-0022"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "editing a .ts file on the host hot-reloads the api container; `docker compose exec api npm test` runs the suite with no host Node",
+          "status": "pending"
+        },
+        {
+          "desc": "editing an Angular file hot-reloads the web container and its proxy reaches api:3000 over the compose network",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T02:30:00Z",
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; Docker-first migration (MVP foundation)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan verify: also own the dev `web` compose service (sibling bind mount, anon node_modules, ng serve, proxy -> api:3000)"
+        }
+      ]
+    },
+    {
+      "id": "T-0032",
+      "title": "MVP production deploy (unified prod compose)",
+      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs — register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost — a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025).",
+      "status": "planned",
+      "type": "infra",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "infra",
+      "repo": "",
+      "paths": [
+        "docker-compose.prod.yml",
+        "project-plan/"
+      ],
+      "dependsOn": [
+        "T-0006",
+        "T-0007",
+        "T-0009",
+        "T-0029",
+        "T-0030",
+        "T-0010",
+        "T-0011",
+        "T-0012",
+        "T-0013",
+        "T-0014",
+        "lords-regiment-dashboard:T-0011",
+        "lords-regiment-dashboard:T-0012",
+        "lords-regiment-dashboard:T-0013",
+        "lords-regiment-dashboard:T-0022",
+        "lords-regiment-dashboard:T-0023",
+        "lords-regiment-dashboard:T-0026"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Hosting target for the MVP: which VPS/provider, domain, TLS issuer (Caddy auto-TLS vs Traefik+LE), and the PROD Discord redirect URI to register? (see T-0028)",
+          "answer": null,
+          "askedAt": "2026-07-11T02:30:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "post-deploy smoke on the live URL: real Discord sign-in works and the roster + one admin action round-trip through the API",
+          "status": "pending"
+        },
+        {
+          "desc": "no stub/fabricated data is publicly visible (un-wired surfaces are guarded per lords-regiment-dashboard:T-0026)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T02:30:00Z",
+      "updatedAt": "2026-07-11T03:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T02:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; MVP go-live (Docker-first)"
+        },
+        {
+          "at": "2026-07-11T03:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "bf-plan verify: folded in Discord prod-app config + pre-exposure config check + both-repos-on-host so the go-live smoke can actually pass; added dep on frontend T-0026 (guard un-wired surfaces)"
+        }
+      ]
     }
   ]
 }
