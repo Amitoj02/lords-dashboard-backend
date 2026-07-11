@@ -1,0 +1,154 @@
+%% Lords Dashboard Backend — data model (28 tables, 3NF)
+%% Generated from TypeORM entities + SCHEMA.md §4. Source of truth: SCHEMA.md.
+erDiagram
+    %% ── Tenant & configuration ──────────────────────────────
+    REGIMENTS ||--|| REGIMENT_SETTINGS : configures
+    ACCENT_TONES ||--o{ REGIMENTS : themes
+    REGIMENTS ||--o| DISCORD_CONNECTIONS : reports
+    DISCORD_CONNECTIONS ||--o{ BOT_OPERATIONS : logs
+
+    %% ── Regiment owns the per-tenant collections ────────────
+    REGIMENTS ||--o{ MEMBERS : has
+    REGIMENTS ||--o{ RANKS : defines
+    REGIMENTS ||--o{ MEDALS : defines
+    REGIMENTS ||--o{ EVENTS : hosts
+    REGIMENTS ||--o{ GALLERY_ITEMS : owns
+    REGIMENTS ||--o{ APPLICATIONS : receives
+    REGIMENTS ||--o{ AUDIT_LOG_ENTRIES : records
+    REGIMENTS ||--o{ NOTIFICATIONS : dispatches
+    REGIMENTS ||--o{ ROLE_PERMISSIONS : authorizes
+
+    %% ── Identity & people ───────────────────────────────────
+    DISCORD_IDENTITIES ||--o| MEMBERS : "is account for"
+    DISCORD_IDENTITIES ||--o{ APPLICATIONS : submits
+    APPLICATIONS }o--o| MEMBERS : "promotes to"
+    RANKS ||--o{ MEMBERS : ranks
+    MEMBERS ||--o{ MEMBER_MEDALS : awarded
+    MEDALS ||--o{ MEMBER_MEDALS : "awarded as"
+    MEMBERS ||--o{ SERVICE_RECORD_ENTRIES : chronicles
+    MEMBERS ||--o{ ACCOUNT_DELETION_REQUESTS : requests
+
+    %% ── Events ──────────────────────────────────────────────
+    EVENTS ||--o{ EVENT_RSVPS : collects
+    MEMBERS ||--o{ EVENT_RSVPS : "rsvps via"
+    EVENTS ||--o{ EVENT_ATTENDEES : "checked in via"
+    MEMBERS ||--o{ EVENT_ATTENDEES : "attends via"
+    EVENTS ||--o{ EVENT_PLATFORMS : "played on"
+    EVENTS ||--o{ EVENT_TAGS : tagged
+    EVENTS ||--o{ EVENT_NOTIFY_OFFSETS : "reminds at"
+    EVENTS ||--o{ GALLERY_ITEMS : "linked from"
+
+    %% ── Gallery ─────────────────────────────────────────────
+    GALLERY_ITEMS ||--o{ GALLERY_FILES : contains
+    GALLERY_ITEMS ||--o{ GALLERY_TAGGED_MEMBERS : "tags via"
+    MEMBERS ||--o{ GALLERY_TAGGED_MEMBERS : "tagged in via"
+    GALLERY_ITEMS ||--o{ GALLERY_LIKES : "liked via"
+    MEMBERS ||--o{ GALLERY_LIKES : "likes via"
+
+    %% ── Audit & notifications ───────────────────────────────
+    AUDIT_ACTIONS ||--o{ AUDIT_LOG_ENTRIES : catalogs
+    MEMBERS ||--o{ AUDIT_LOG_ENTRIES : "acts in"
+    NOTIFICATIONS ||--o{ NOTIFICATION_READS : "read via"
+    MEMBERS ||--o{ NOTIFICATION_READS : "reads via"
+
+    REGIMENTS {
+        int id PK
+        string name
+        string slug
+        string accent_tone_key FK
+    }
+    DISCORD_IDENTITIES {
+        int id PK
+        string discord_user_id UK
+        string global_name
+        string access_token "AES-256-GCM"
+        int member_id FK "nullable"
+    }
+    MEMBERS {
+        int id PK
+        int regiment_id FK
+        int rank_id FK
+        int discord_identity_id FK
+        enum role "Owner..Applicant"
+        enum status "Active|Inactive|Pending"
+        datetime suspended_until
+        datetime banned_at
+    }
+    RANKS {
+        int id PK
+        int regiment_id FK
+        string name
+        int precedence
+        int chevrons
+        string discord_role_id
+    }
+    MEDALS {
+        int id PK
+        int regiment_id FK
+        string name
+        enum ribbon "blue|red|gold|green|tricolor"
+        string discord_role_id
+    }
+    MEMBER_MEDALS {
+        int member_id FK
+        int medal_id FK
+        datetime awarded_at
+        int awarded_by FK
+    }
+    ROLE_PERMISSIONS {
+        int regiment_id FK
+        enum role
+        string capability
+        bool allowed
+    }
+    APPLICATIONS {
+        int id PK
+        int regiment_id FK
+        int discord_identity_id FK
+        enum status "pending|approved|declined|held"
+        enum applicant_type "Applicant|Mercenary"
+        int promoted_member_id FK "nullable"
+        string server_password "encrypted"
+    }
+    EVENTS {
+        int id PK
+        int regiment_id FK
+        enum status "upcoming|ongoing|previous"
+        string server_password "AES-256-GCM"
+        bool is_draft
+    }
+    GALLERY_ITEMS {
+        int id PK
+        int regiment_id FK
+        enum type "image|video|link"
+        enum status "pending|approved|declined"
+        int event_id FK "nullable"
+    }
+    AUDIT_LOG_ENTRIES {
+        int id PK
+        int regiment_id FK
+        string action FK
+        enum severity "info|warn|err"
+        enum actor_type "member|bot|system"
+        int actor_member_id FK
+        enum discord_sync_status
+        json before
+        json after
+    }
+    NOTIFICATIONS {
+        int id PK
+        int regiment_id FK
+        enum tone "info|warn|ok"
+        string title
+    }
+    DISCORD_CONNECTIONS {
+        int id PK
+        int regiment_id FK
+        enum connection_status "idle|checking|connected|error"
+        string guild_id
+    }
+    ACCOUNT_DELETION_REQUESTS {
+        int id PK
+        int member_id FK
+        enum status "pending_discord_confirmation|confirmed|executed|cancelled"
+    }
