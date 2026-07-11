@@ -7,6 +7,7 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { MemberRole, MemberStatus, Platform } from '../common/enums';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
@@ -104,6 +105,12 @@ describe('MembersService', () => {
   const deletionRepo = { findOne: jest.fn(), save: jest.fn(), create: jest.fn((x: unknown) => x) };
   const regimentRepo = { findOne: jest.fn() };
   const audit = { record: jest.fn() };
+  // Best-effort Discord side effects — mocked so admin actions can assert they
+  // are enqueued without a real bot.
+  const discordSync = {
+    enqueueRoleSync: jest.fn().mockResolvedValue(null),
+    enqueueMemberKick: jest.fn().mockResolvedValue(null),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -147,6 +154,7 @@ describe('MembersService', () => {
         { provide: getRepositoryToken(AccountDeletionRequest), useValue: deletionRepo },
         { provide: getRepositoryToken(Regiment), useValue: regimentRepo },
         { provide: AuditService, useValue: audit },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
 

@@ -1,0 +1,173 @@
+import {
+  Injectable,
+  Logger,
+  OnApplicationShutdown,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Client, Events, GatewayIntentBits, Guild } from 'discord.js';
+import { AppConfig } from '../../config/configuration';
+import {
+  DiscordGateway,
+  DiscordGuildMemberRef,
+  DiscordGatewayStatus,
+  DiscordRole,
+  MemberJoinHandler,
+} from './discord-gateway';
+
+/**
+ * The production {@link DiscordGateway} backed by a discord.js Client, held in
+ * the web process. It is only instantiated when `discord.botMock` is false (a
+ * real DISCORD_BOT_TOKEN is set) — otherwise MockDiscordGateway is used and this
+ * class is never constructed. Lifecycle is defensive by design (regression risk
+ * T-0020#0): login/reconnect/shutdown are wrapped so a bot failure can NEVER
+ * crash the API — a failed login just leaves the gateway "not connected" and the
+ * outbox worker surfaces the resulting job failures as resolvable operations.
+ *
+ * The bot has NO slash commands (owner decision): it only manages roles and
+ * posts messages. It requires the GUILD_MEMBERS privileged intent and must sit
+ * above every role it manages.
+ */
+@Injectable()
+export class RealDiscordGateway
+  extends DiscordGateway
+  implements OnModuleInit, OnApplicationShutdown
+{
+  private readonly logger = new Logger(RealDiscordGateway.name);
+  private client: Client | null = null;
+  private ready = false;
+  private joinHandler: MemberJoinHandler | null = null;
+
+  constructor(private readonly config: ConfigService<AppConfig, true>) {
+    super();
+  }
+
+  async onModuleInit(): Promise<void> {
+    const discord = this.config.get('discord', { infer: true });
+    if (!discord.botToken) {
+      this.logger.warn('No DISCORD_BOT_TOKEN — real gateway will stay disconnected.');
+      return;
+    }
+    try {
+      this.client = new Client({
+        intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+      });
+      this.client.once(Events.ClientReady, (c) => {
+        this.ready = true;
+        this.logger.log(`Discord bot connected as ${c.user.tag}`);
+      });
+      this.client.on(Events.GuildMemberAdd, (member) => {
+        void this.joinHandler?.(member.id);
+      });
+      this.client.on(Events.Error, (err) => this.logger.error(`Gateway error: ${err.message}`));
+      await this.client.login(discord.botToken);
+    } catch (error) {
+      // Never rethrow: a bot that fails to connect must not take down the API.
+      this.ready = false;
+      this.logger.error(`Discord bot failed to connect: ${(error as Error).message}`);
+    }
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    try {
+      await this.client?.destroy();
+    } catch (error) {
+      this.logger.error(`Discord bot shutdown error: ${(error as Error).message}`);
+    } finally {
+      this.ready = false;
+      this.client = null;
+    }
+  }
+
+  registerMemberJoinHandler(handler: MemberJoinHandler): void {
+    this.joinHandler = handler;
+  }
+
+  async getStatus(): Promise<DiscordGatewayStatus> {
+    if (!this.ready || !this.client) {
+      return {
+        connected: false,
+        botVersion: null,
+        totalRoles: null,
+        botRolePosition: null,
+        membersVisible: null,
+      };
+    }
+    const guild = await this.resolveGuild();
+    const botPosition = guild.members.me?.roles.highest.position ?? null;
+    return {
+      connected: true,
+      botVersion: null,
+      totalRoles: guild.roles.cache.size,
+      botRolePosition: botPosition,
+      membersVisible: guild.memberCount,
+    };
+  }
+
+  async listRoles(): Promise<DiscordRole[]> {
+    const guild = await this.resolveGuild();
+    return guild.roles.cache.map((r) => ({ id: r.id, name: r.name, position: r.position }));
+  }
+
+  async assignRole(discordUserId: string, roleId: string): Promise<void> {
+    const guild = await this.resolveGuild();
+    const member = await guild.members.fetch(discordUserId);
+    await member.roles.add(roleId);
+  }
+
+  async removeRole(discordUserId: string, roleId: string): Promise<void> {
+    const guild = await this.resolveGuild();
+    const member = await guild.members.fetch(discordUserId);
+    await member.roles.remove(roleId);
+  }
+
+  async sendChannelMessage(channelId: string, content: string): Promise<{ messageId: string }> {
+    const client = this.requireClient();
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased() || !('send' in channel)) {
+      throw new ServiceUnavailableException('Channel is not a sendable text channel');
+    }
+    const message = await channel.send(content);
+    return { messageId: message.id };
+  }
+
+  async sendDirectMessage(discordUserId: string, content: string): Promise<void> {
+    const client = this.requireClient();
+    const user = await client.users.fetch(discordUserId);
+    await user.send(content);
+  }
+
+  async fetchMember(discordUserId: string): Promise<DiscordGuildMemberRef | null> {
+    const guild = await this.resolveGuild();
+    const member = await guild.members.fetch(discordUserId).catch(() => null);
+    if (!member) return null;
+    return {
+      id: member.id,
+      roles: member.roles.cache.map((r) => r.id),
+      joinedAt: member.joinedAt ? member.joinedAt.toISOString() : null,
+    };
+  }
+
+  async kickMember(discordUserId: string, reason?: string): Promise<void> {
+    const guild = await this.resolveGuild();
+    const member = await guild.members.fetch(discordUserId);
+    await member.kick(reason);
+  }
+
+  private requireClient(): Client {
+    if (!this.ready || !this.client) {
+      throw new ServiceUnavailableException('Discord bot is not connected');
+    }
+    return this.client;
+  }
+
+  private async resolveGuild(): Promise<Guild> {
+    const client = this.requireClient();
+    const guildId = this.config.get('discord', { infer: true }).guildId;
+    if (!guildId) {
+      throw new ServiceUnavailableException('No DISCORD_GUILD_ID configured');
+    }
+    return client.guilds.fetch(guildId);
+  }
+}

@@ -46,6 +46,15 @@ export const envValidationSchema = Joi.object({
   DISCORD_MOCK: Joi.boolean(),
   DISCORD_MOCK_DEFAULT_PERSONA: Joi.string().default('owner'),
 
+  // Discord BOT (gateway) — the in-process "Quartermaster" that syncs roles +
+  // posts announcements. Allowed empty so the app boots with the bot mocked.
+  DISCORD_BOT_TOKEN: Joi.string().allow('').default(''),
+  DISCORD_APPLICATION_ID: Joi.string().allow('').default(''),
+  // Bot mock — replaces the discord.js gateway with an in-process stub. Left
+  // optional (no default) so the effective value is computed in configuration.ts:
+  // ON when no bot token is set.
+  DISCORD_BOT_MOCK: Joi.boolean(),
+
   // Frontend redirect targets
   FRONTEND_URL: Joi.string().uri().default('http://localhost:4200'),
   FRONTEND_AUTH_SUCCESS_REDIRECT: Joi.string().uri().default('http://localhost:4200/auth/callback'),

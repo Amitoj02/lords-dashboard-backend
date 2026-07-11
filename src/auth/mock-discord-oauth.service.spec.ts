@@ -12,6 +12,9 @@ function configWith(overrides: Partial<DiscordConfig> = {}): ConfigService<AppCo
     guildId: '999',
     mock: true,
     mockDefaultPersona: 'owner',
+    botToken: '',
+    applicationId: '',
+    botMock: true,
     ...overrides,
   };
   return {

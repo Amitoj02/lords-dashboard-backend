@@ -111,6 +111,24 @@ export enum BotConnectionStatus {
   Error = 'error',
 }
 
+/** Lifecycle of a queued Discord sync job in the outbox (discord_sync_jobs). */
+export enum DiscordSyncJobStatus {
+  Pending = 'pending',
+  Processing = 'processing',
+  Succeeded = 'succeeded',
+  Failed = 'failed',
+}
+
+/** The kind of work a Discord sync job performs when the worker drains it. */
+export enum DiscordSyncJobType {
+  RoleAssign = 'role.assign',
+  RoleRemove = 'role.remove',
+  RoleSync = 'role.sync',
+  MemberKick = 'member.kick',
+  Announce = 'announce',
+  Welcome = 'welcome',
+}
+
 export enum NotificationTone {
   Info = 'info',
   Warn = 'warn',

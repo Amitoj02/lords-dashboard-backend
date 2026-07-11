@@ -9,6 +9,7 @@ import { AuthzModule } from './authz/authz.module';
 import configuration from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
+import { DiscordModule } from './discord/discord.module';
 import { EventsModule } from './events/events.module';
 import { GalleryModule } from './gallery/gallery.module';
 import { HealthModule } from './health/health.module';
@@ -51,6 +52,7 @@ import { SettingsModule } from './settings/settings.module';
     GalleryModule,
     NotificationsModule,
     SettingsModule,
+    DiscordModule,
   ],
   providers: [
     // Throttle every route globally; individual routes can override with @Throttle/@SkipThrottle.

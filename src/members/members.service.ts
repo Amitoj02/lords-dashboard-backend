@@ -11,6 +11,7 @@ import { In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AccountDeletionStatus, EventStatus, MemberRole, MemberStatus } from '../common/enums';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
 import { RegimentEvent } from '../events/entities/event.entity';
@@ -65,6 +66,9 @@ export class MembersService {
     @InjectRepository(Regiment)
     private readonly regiments: Repository<Regiment>,
     private readonly audit: AuditService,
+    // Best-effort Discord side effects (role sync / kick). Every call no-ops
+    // unless the bot is enabled and the relevant switch is on; never throws.
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   /**
@@ -191,6 +195,7 @@ export class MembersService {
       detail: dto.note ?? null,
     });
 
+    await this.syncMemberRoles(member);
     return this.project(member);
   }
 
@@ -229,6 +234,7 @@ export class MembersService {
       detail: dto.note ?? null,
     });
 
+    await this.syncMemberRoles(member);
     return this.project(member);
   }
 
@@ -263,6 +269,7 @@ export class MembersService {
       detail: `Awarded ${medal.title}`,
     });
 
+    await this.syncMemberRoles(member);
     return this.project(member);
   }
 
@@ -296,6 +303,7 @@ export class MembersService {
       detail: `Removed ${title}`,
     });
 
+    await this.syncMemberRoles(member);
     return this.project(member);
   }
 
@@ -341,12 +349,12 @@ export class MembersService {
   /**
    * Ban a member (app-side). Marks bannedAt + sets status Inactive.
    *
-   * ⚠️ SENSITIVE — owner decision (questionnaire T-0027 Q4): an app-side ban must
-   * ALSO remove the member's synced Discord roles and kick them from the guild.
-   * That is a Discord SYNC action owned by the (deferred) bot milestone
-   * (T-0020/T-0021); it is intentionally NOT performed here because there is no
-   * bot in the MVP. When the bot lands, enqueue a kick/role-strip sync job from
-   * this method and re-review the whole flow before shipping.
+   * ⚠️ SENSITIVE — owner decision (questionnaire T-0027 Q4): an app-side ban may
+   * ALSO kick the member from the Discord guild. That is now wired as a
+   * best-effort outbox job (enqueueMemberKick), but it is GATED behind the
+   * regiment's `kickOnBan` switch, which DEFAULTS OFF — so by default a ban never
+   * touches Discord. The owner asked to re-review this flow every time it is
+   * touched before enabling it in production; the enqueue no-ops until then.
    */
   async ban(
     id: string,
@@ -372,6 +380,12 @@ export class MembersService {
       detail: dto.reason ?? null,
     });
 
+    // Flag-gated (kickOnBan, default OFF) + best-effort — never fails the ban.
+    await this.discordSync.enqueueMemberKick(
+      member.regimentId,
+      member.discordIdentity?.discordUserId ?? null,
+      dto.reason ?? null,
+    );
     return this.project(member);
   }
 
@@ -499,6 +513,19 @@ export class MembersService {
   }
 
   // ── Internal helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Best-effort: enqueue a Discord role reconciliation for a member after a
+   * rank/role/medal change. No-ops when the bot is disabled or the member has no
+   * linked Discord identity; never throws (the enqueuer swallows failures).
+   */
+  private async syncMemberRoles(member: Member): Promise<void> {
+    await this.discordSync.enqueueRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+    );
+  }
 
   /** Load a regiment-scoped, non-deleted member with its rank + identity, or 404. */
   private async loadMember(id: string, regimentId: string): Promise<Member> {
