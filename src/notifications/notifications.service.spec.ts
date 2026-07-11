@@ -148,7 +148,7 @@ describe('NotificationsService', () => {
   });
 
   describe('create', () => {
-    it('composes with the given author label, audits, and returns read=true', async () => {
+    it('composes with the given author label, audits, and returns read=false', async () => {
       const dto = { title: 'Stand-to', body: 'Report in.', authorLabel: 'HQ' };
 
       const result = await service.create(user(), dto, '1.2.3.4');
@@ -162,7 +162,9 @@ describe('NotificationsService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'notification.create', regimentId: REGIMENT }),
       );
-      expect(result.read).toBe(true);
+      // Compose does not persist a read row, so the DTO reports read=false to
+      // stay consistent with unread-count (which still counts this dispatch).
+      expect(result.read).toBe(false);
       expect(result.authorLabel).toBe('HQ');
     });
 

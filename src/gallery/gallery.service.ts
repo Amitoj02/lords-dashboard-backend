@@ -85,18 +85,21 @@ export class GalleryService {
   /** Public view of a single approved item (404 otherwise). Honours `publicGallery`. */
   async findOnePublic(id: string): Promise<GalleryItemDto> {
     const settings = await this.resolveSettings();
-    if (settings && settings.publicGallery === false) {
+    // Mirror findPublic: with no settings row there is no resolvable public
+    // gallery, so a single item is treated as not found (never served unscoped).
+    if (!settings) {
+      throw new NotFoundException('Gallery item not found');
+    }
+    if (settings.publicGallery === false) {
       throw new ForbiddenException('The gallery is private');
     }
 
     const where: FindOptionsWhere<GalleryItem> = {
       id,
+      regimentId: settings.regimentId,
       status: GalleryStatus.Approved,
       isDraft: false,
     };
-    if (settings) {
-      where.regimentId = settings.regimentId;
-    }
     const item = await this.items.findOne({ where, relations: { author: true } });
     if (!item) {
       throw new NotFoundException('Gallery item not found');
@@ -260,7 +263,9 @@ export class GalleryService {
   /** Idempotently like an item for the caller. Returns the fresh like state. */
   async like(user: AuthenticatedUser, id: string): Promise<GalleryLikeState> {
     const memberId = this.requireMember(user);
-    const item = await this.loadItem(id, user.regimentId, {});
+    // onlyApproved: likes apply solely to publicly-visible items — a member must
+    // not be able to like (or probe the existence of) a pending/declined item.
+    const item = await this.loadItem(id, user.regimentId, { onlyApproved: true });
 
     const existing = await this.likes.findOne({
       where: { galleryItemId: item.id, memberId },
@@ -278,7 +283,7 @@ export class GalleryService {
   /** Idempotently remove the caller's like. Returns the fresh like state. */
   async unlike(user: AuthenticatedUser, id: string): Promise<GalleryLikeState> {
     const memberId = this.requireMember(user);
-    const item = await this.loadItem(id, user.regimentId, {});
+    const item = await this.loadItem(id, user.regimentId, { onlyApproved: true });
 
     await this.likes.delete({ galleryItemId: item.id, memberId });
     const likesCount = await this.likes.count({ where: { galleryItemId: item.id } });

@@ -183,9 +183,18 @@ export class AuditService {
     return where;
   }
 
-  /** CSV-escape one field: null→empty, CR/LF→space, `"`→`""`, always quoted. */
+  /**
+   * CSV-escape one field: null→empty, CR/LF→space, `"`→`""`, always quoted.
+   * Also neutralises spreadsheet formula injection (CWE-1236): a field that
+   * begins with `= + - @` (or tab) is prefixed with a single quote so Excel/
+   * Sheets treat the cell as text rather than evaluating attacker-controlled
+   * content (e.g. an audited event title or member name) as a formula.
+   */
   private escapeCsvField(value: string | null): string {
-    const text = (value ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
+    let text = (value ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""');
+    if (/^[=+\-@\t]/.test(text)) {
+      text = `'${text}`;
+    }
     return `"${text}"`;
   }
 

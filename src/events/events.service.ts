@@ -105,10 +105,14 @@ export class EventsService {
     return new PaginatedResponseDto(data, total, query.page, query.limit);
   }
 
-  /** A single published event, public view (404 for drafts/deleted/missing). */
+  /** A single published event, public view (404 for drafts/archived/deleted/missing). */
   async getPublic(id: string): Promise<EventDto> {
     const regimentId = await this.resolvePublicRegimentId();
-    const event = await this.events.findOne({ where: { id, regimentId, isDraft: false } });
+    // isArchived is excluded here to match listPublic — an archived event is
+    // hidden from the public calendar, so a direct fetch by id must 404 too.
+    const event = await this.events.findOne({
+      where: { id, regimentId, isDraft: false, isArchived: false },
+    });
     if (!event) {
       throw new NotFoundException('Event not found');
     }

@@ -200,6 +200,16 @@ describe('SettingsService', () => {
 
     it('ALLOWS a benign grant (ModerateGallery → Member): persists, invalidates, audits', async () => {
       permissionRepo.find.mockResolvedValue(ownerCoreRows());
+      // The write runs inside a transaction; wire the manager repo so we can
+      // assert the new cell is created + saved exactly once.
+      const permTxRepo = {
+        update: jest.fn(),
+        create: jest.fn((data: Partial<RolePermission>) => ({ ...data })),
+        save: jest.fn(),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb({ getRepository: () => permTxRepo }),
+      );
 
       await service.updatePermissions(
         user(),
@@ -211,17 +221,44 @@ describe('SettingsService', () => {
         null,
       );
 
-      expect(permissionRepo.create).toHaveBeenCalledWith({
+      expect(permTxRepo.create).toHaveBeenCalledWith({
         regimentId: REGIMENT,
         role: MemberRole.Member,
         capability: Capability.ModerateGallery,
         granted: true,
       });
-      expect(permissionRepo.save).toHaveBeenCalledTimes(1);
+      expect(permTxRepo.save).toHaveBeenCalledTimes(1);
       expect(authz.invalidate).toHaveBeenCalledWith(REGIMENT);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'settings.permissions.update' }),
       );
+    });
+
+    it('collapses duplicate cells in one batch so a new cell is written exactly once', async () => {
+      permissionRepo.find.mockResolvedValue(ownerCoreRows());
+      const permTxRepo = {
+        update: jest.fn(),
+        create: jest.fn((data: Partial<RolePermission>) => ({ ...data })),
+        save: jest.fn(),
+      };
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb({ getRepository: () => permTxRepo }),
+      );
+
+      await service.updatePermissions(
+        user(),
+        {
+          changes: [
+            { role: MemberRole.Member, capability: Capability.ModerateGallery, granted: true },
+            { role: MemberRole.Member, capability: Capability.ModerateGallery, granted: true },
+          ],
+        },
+        null,
+      );
+
+      // A single INSERT for the deduped new cell — not two (which would violate
+      // the UNIQUE(regiment_id, role, capability) index and 500 mid-batch).
+      expect(permTxRepo.save).toHaveBeenCalledTimes(1);
     });
 
     it('rejects an unknown capability before touching the matrix', async () => {

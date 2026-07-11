@@ -68,7 +68,7 @@ describe('Post-MVP feature modules (e2e)', () => {
   // Rows created during the run, torn down in afterAll.
   let eventId: string | undefined;
   let galleryId: string | undefined;
-  let notificationId: string | undefined;
+  const notificationIds: string[] = [];
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -101,7 +101,7 @@ describe('Post-MVP feature modules (e2e)', () => {
       );
     if (eventId) await dataSource.getRepository(RegimentEvent).delete(eventId);
     if (galleryId) await dataSource.getRepository(GalleryItem).delete(galleryId);
-    if (notificationId) await dataSource.getRepository(Notification).delete(notificationId);
+    for (const id of notificationIds) await dataSource.getRepository(Notification).delete(id);
     await cleanupApplicant();
     await app.close();
   });
@@ -236,6 +236,16 @@ describe('Post-MVP feature modules (e2e)', () => {
         .expect(200);
       expect(audit.body.data.length).toBeGreaterThanOrEqual(1);
     });
+
+    it('hides an archived event from the public detail endpoint too (not just the list)', async () => {
+      // Public detail must match the public list: an archived event 404s.
+      await request(server()).get(`/api/events/${eventId}`).expect(200); // visible before
+      await request(server())
+        .post(`/api/events/${eventId}/archive`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      await request(server()).get(`/api/events/${eventId}`).expect(404); // hidden after
+    });
   });
 
   // ── Gallery (T-0016) ───────────────────────────────────────────────────────
@@ -300,7 +310,8 @@ describe('Post-MVP feature modules (e2e)', () => {
         .set(bearer(ownerToken))
         .send({ title: 'E2E Dispatch', body: 'Muster at 1900.' })
         .expect(201);
-      notificationId = created.body.id as string;
+      const notificationId = created.body.id as string;
+      notificationIds.push(notificationId);
 
       const afterCompose = await request(server())
         .get('/api/notifications/unread-count')
@@ -347,6 +358,25 @@ describe('Post-MVP feature modules (e2e)', () => {
     it('denies the audit ledger + export to a caller without view_audit_log', async () => {
       await request(server()).get('/api/audit').set(bearer(applicantToken)).expect(403);
       await request(server()).get('/api/audit/export').set(bearer(applicantToken)).expect(403);
+    });
+
+    it('neutralizes spreadsheet formula injection in the CSV export', async () => {
+      // A dispatch title that is a formula lands in an audit row's targetLabel.
+      const created = await request(server())
+        .post('/api/notifications')
+        .set(bearer(ownerToken))
+        .send({ title: '=HYPERLINK("http://evil","x")', body: 'payload' })
+        .expect(201);
+      notificationIds.push(created.body.id as string);
+
+      const csv = await request(server())
+        .get('/api/audit/export')
+        .set(bearer(ownerToken))
+        .expect(200);
+      // The leading '=' is defused with a single quote so a spreadsheet treats
+      // the cell as text instead of evaluating it.
+      expect(csv.text).toContain(`"'=HYPERLINK`);
+      expect(csv.text).not.toContain(`"=HYPERLINK`);
     });
   });
 });

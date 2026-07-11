@@ -101,8 +101,11 @@ export class NotificationsService {
       target: { type: 'notification', id: saved.id, label: saved.title },
     });
 
-    // The author has implicitly "seen" their own dispatch.
-    return NotificationDto.from(saved, true);
+    // read=false keeps the DTO consistent with persisted state: no
+    // notification_reads row is written on compose, so unread-count (an anti-join
+    // on notification_reads) still counts this dispatch until the author opens it.
+    // Returning read=true here would contradict that count.
+    return NotificationDto.from(saved, false);
   }
 
   /**
