@@ -13,14 +13,18 @@ export class DiscordOAuthService {
   private readonly logger = new Logger(DiscordOAuthService.name);
   private readonly apiBase = 'https://discord.com/api/v10';
 
-  constructor(private readonly config: ConfigService<AppConfig, true>) {}
+  constructor(protected readonly config: ConfigService<AppConfig, true>) {}
 
   private get discord() {
     return this.config.get('discord', { infer: true });
   }
 
-  /** The Discord authorize URL the browser is redirected to (step 1). */
-  buildAuthorizeUrl(state: string): string {
+  /**
+   * The Discord authorize URL the browser is redirected to (step 1). The
+   * optional `persona` is ignored by the real flow; the mock uses it to pick
+   * which canned user to sign in as (see MockDiscordOAuthService).
+   */
+  buildAuthorizeUrl(state: string, _persona?: string): string {
     const { clientId, callbackUrl, scopes } = this.discord;
     const params = new URLSearchParams({
       client_id: clientId,

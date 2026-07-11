@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI workflow for the Lords Dashboard API (T-0008).
+#
+# ⚠️ ACTIVATION: this lives here (not in .github/workflows/) because the token
+# used to push it lacked the GitHub `workflow` scope. To enable CI, move it:
+#     git mv project-plan/ci-workflow.yml .github/workflows/ci.yml
+#     git commit -m "ci: activate workflow" && git push
+# (push with a token that has the `workflow` scope, or add it via the GitHub UI).
+#
+# The `images` job builds the web image from the sibling frontend repo, so add a
+# repository secret FRONTEND_CHECKOUT_TOKEN with read access to
+# Amitoj02/lords-regiment-dashboard (falls back to api-image-only without it).
+# ─────────────────────────────────────────────────────────────────────────────
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Lint + unit + e2e + build the API against a real MySQL 8 ───────────────
+  backend:
+    name: Backend (lint · unit · e2e · build)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root-password
+          MYSQL_DATABASE: lords_dashboard
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -pci-root-password"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USERNAME: root
+      DB_PASSWORD: ci-root-password
+      DB_DATABASE: lords_dashboard
+      JWT_SECRET: ci-only-throwaway-jwt-secret-value
+      ENCRYPTION_KEY: '6465760000000000000000000000000000000000000000000000000000000000'
+      DISCORD_MOCK: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint:check
+      - name: Build
+        run: npm run build
+      - name: Migrate + seed the test database
+        run: npm run db:setup
+      - name: Unit tests
+        run: npm test
+      - name: E2E tests
+        run: npm run test:e2e
+
+  # ── Build BOTH docker images the stack ships (api + web) ───────────────────
+  images:
+    name: Docker images (api + web)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout backend
+        uses: actions/checkout@v4
+        with:
+          path: lords-dashboard-backend
+      - name: Checkout frontend (sibling build context)
+        id: fe
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: Amitoj02/lords-regiment-dashboard
+          path: lords-regiment-dashboard
+          token: ${{ secrets.FRONTEND_CHECKOUT_TOKEN || github.token }}
+      - name: Build the API image
+        run: docker build -t lords-api:ci --target prod lords-dashboard-backend
+      - name: Build the web image
+        if: steps.fe.outcome == 'success'
+        run: docker build -t lords-web:ci --target prod lords-regiment-dashboard

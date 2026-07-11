@@ -13,40 +13,71 @@ dashboard). Built with **NestJS 11 + TypeORM + MySQL**, it backs the
 
 - **NestJS 11** (modular architecture, DI, guards, pipes, interceptors, filters)
 - **TypeORM 0.3** + **mysql2**, snake_case naming strategy, migrations + seeders
-- **MySQL 8** (XAMPP, `localhost:3306`)
-- **Passport JWT** + **Discord OAuth2** (authorization-code flow)
+- **MySQL 8** (runs as the `db` service in Docker Compose — no host database needed)
+- **Passport JWT** + **Discord OAuth2** (authorization-code flow, with a swap-ready in-process mock)
 - **class-validator / class-transformer**, **Swagger / OpenAPI**, **Joi** env validation
 - **Jest** + **Supertest** (unit + e2e)
+- **Docker Compose** — one unified stack (api + MySQL 8 + Angular web) with dev/prod image parity
 - AES-256-GCM column encryption for Discord tokens & event passwords
 
 ## Prerequisites
 
-- Node `>=20` (developed on 24), npm `>=10`
-- MySQL running on `localhost:3306` (XAMPP is fine; default `root` / empty password)
+- **Docker + Docker Compose** — that's it. No host Node or MySQL required.
+- (Only if running the API on the host instead: Node `>=20`, npm `>=10`, and a reachable MySQL 8.)
 
-## Getting started
+## Getting started (Docker — recommended)
+
+The whole product runs from one compose file in this repo. It builds the Angular
+frontend from the sibling `../lords-regiment-dashboard` checkout.
+
+```bash
+docker compose up --build            # api + MySQL 8 + web, hot-reloading
+docker compose exec api npm run db:setup   # first run only: create -> migrate -> seed
+```
+
+- Web (SPA): <http://localhost:4200>  ·  API: proxied at <http://localhost:4200/api>
+- Swagger: <http://localhost:4200/api/docs>  ·  MySQL (host tools): `127.0.0.1:3307`
+
+Discord is **mocked** out of the box (`DISCORD_MOCK=true`), so sign-in works with
+no Discord app — click *Continue with Discord* and you are signed in as the seeded
+Owner. See _Discord OAuth_ below to go live.
+
+Run any tooling in the container: `docker compose exec api npm test`,
+`docker compose exec api npm run lint`, `docker compose exec api npm run migration:run`.
+
+### Running the API on the host (optional)
 
 ```bash
 npm install
-cp .env.example .env          # then fill in the Discord OAuth values
-npm run db:setup              # create database -> run migrations -> seed
-npm run start:dev             # http://localhost:3000/api  (Swagger at /api/docs)
+cp .env.example .env          # set DB_HOST=127.0.0.1, DB_PORT=3307 (the compose db)
+docker compose up -d db       # or any reachable MySQL 8
+npm run db:setup && npm run start:dev
 ```
 
 `db:setup` is shorthand for `db:create && migration:run && seed`. All three are idempotent.
 
-### Configuring Discord OAuth
+### Configuring Discord OAuth (going live)
+
+Sign-in works immediately via the mock. To use a real Discord application:
 
 1. Create an application at <https://discord.com/developers/applications>.
-2. Under **OAuth2 → Redirects**, add `http://localhost:3000/api/auth/discord/callback`.
-3. Copy the **Client ID** and **Client Secret** into `.env`
-   (`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`).
+2. Under **OAuth2 → Redirects**, add your callback (dev: `http://localhost:4200/api/auth/discord/callback`;
+   prod: `https://<your-domain>/api/auth/discord/callback`).
+3. Set `DISCORD_MOCK=false` and copy the **Client ID** / **Client Secret** into your env
+   (`DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`). No code changes are needed — the mock and the
+   real client share one interface (`DiscordOAuthService`).
 4. Optionally set `DISCORD_GUILD_ID` to your regiment's Discord server to record guild membership.
 5. Generate secrets:
    ```bash
    node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"   # JWT_SECRET
    node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # ENCRYPTION_KEY (64 hex)
    ```
+
+### Production
+
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build` builds slim images,
+runs a one-shot migrate+seed init container (compiled JS, no ts-node), serves the SPA via nginx and
+reverse-proxies `/api`. See [`project-plan/DEPLOY.md`](./project-plan/DEPLOY.md) for the full runbook.
 
 ## Authentication flow
 

@@ -40,6 +40,11 @@ export const envValidationSchema = Joi.object({
     .default('http://localhost:3000/api/auth/discord/callback'),
   DISCORD_SCOPES: Joi.string().default('identify email guilds'),
   DISCORD_GUILD_ID: Joi.string().allow('').default(''),
+  // Discord mock — replaces the OAuth2 network calls with an in-process stub so
+  // the sign-in flow works with no Discord app. Left optional (no default) so the
+  // effective value is computed in configuration.ts: ON when no client id is set.
+  DISCORD_MOCK: Joi.boolean(),
+  DISCORD_MOCK_DEFAULT_PERSONA: Joi.string().default('owner'),
 
   // Frontend redirect targets
   FRONTEND_URL: Joi.string().uri().default('http://localhost:4200'),

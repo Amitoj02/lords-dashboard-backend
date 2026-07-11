@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { MemberRole, MemberStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
+import { AuthzService } from '../authz/authz.service';
 import { AuthService } from './auth.service';
 import { DiscordOAuthService } from './discord-oauth.service';
 import { DiscordIdentity } from './entities/discord-identity.entity';
@@ -45,11 +46,13 @@ describe('AuthService', () => {
     Pick<DiscordOAuthService, 'exchangeCode' | 'fetchUser' | 'isMemberOfGuild' | 'buildAvatarUrl'>
   >;
   let jwt: { signAsync: jest.Mock };
+  let authz: { grantedCapabilities: jest.Mock };
 
   beforeEach(async () => {
     identities = repoMock<DiscordIdentity>();
     members = repoMock<Member>();
     regiments = repoMock<Regiment>();
+    authz = { grantedCapabilities: jest.fn().mockResolvedValue([]) };
     discord = {
       exchangeCode: jest.fn().mockResolvedValue(TOKEN),
       fetchUser: jest.fn().mockResolvedValue(NEW_PROFILE),
@@ -70,6 +73,7 @@ describe('AuthService', () => {
           provide: ConfigService,
           useValue: { get: jest.fn().mockReturnValue({ guildId: 'guild-1' }) },
         },
+        { provide: AuthzService, useValue: authz },
       ],
     }).compile();
 
@@ -163,6 +167,7 @@ describe('AuthService', () => {
           { provide: DiscordOAuthService, useValue: discord },
           { provide: JwtService, useValue: jwt },
           { provide: ConfigService, useValue: { get: () => ({ guildId: '' }) } },
+          { provide: AuthzService, useValue: authz },
         ],
       }).compile();
       const svc = module.get(AuthService);
@@ -189,6 +194,7 @@ describe('AuthService', () => {
         avatarUrl: 'https://cdn/a.png',
         rank: { name: 'General' },
       });
+      authz.grantedCapabilities.mockResolvedValue(['manage_settings', 'view_audit_log']);
       const user: AuthenticatedUser = {
         identityId: 'identity-1',
         memberId: 'member-1',
@@ -206,7 +212,10 @@ describe('AuthService', () => {
         discordLinked: true,
         avatarUrl: 'https://cdn/a.png',
         isMember: true,
+        capabilities: ['manage_settings', 'view_audit_log'],
       });
+      // Capabilities are resolved for the member's current role in their regiment.
+      expect(authz.grantedCapabilities).toHaveBeenCalledWith('regiment-1', MemberRole.Owner);
     });
 
     it('returns the identity projection when there is no linked member', async () => {
@@ -216,6 +225,7 @@ describe('AuthService', () => {
         discordTag: '@newbie',
         avatarUrl: 'https://cdn/a.png',
       });
+      authz.grantedCapabilities.mockResolvedValue(['apply_to_join']);
       const user: AuthenticatedUser = {
         identityId: 'identity-1',
         memberId: null,
@@ -233,7 +243,10 @@ describe('AuthService', () => {
         discordLinked: false,
         avatarUrl: 'https://cdn/a.png',
         isMember: false,
+        capabilities: ['apply_to_join'],
       });
+      // Identity-only sessions resolve capabilities as an Applicant.
+      expect(authz.grantedCapabilities).toHaveBeenCalledWith('regiment-1', MemberRole.Applicant);
     });
   });
 });

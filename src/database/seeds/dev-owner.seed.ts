@@ -13,19 +13,29 @@ import {
 } from './seed.util';
 
 /**
- * Dev fixture: an owner identity + member so admin flows and /auth/me are
- * testable without a live Discord login. In production the owner is established
- * by the onboarding wizard.
+ * Seeds the regiment Owner (identity + member) so admin flows and /auth/me work
+ * from the first boot.
+ *
+ * - DEV (default): a fixture owner with the well-known dev snowflake, so the
+ *   Discord mock (`?as=owner`) resolves it and admin flows are testable with no
+ *   live Discord login.
+ * - PROD: set `OWNER_DISCORD_ID` (and optionally `OWNER_NAME`) to claim a REAL
+ *   Owner on first deploy — the real person's Discord snowflake, so their first
+ *   sign-in resolves the Owner member. The dev fixture is never valid for prod.
  */
 export async function seedDevOwner(ds: DataSource): Promise<void> {
+  const ownerDiscordId = process.env.OWNER_DISCORD_ID?.trim() || OWNER_DISCORD_USER_ID;
+  const ownerName = process.env.OWNER_NAME?.trim() || 'Lord Commander';
+  const isRealOwner = !!process.env.OWNER_DISCORD_ID?.trim();
+
   const identity = await ensure(
     ds.getRepository(DiscordIdentity),
     { id: OWNER_IDENTITY_ID },
     {
-      discordUserId: OWNER_DISCORD_USER_ID,
-      discordTag: '@lord_commander',
-      discordUsername: 'lord_commander',
-      globalName: 'Lord Commander',
+      discordUserId: ownerDiscordId,
+      discordTag: isRealOwner ? null : '@lord_commander',
+      discordUsername: isRealOwner ? null : 'lord_commander',
+      globalName: ownerName,
       avatarUrl: null,
       guildMember: true,
       scopes: 'identify email guilds',
@@ -43,8 +53,8 @@ export async function seedDevOwner(ds: DataSource): Promise<void> {
       regimentId: REGIMENT_ID,
       discordIdentityId: identity.id,
       rankId: generalRank.id,
-      name: 'Lord Commander',
-      inGameName: 'Lord_Commander',
+      name: ownerName,
+      inGameName: isRealOwner ? null : 'Lord_Commander',
       role: MemberRole.Owner,
       status: MemberStatus.Active,
       platform: Platform.Steam,

@@ -5,6 +5,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AppConfig } from '../config/configuration';
 import { MemberRole } from '../common/enums';
+import { AuthzService } from '../authz/authz.service';
 import { Member } from '../members/entities/member.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { CurrentUserDto } from './dto/current-user.dto';
@@ -34,11 +35,16 @@ export class AuthService {
     private readonly discordOAuth: DiscordOAuthService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly authz: AuthzService,
   ) {}
 
-  /** Step 1: the URL to redirect the browser to. */
-  getLoginUrl(state: string): string {
-    return this.discordOAuth.buildAuthorizeUrl(state);
+  /**
+   * Step 1: the URL to redirect the browser to. `persona` is only meaningful
+   * when the Discord mock is active (it selects which canned user to sign in
+   * as); the real flow ignores it.
+   */
+  getLoginUrl(state: string, persona?: string): string {
+    return this.discordOAuth.buildAuthorizeUrl(state, persona);
   }
 
   /**
@@ -115,21 +121,38 @@ export class AuthService {
     return this.jwt.signAsync(payload);
   }
 
-  /** The CurrentUser projection for /auth/me. */
+  /**
+   * The CurrentUser projection for /auth/me, enriched with the caller's
+   * effective capabilities (resolved from the role_permissions matrix). A
+   * member is projected off their current roster row (fresher than the JWT); an
+   * identity-only session projects off the Discord identity as an Applicant.
+   */
   async getCurrentUser(user: AuthenticatedUser): Promise<CurrentUserDto> {
+    let projection: CurrentUserDto | null = null;
+    let role: MemberRole = MemberRole.Applicant;
+
     if (user.memberId) {
       const member = await this.members.findOne({
         where: { id: user.memberId },
         relations: { rank: true },
       });
-      if (member) return AuthService.toMemberProjection(member);
+      if (member) {
+        projection = AuthService.toMemberProjection(member);
+        role = member.role;
+      }
     }
 
-    const identity = await this.identities.findOne({ where: { id: user.identityId } });
-    if (!identity) {
-      throw new UnauthorizedException('Account no longer exists');
+    if (!projection) {
+      const identity = await this.identities.findOne({ where: { id: user.identityId } });
+      if (!identity) {
+        throw new UnauthorizedException('Account no longer exists');
+      }
+      projection = AuthService.toIdentityProjection(identity);
+      role = MemberRole.Applicant;
     }
-    return AuthService.toIdentityProjection(identity);
+
+    projection.capabilities = await this.authz.grantedCapabilities(user.regimentId, role);
+    return projection;
   }
 
   private static toMemberProjection(member: Member): CurrentUserDto {
@@ -142,6 +165,8 @@ export class AuthService {
       discordLinked: member.discordLinked,
       avatarUrl: member.avatarUrl,
       isMember: true,
+      // Filled in by getCurrentUser from the role_permissions matrix.
+      capabilities: [],
     };
   }
 
@@ -155,6 +180,8 @@ export class AuthService {
       discordLinked: false,
       avatarUrl: identity.avatarUrl,
       isMember: false,
+      // Filled in by getCurrentUser from the role_permissions matrix.
+      capabilities: [],
     };
   }
 

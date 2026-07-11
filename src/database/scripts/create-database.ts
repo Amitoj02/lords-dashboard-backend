@@ -6,8 +6,10 @@ loadEnv();
 
 /**
  * Creates the application database if it does not already exist.
- * Connects to the MySQL server WITHOUT selecting a database, so it works on a
- * fresh XAMPP install. Idempotent — safe to run repeatedly.
+ * Connects to the MySQL server WITHOUT selecting a database, so it works against
+ * a fresh MySQL 8 server (e.g. the compose `db` service). Idempotent — safe to
+ * run repeatedly. In production the `db` container auto-creates the database from
+ * MYSQL_DATABASE, so only migrate+seed run (see db:setup:prod).
  *
  *   npm run db:create
  */

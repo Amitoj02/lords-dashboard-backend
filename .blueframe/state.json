@@ -1,9 +1,9 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
-  "lastSyncedAt": "2026-07-11T02:30:00Z",
-  "notesForNextSession": "PLAN RE-PRIORITIZED via bf-plan (2026-07-11) into MVP-first tiers under a hard Docker-first + no-XAMPP mandate. OWNER DECISIONS LOCKED: (1) MVP = core dashboard; the Discord BOT is DEFERRED to a post-MVP milestone. (2) ONE unified docker-compose in THIS repo runs api + MySQL 8 `db` + `web` (frontend build context ../lords-regiment-dashboard). (3) Fully-containerized dev with dev/prod IMAGE parity (base compose + docker-compose.override.yml[dev] + docker-compose.prod.yml). XAMPP / local MySQL is being removed entirely (T-0029). PRIORITY TIERS (build in order): TIER 0 Docker-first foundation + shared plumbing (MVP gate) = T-0009 unified compose stack -> T-0030 containerized db bootstrap -> T-0031 devcontainer/hot-reload -> T-0029 purge XAMPP; plus T-0006 CapabilitiesGuard + T-0007 AuditService; T-0008 CI on containers. TIER 1 MVP feature core = T-0010 Members/roster+admin-actions -> T-0014 Applications(apply->approve->member); T-0011 Ranks + T-0012 Medals + T-0013 regiment stats. Frontend MVP: lords-regiment-dashboard T-0013 env -> T-0022 frontend Dockerfile; T-0011 core HTTP + T-0012 real OAuth2->JWT -> T-0023 member admin-action modal. TIER 2 MVP GO-LIVE = T-0032 deploy unified prod compose (TLS, smoke). *** MVP SHIPS HERE. *** TIER 3 post-MVP features = T-0015 Events, T-0016 Gallery, T-0017 Audit read, T-0018 Notifications, T-0019 Settings+permissions-matrix. Frontend: T-0025 wire remaining services + T-0017 settings/announcements/invite UI. TIER 4 Discord bot milestone = T-0020 bot foundation+new migration -> T-0021 core sync+control API -> T-0022 onboarding+slash. Frontend: T-0024 bot admin UI. TIER 5 hardening & full go-live = T-0025 security review + cross-stack E2E incl. bot + re-deploy. Answer questionnaires T-0026/27/28 before seeding the rank ladder (T-0011) and building the bot (T-0020). SHIPPED already: T-0001..T-0005 (skeleton, crypto, 28-table schema, Discord OAuth2+JWT, health).",
+  "lastSyncedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
+  "lastSyncedAt": "2026-07-11T04:20:00Z",
+  "notesForNextSession": "MVP SHIPPED (build + verify) this session on branch feat/mvp-complete. Backend: mock Discord OAuth (DISCORD_MOCK, swap-ready; personas owner/recruit/<label>), capabilities on /auth/me (T-0006), AuditService (T-0007), Members admin actions+GDPR (T-0010), Ranks/Medals[repeatable, migration drops the unique index]/Regiment stats (T-0011/12/13), Applications approve writes service-record (T-0014). Docker-first: unified compose api+db+web, dev override (:z for Fedora SELinux) + prod overlay w/ ts-node-free migrate/seed init (T-0009/30/31/29), CI (T-0008). 106 unit + 7 e2e green; lint clean. Frontend (lords-regiment-dashboard branch feat/mvp-integration): real OAuth2->JWT + interceptor + /auth/callback, HTTP services w/ DTO mappers, admin modal (T-0023), coming-soon guard for deferred surfaces (T-0026), Dockerfile (T-0022). VERIFIED LIVE in the full prod stack (nginx serving SPA + /api proxy) via browser: login(mock)->dashboard(real owner)->roster->admin modal, and apply->approve loop; capability gating returns 403 for non-admins. BLOCKED: T-0032 real deploy needs owner's DigitalOcean + Discord prod app (see project-plan/DEPLOY.md). NEXT (post-MVP): T-0015 Events, T-0016 Gallery, T-0017 Audit read, T-0018 Notifications, T-0019 Settings+permissions matrix; then TIER 4 Discord bot (T-0020/21/22) \u2014 remember T-0027 Q4: app ban must also kick from Discord (owner wants a re-check each time). Frontend post-MVP: FE T-0025 wire events/gallery/audit/settings, FE T-0017 settings/announce/invite, FE T-0024 bot UI. To open the stack: `docker compose up` (dev) or the prod overlay; DISCORD_MOCK=false + real creds to go live.",
   "nextIdCounter": 33,
   "connections": [],
   "tasks": [
@@ -192,7 +192,7 @@
       "id": "T-0005",
       "title": "Health module (liveness + DB probe)",
       "summary": "Health controller/module exposing a liveness endpoint and a database connectivity probe. No test coverage yet; marked review pending a smoke check.",
-      "status": "review",
+      "status": "deploy_ready",
       "type": "infra",
       "size": "XS",
       "sizeWeight": 1,
@@ -210,14 +210,14 @@
       "testPlan": [
         {
           "desc": "GET /api/health returns ok and reports DB reachable",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -225,6 +225,13 @@
           "to": "review",
           "by": "claude",
           "note": "created during bf-init; exists but no test"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "review",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
@@ -232,7 +239,7 @@
       "id": "T-0006",
       "title": "Capability authorization layer + capabilities on /auth/me",
       "summary": "CapabilitiesGuard + @RequireCapability() decorator reading the seeded role_permissions matrix (capability-based, stricter than the coarse RolesGuard). Also project the caller's effective capabilities into the CurrentUser DTO returned by /auth/me, so the frontend can gate UI by capability instead of coarse role. The matrix data + entity exist; the guard/decorator/projection do not.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -251,18 +258,18 @@
       "testPlan": [
         {
           "desc": "guard allows/denies by role_permissions row, not by role membership",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "/auth/me returns the caller's effective capabilities array derived from role_permissions",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -277,6 +284,13 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan verify: also expose effective capabilities on /auth/me so the frontend (lords-regiment-dashboard:T-0023) can capability-gate the admin action UI"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
@@ -284,7 +298,7 @@
       "id": "T-0007",
       "title": "Shared AuditService + audit interceptor",
       "summary": "An AuditService and interceptor/helper so every mutating endpoint writes an audit_log_entries row (actor, action from audit_actions, before/after, severity, discord_sync_status). audit_actions are seeded; the service is not built.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -302,14 +316,14 @@
       "testPlan": [
         {
           "desc": "a mutation produces exactly one audit row with before/after captured",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -317,6 +331,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-init; Phase 01"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
@@ -324,7 +345,7 @@
       "id": "T-0008",
       "title": "CI pipeline on containers (GitHub Actions)",
       "summary": ".github/workflows/ci.yml running lint -> unit -> e2e (against a MySQL 8 service container) -> build on every push. Builds BOTH images the stack ships: the API image, and the web image (checking out the sibling lords-regiment-dashboard repo into a second path so the compose `web` build context ../lords-regiment-dashboard resolves in CI). Keeps dev/CI/prod in parity and gates the definition-of-done for each phase. Does not exist yet.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
@@ -342,18 +363,18 @@
       "testPlan": [
         {
           "desc": "CI green on a clean push: lint + unit + e2e + build",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "CI builds the API image AND the web image with both repos checked out (sibling context resolves)",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -375,6 +396,13 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan verify: the web build context is the sibling repo, so CI must check out lords-regiment-dashboard:T-0022 and build the web image too"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
@@ -382,7 +410,7 @@
       "id": "T-0009",
       "title": "Unified Docker Compose stack (api + MySQL 8 + web, dev/prod parity)",
       "summary": "A single docker-compose at the backend repo root that runs the whole product: api (this repo), db (MySQL 8), and web (the Angular frontend, build context ../lords-regiment-dashboard). Multi-stage Dockerfile (deps -> build -> slim runtime) plus a base docker-compose.yml + docker-compose.override.yml (dev: bind mounts, hot reload, exposed ports) + docker-compose.prod.yml (prod: built images, no mounts, restart policies), with healthcheck-gated startup so api waits for db. `docker compose up` serves /api/health, /api/docs and the SPA. Does not exist yet.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -403,18 +431,18 @@
       "testPlan": [
         {
           "desc": "docker compose up serves /api/health and /api/docs",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "the web service serves the SPA and reaches the api over the compose network",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T02:30:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -429,14 +457,21 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan re-scope: expanded from app+MySQL to the unified api+db+web stack with dev/prod parity (owner picked one unified compose in this repo); XAMPP removed via T-0029"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0010",
-      "title": "MembersModule — roster + admin actions + GDPR",
+      "title": "MembersModule \u2014 roster + admin actions + GDPR",
       "summary": "GET /members (filter + pagination), GET/PATCH /members/:id, admin actions (change rank/role, award/remove medal, suspend, ban, unban), service-record and command-info reads, and GDPR (deletion-request + confirm + export). Derived values (chevrons, events_attended, attendance_percent) computed server-side. Entities exist; module unbuilt.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -454,14 +489,14 @@
       "testPlan": [
         {
           "desc": "each admin action is capability-gated and writes an audit row",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -469,14 +504,21 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-init; Phase 02"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0011",
-      "title": "RanksModule — CRUD + reorder + link-discord",
+      "title": "RanksModule \u2014 CRUD + reorder + link-discord",
       "summary": "Ranks CRUD, precedence reorder, and Discord-role link fields (the sync itself lands with the bot). Entity + seed exist; module unbuilt.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -501,14 +543,14 @@
       "testPlan": [
         {
           "desc": "reorder updates precedence transactionally; CRUD is capability-gated + audited",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -516,14 +558,21 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-init; Phase 02"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0012",
-      "title": "MedalsModule — CRUD + link-discord",
+      "title": "MedalsModule \u2014 CRUD + link-discord",
       "summary": "Medals catalog CRUD and Discord-role link fields; holders_count derived server-side. Entity + seed exist; module unbuilt.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -548,14 +597,14 @@
       "testPlan": [
         {
           "desc": "CRUD capability-gated + audited; holders_count computed",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -563,6 +612,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-init; Phase 02"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
@@ -570,7 +626,7 @@
       "id": "T-0013",
       "title": "Regiment profile & stats endpoints",
       "summary": "GET /regiment (public profile) and GET /regiment/stats (landing counters, public if public_stats), plus onboarding state endpoints. Values computed server-side, never trusted from client.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -589,14 +645,14 @@
       "testPlan": [
         {
           "desc": "stats respect public_stats visibility toggle",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -604,14 +660,21 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-init; Phase 02"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0014",
-      "title": "ApplicationsModule — intake + decisions + promote",
+      "title": "ApplicationsModule \u2014 intake + decisions + promote",
       "summary": "Public POST /applications intake, admin list/detail, approve/decline/hold with moderator_note + discord_dm_message. Approve promotes to a members row (link identity, default rank, role=Member, set promoted_member_id, service-record + audit). Honors open_recruitment and reapplication detection. Entity exists; module unbuilt.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -631,14 +694,14 @@
       "testPlan": [
         {
           "desc": "e2e: apply -> approve -> new member appears on roster with service-record + audit",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -646,12 +709,19 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-init; Phase 03"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0015",
-      "title": "EventsModule — CRUD + RSVP + attendees + password reveal",
+      "title": "EventsModule \u2014 CRUD + RSVP + attendees + password reveal",
       "summary": "Events CRUD (+ draft/archive), child writes for platforms/tags/notify_offsets, RSVP, attendee check-in, and the sensitive POST /:id/reveal-password (gated on RSVP + reveal_event_passwords capability, decrypts server_password, writes an audit row). Public vs member serialization; a scheduled job advances status upcoming->ongoing->previous. Entities exist; module unbuilt.",
       "status": "planned",
       "type": "feature",
@@ -691,7 +761,7 @@
     },
     {
       "id": "T-0016",
-      "title": "GalleryModule — submit + moderation + likes",
+      "title": "GalleryModule \u2014 submit + moderation + likes",
       "summary": "POST /gallery submit (forces pending), public GET (approved only) + filters, approve/decline moderation (auto_approve_trusted honored), like toggle, tagged members, soft-delete. Stores file URLs/refs only in v1; enforces regiment_settings size/type limits. Entities exist; module unbuilt.",
       "status": "planned",
       "type": "feature",
@@ -731,7 +801,7 @@
     },
     {
       "id": "T-0017",
-      "title": "AuditModule — read-only ledger",
+      "title": "AuditModule \u2014 read-only ledger",
       "summary": "GET /audit (filter severity/actor/action/date + search + pagination), GET /audit/:id (before/after drawer), GET /audit/export (CSV). Append-only, no write API (writes come from T-0007). Entities exist; read module unbuilt.",
       "status": "planned",
       "type": "feature",
@@ -771,8 +841,8 @@
     },
     {
       "id": "T-0018",
-      "title": "NotificationsModule — field dispatches",
-      "summary": "GET /notifications, POST /notifications (compose — admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
+      "title": "NotificationsModule \u2014 field dispatches",
+      "summary": "GET /notifications, POST /notifications (compose \u2014 admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
       "status": "planned",
       "type": "feature",
       "size": "M",
@@ -811,7 +881,7 @@
     },
     {
       "id": "T-0019",
-      "title": "SettingsModule — config + permissions matrix + hazardous ops",
+      "title": "SettingsModule \u2014 config + permissions matrix + hazardous ops",
       "summary": "GET/PATCH /settings (profile, visibility toggles, gallery/event defaults, Holdfast server, backups/retention), GET/PATCH /settings/permissions (edit the role_permissions matrix that CapabilitiesGuard reads), and hazardous ops: transfer-ownership, transfer-discord, dissolve. regiment_settings entity exists; module unbuilt.",
       "status": "planned",
       "type": "feature",
@@ -907,7 +977,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created during bf-init; Phase 07 — new schema + net-new bot runtime"
+          "note": "created during bf-init; Phase 07 \u2014 new schema + net-new bot runtime"
         }
       ]
     },
@@ -957,7 +1027,7 @@
     {
       "id": "T-0022",
       "title": "Bot onboarding automation + slash commands",
-      "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami — resolve against the same services, ephemeral responses.",
+      "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami \u2014 resolve against the same services, ephemeral responses.",
       "status": "planned",
       "type": "feature",
       "size": "L",
@@ -1060,7 +1130,7 @@
     },
     {
       "id": "T-0026",
-      "title": "Questionnaire — domain model decisions",
+      "title": "Questionnaire \u2014 domain model decisions",
       "summary": "Open product decisions that shape seeding and validation before Phase 02 builds on them.",
       "status": "in_progress",
       "type": "question",
@@ -1102,7 +1172,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T02:42:07.173Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1124,12 +1194,19 @@
           "to": "in_progress",
           "by": "human",
           "note": "all questions answered"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "in_progress",
+          "to": "in_progress",
+          "by": "claude",
+          "note": "answers consumed by the MVP build (T-0026 rank ladder/repeatable medals; T-0027 ban->discord-kick flagged for bot; T-0028 recruitment-off/real-stats/hosting)."
         }
       ]
     },
     {
       "id": "T-0027",
-      "title": "Questionnaire — Discord / bot decisions",
+      "title": "Questionnaire \u2014 Discord / bot decisions",
       "summary": "Open decisions that shape the Discord bot phases (07-09) and the new migration.",
       "status": "in_progress",
       "type": "question",
@@ -1150,7 +1227,7 @@
           "answeredAt": "2026-07-11T02:42:39.092Z"
         },
         {
-          "q": "Join role: which Discord role does the bot auto-assign on join — Applicant, a 'Guest', or none?",
+          "q": "Join role: which Discord role does the bot auto-assign on join \u2014 Applicant, a 'Guest', or none?",
           "answer": "Guest",
           "askedAt": "2026-07-11T00:50:59Z",
           "answeredAt": "2026-07-11T02:42:44.752Z"
@@ -1179,7 +1256,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T02:44:36.791Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1194,12 +1271,19 @@
           "to": "in_progress",
           "by": "human",
           "note": "all questions answered"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "in_progress",
+          "to": "in_progress",
+          "by": "claude",
+          "note": "answers consumed by the MVP build (T-0026 rank ladder/repeatable medals; T-0027 ban->discord-kick flagged for bot; T-0028 recruitment-off/real-stats/hosting)."
         }
       ]
     },
     {
       "id": "T-0028",
-      "title": "Questionnaire — product flows & ops/deploy",
+      "title": "Questionnaire \u2014 product flows & ops/deploy",
       "summary": "Open product-flow and deployment decisions needed before Phase 12 (and some feature phases).",
       "status": "in_progress",
       "type": "question",
@@ -1258,7 +1342,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T02:49:49.649Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1280,14 +1364,21 @@
           "to": "in_progress",
           "by": "human",
           "note": "all questions answered"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "in_progress",
+          "to": "in_progress",
+          "by": "claude",
+          "note": "answers consumed by the MVP build (T-0026 rank ladder/repeatable medals; T-0027 ban->discord-kick flagged for bot; T-0028 recruitment-off/real-stats/hosting)."
         }
       ]
     },
     {
       "id": "T-0029",
       "title": "Containerize all config + purge XAMPP (zero-config `up`)",
-      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology — DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
-      "status": "planned",
+      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology \u2014 DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
+      "status": "deploy_ready",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
@@ -1309,16 +1400,16 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` — no XAMPP, no host MySQL/Node, no hand-edited secrets",
-          "status": "pending"
+          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` \u2014 no XAMPP, no host MySQL/Node, no hand-edited secrets",
+          "status": "passed"
         },
         {
           "desc": "the OAuth callback + frontend redirects + CORS resolve through the proxy origin (not split localhost ports)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "grep finds no XAMPP/localhost:3306 defaults left in code or docs",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
@@ -1329,9 +1420,9 @@
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1346,14 +1437,21 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan verify: widened from DB-only to all env (auth/redirect/CORS/cookie for the proxied topology) + Joi-valid dev secrets for zero-config up + residual XAMPP purge (SCHEMA.md, config defaults)"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0030",
       "title": "Containerized DB bootstrap & migration workflow (dev + prod)",
-      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id — the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
-      "status": "planned",
+      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id \u2014 the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
+      "status": "deploy_ready",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -1374,22 +1472,22 @@
       "testPlan": [
         {
           "desc": "dev: `docker compose run --rm api npm run db:setup` creates+migrates+seeds the MySQL 8 container idempotently (a re-run is a no-op)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "prod: the slim image runs migrate+seed with NO ts-node (compiled JS) via the init service, then api starts",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "a fresh prod deploy has a legitimate Owner (real Discord id), not just the dev owner seed",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1404,14 +1502,21 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan verify: added a ts-node-free PROD migrate/seed path (slim image can't run ts-node), a one-shot init service, and real-Owner provisioning for fresh prod deploys"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0031",
       "title": "Fully-containerized dev workflow (devcontainer + hot reload, api + web)",
-      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too — bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
-      "status": "planned",
+      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too \u2014 bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
+      "status": "deploy_ready",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
@@ -1432,18 +1537,18 @@
       "testPlan": [
         {
           "desc": "editing a .ts file on the host hot-reloads the api container; `docker compose exec api npm test` runs the suite with no host Node",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "editing an Angular file hot-reloads the web container and its proxy reaches api:3000 over the compose network",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1458,14 +1563,21 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan verify: also own the dev `web` compose service (sibling bind mount, anon node_modules, ng serve, proxy -> api:3000)"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
         }
       ]
     },
     {
       "id": "T-0032",
       "title": "MVP production deploy (unified prod compose)",
-      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs — register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost — a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025).",
-      "status": "planned",
+      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs \u2014 register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost \u2014 a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025).",
+      "status": "blocked",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -1515,7 +1627,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T03:00:00Z",
+      "updatedAt": "2026-07-11T04:20:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1530,6 +1642,13 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan verify: folded in Discord prod-app config + pre-exposure config check + both-repos-on-host so the go-live smoke can actually pass; added dep on frontend T-0026 (guard un-wired surfaces)"
+        },
+        {
+          "at": "2026-07-11T04:20:00Z",
+          "from": "planned",
+          "to": "blocked",
+          "by": "claude",
+          "note": "Everything it depends on is built+verified (images, ts-node-free migrate/seed, mock->real Discord seam, no-stub-data guard). BLOCKED ON OWNER: needs the real DigitalOcean droplet + a Discord production app. Runbook: project-plan/DEPLOY.md."
         }
       ]
     }

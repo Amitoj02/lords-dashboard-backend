@@ -50,6 +50,15 @@ export interface DiscordConfig {
   callbackUrl: string;
   scopes: string[];
   guildId: string;
+  /**
+   * When true, the real Discord OAuth2 network calls are replaced by an
+   * in-process mock (see MockDiscordOAuthService) so the full sign-in → JWT →
+   * /auth/me flow works with no Discord application. Flip to false and fill in
+   * clientId/clientSecret to go live — nothing else changes.
+   */
+  mock: boolean;
+  /** Persona the mock signs in as when no `?as=` hint is given (default `owner`). */
+  mockDefaultPersona: string;
 }
 
 export interface FrontendConfig {
@@ -84,6 +93,11 @@ export default (): AppConfig => ({
       process.env.DISCORD_CALLBACK_URL ?? 'http://localhost:3000/api/auth/discord/callback',
     scopes: (process.env.DISCORD_SCOPES ?? 'identify email guilds').split(' ').filter(Boolean),
     guildId: process.env.DISCORD_GUILD_ID ?? '',
+    // Default the mock ON only when no real client id is configured, so a fresh
+    // `docker compose up` works with zero Discord setup; an explicit
+    // DISCORD_MOCK always wins.
+    mock: toBool(process.env.DISCORD_MOCK, !process.env.DISCORD_CLIENT_ID),
+    mockDefaultPersona: process.env.DISCORD_MOCK_DEFAULT_PERSONA ?? 'owner',
   },
   frontend: {
     url: process.env.FRONTEND_URL ?? 'http://localhost:4200',
