@@ -85,24 +85,32 @@ export class RealDiscordGateway
   }
 
   async getStatus(): Promise<DiscordGatewayStatus> {
-    if (!this.ready || !this.client) {
-      return {
-        connected: false,
-        botVersion: null,
-        totalRoles: null,
-        botRolePosition: null,
-        membersVisible: null,
-      };
-    }
-    const guild = await this.resolveGuild();
-    const botPosition = guild.members.me?.roles.highest.position ?? null;
-    return {
-      connected: true,
+    const disconnected: DiscordGatewayStatus = {
+      connected: false,
       botVersion: null,
-      totalRoles: guild.roles.cache.size,
-      botRolePosition: botPosition,
-      membersVisible: guild.memberCount,
+      totalRoles: null,
+      botRolePosition: null,
+      membersVisible: null,
     };
+    if (!this.ready || !this.client) {
+      return disconnected;
+    }
+    try {
+      const guild = await this.resolveGuild();
+      const botPosition = guild.members.me?.roles.highest.position ?? null;
+      return {
+        connected: true,
+        botVersion: null,
+        totalRoles: guild.roles.cache.size,
+        botRolePosition: botPosition,
+        membersVisible: guild.memberCount,
+      };
+    } catch (error) {
+      // getStatus is a health probe — it must never throw (e.g. no guild id or a
+      // transient fetch error would otherwise break /discord/connection + verify).
+      this.logger.error(`getStatus failed: ${(error as Error).message}`);
+      return disconnected;
+    }
   }
 
   async listRoles(): Promise<DiscordRole[]> {

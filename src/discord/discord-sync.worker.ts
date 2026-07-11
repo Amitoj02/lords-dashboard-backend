@@ -11,9 +11,17 @@ import {
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { BotOperation } from './entities/bot-operation.entity';
+import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
 import { DiscordSyncJob } from './entities/discord-sync-job.entity';
 import { DiscordGateway } from './gateway/discord-gateway';
+
+/** Job types whose side effect is safe to re-run after an orphaned restart. */
+const IDEMPOTENT_JOB_TYPES = new Set<string>([
+  DiscordSyncJobType.RoleAssign,
+  DiscordSyncJobType.RoleRemove,
+  DiscordSyncJobType.RoleSync,
+]);
 
 /** How many jobs to drain per tick (keeps well under Discord's rate limits). */
 const BATCH_SIZE = 20;
@@ -46,11 +54,15 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     private readonly members: Repository<Member>,
     @InjectRepository(Rank)
     private readonly ranks: Repository<Rank>,
+    @InjectRepository(DiscordBotSettings)
+    private readonly settings: Repository<DiscordBotSettings>,
     private readonly gateway: DiscordGateway,
     private readonly audit: AuditService,
   ) {}
 
   onModuleInit(): void {
+    // Recover any jobs left mid-flight by a previous process before draining.
+    void this.reapOrphanedJobs();
     this.timer = setInterval(() => void this.drain(), TICK_MS);
     // Do not keep the event loop alive for the worker (clean test/CLI exit).
     this.timer.unref();
@@ -90,15 +102,28 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     job.status = DiscordSyncJobStatus.Processing;
     await this.jobs.save(job);
 
+    // ONLY the side effect is wrapped in the retry try. A failure here means the
+    // Discord action did not complete, so retrying is safe.
     try {
       await this.dispatch(job);
-      job.status = DiscordSyncJobStatus.Succeeded;
-      job.processedAt = new Date();
-      job.lastError = null;
+    } catch (error) {
+      await this.handleFailure(job, error as Error);
+      return;
+    }
+
+    // The side effect succeeded. Post-success bookkeeping must NEVER re-open the
+    // job — otherwise a transient DB error here would re-run a non-idempotent
+    // action (a second kick / a duplicate announcement).
+    job.status = DiscordSyncJobStatus.Succeeded;
+    job.processedAt = new Date();
+    job.lastError = null;
+    try {
       await this.jobs.save(job);
       await this.recordOperation(job, true, false);
     } catch (error) {
-      await this.handleFailure(job, error as Error);
+      this.logger.error(
+        `Job ${job.id} succeeded but bookkeeping failed: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -115,7 +140,18 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       case DiscordSyncJobType.RoleSync:
         await this.reconcileRoles(job.regimentId, String(p.memberId), String(p.discordUserId));
         return;
-      case DiscordSyncJobType.MemberKick:
+      case DiscordSyncJobType.MemberKick: {
+        // ⚠️ SENSITIVE: re-check the gate at EXECUTION time. A kick can sit in the
+        // queue (or in retry backoff) after being enqueued; if the owner turned
+        // off kickOnBan or disabled the bot in the meantime, do NOT kick. This is
+        // the last line of defence for the owner's "re-check every time" request.
+        const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
+        if (!settings?.botEnabled || !settings?.kickOnBan) {
+          this.logger.warn(
+            `Skipping queued kick for ${String(p.discordUserId)}: kickOnBan/botEnabled disabled since enqueue`,
+          );
+          return;
+        }
         await this.gateway.kickMember(String(p.discordUserId), p.reason ?? undefined);
         await this.audit.record({
           regimentId: job.regimentId,
@@ -124,6 +160,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
           detail: `Kicked ${String(p.discordUserId)} from Discord`,
         });
         return;
+      }
       case DiscordSyncJobType.Announce:
         await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
         return;
@@ -186,6 +223,39 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       ),
     });
     this.logger.error(`Job ${job.id} failed terminally: ${error.message}`);
+  }
+
+  /**
+   * On startup, recover jobs a previous process left in `processing` (it died
+   * mid-flight). Single-instance, so ANY `processing` row on boot is orphaned.
+   * Idempotent job types are safely re-queued; non-idempotent ones (kick/
+   * announce/welcome) are NOT auto-retried — we cannot know whether the side
+   * effect already fired — and are surfaced as resolvable operations instead.
+   */
+  private async reapOrphanedJobs(): Promise<void> {
+    try {
+      const orphaned = await this.jobs.find({
+        where: { status: DiscordSyncJobStatus.Processing },
+      });
+      if (orphaned.length === 0) return;
+      for (const job of orphaned) {
+        if (IDEMPOTENT_JOB_TYPES.has(job.jobType)) {
+          job.status = DiscordSyncJobStatus.Pending;
+          job.scheduledAt = new Date();
+          await this.jobs.save(job);
+        } else {
+          job.status = DiscordSyncJobStatus.Failed;
+          job.processedAt = new Date();
+          job.lastError =
+            'Orphaned in-flight (process restarted); not auto-retried (non-idempotent)';
+          await this.jobs.save(job);
+          await this.recordOperation(job, false, true);
+        }
+      }
+      this.logger.warn(`Reaped ${orphaned.length} orphaned in-flight sync job(s) on startup`);
+    } catch (error) {
+      this.logger.error(`Orphaned-job reaper failed: ${(error as Error).message}`);
+    }
   }
 
   private async recordOperation(
