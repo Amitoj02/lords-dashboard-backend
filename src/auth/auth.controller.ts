@@ -23,11 +23,17 @@ export class AuthController {
 
   @Public()
   @Get('discord')
-  @ApiOperation({ summary: 'Begin Discord OAuth2 sign-in (302 redirect to Discord)' })
-  discordLogin(@Res() res: Response): void {
+  @ApiOperation({
+    summary: 'Begin Discord OAuth2 sign-in (302 redirect to Discord)',
+    description:
+      'When the Discord mock is active, the optional `as` query selects which ' +
+      'canned persona to sign in as (e.g. `owner`, `recruit`, or any label). ' +
+      'Ignored by the real Discord flow.',
+  })
+  discordLogin(@Query('as') persona: string | undefined, @Res() res: Response): void {
     const state = randomBytes(16).toString('hex');
     res.cookie(STATE_COOKIE, state, this.cookieOptions(10 * 60 * 1000));
-    res.redirect(this.authService.getLoginUrl(state));
+    res.redirect(this.authService.getLoginUrl(state, persona));
   }
 
   @Public()

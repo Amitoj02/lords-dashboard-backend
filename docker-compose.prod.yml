@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# PROD overlay — built images, no bind mounts, restart policies, TLS-terminating
+# nginx web that also reverse-proxies /api to the api container (same origin).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Secrets come from the host environment (a root .env or the shell), NEVER from
+# the committed dev defaults. Required in prod: DB_PASSWORD, JWT_SECRET,
+# ENCRYPTION_KEY (64 hex), DISCORD_CLIENT_ID/SECRET, DISCORD_MOCK=false,
+# WEB_ORIGIN=https://your.domain. See project-plan/DEPLOY.md.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  db:
+    restart: unless-stopped
+    # No host port is published in prod: the dev override (which maps 3307) is
+    # not loaded for prod, so only the compose network reaches MySQL.
+
+  # One-shot: apply migrations + seed using the compiled JS (no ts-node), then
+  # exit. The api waits for this to complete successfully before starting.
+  migrate:
+    build:
+      context: .
+      target: prod
+    # Retry the (idempotent) migrate + seed until the db accepts connections —
+    # covers any residual TCP-readiness race after the healthcheck.
+    command: >-
+      sh -c "for i in $$(seq 1 15); do
+        npm run migration:run:prod && npm run seed:prod && exit 0;
+        echo \"migrate: db not ready, retry $$i/15...\"; sleep 3;
+      done; echo 'migrate: giving up'; exit 1"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      DB_DATABASE: ${DB_DATABASE:-lords_dashboard}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set a 64-hex ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      # Provision a real Owner on first boot from the configured Discord id.
+      OWNER_DISCORD_ID: ${OWNER_DISCORD_ID:-}
+      OWNER_NAME: ${OWNER_NAME:-Regiment Owner}
+    restart: 'no'
+    networks: [lords]
+
+  api:
+    build:
+      target: prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set a 64-hex ENCRYPTION_KEY}
+      DISCORD_MOCK: ${DISCORD_MOCK:-false}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID or DISCORD_MOCK=true}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN e.g. https://lordsofholdfast.com}
+      CORS_ORIGINS: ${WEB_ORIGIN}
+      FRONTEND_URL: ${WEB_ORIGIN}
+      DISCORD_CALLBACK_URL: ${WEB_ORIGIN}/api/auth/discord/callback
+      FRONTEND_AUTH_SUCCESS_REDIRECT: ${WEB_ORIGIN}/auth/callback
+      FRONTEND_AUTH_FAILURE_REDIRECT: ${WEB_ORIGIN}/login
+
+  web:
+    build:
+      target: prod
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '${WEB_HTTP_PORT:-8080}:80'

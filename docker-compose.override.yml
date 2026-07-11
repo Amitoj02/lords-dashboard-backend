@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEV override — auto-merged by `docker compose up`. Source is bind-mounted for
+# hot reload; node_modules stay in anonymous volumes so the host OS/arch build
+# from the image is preserved. All tooling runs via `docker compose exec`:
+#   docker compose exec api npm test
+#   docker compose exec api npm run db:setup     (first run: create + migrate + seed)
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  db:
+    ports:
+      - '${DB_HOST_PORT:-3307}:3306' # host tools can reach MySQL at 127.0.0.1:3307
+
+  api:
+    build:
+      target: dev
+    command: npm run start:dev
+    environment:
+      NODE_ENV: development
+      DB_LOGGING: 'false'
+    volumes:
+      # `:z` relabels for SELinux (Fedora/RHEL) — harmless on other hosts.
+      - .:/app:z
+      - /app/node_modules # anonymous volume: keep the image's node_modules
+    ports:
+      - '${API_HOST_PORT:-3000}:3000'
+
+  web:
+    build:
+      target: dev
+    # ng serve, bound to all interfaces, proxying /api to the api service.
+    command: npm start -- --host 0.0.0.0 --disable-host-check --poll 1000 --proxy-config proxy.conf.docker.json
+    volumes:
+      - ../lords-regiment-dashboard:/app:z
+      - /app/node_modules
+    ports:
+      - '${WEB_HOST_PORT:-4200}:4200'
+    depends_on:
+      - api

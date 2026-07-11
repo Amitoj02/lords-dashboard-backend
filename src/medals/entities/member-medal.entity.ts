@@ -10,9 +10,15 @@ import {
 import { Member } from '../../members/entities/member.entity';
 import { Medal } from './medal.entity';
 
-/** Junction: a medal awarded to a member, with per-award metadata. */
+/**
+ * Junction: a medal awarded to a member, with per-award metadata. A medal may be
+ * awarded to the same member MORE THAN ONCE (owner decision) — the frontend shows
+ * how many times each medal was earned — so (member_id, medal_id) is a plain,
+ * non-unique index (for fast per-member lookups), not a unique constraint. Each
+ * award is its own row with its own awardedAt/awardedByMemberId/detail.
+ */
 @Entity('member_medals')
-@Index(['memberId', 'medalId'], { unique: true })
+@Index(['memberId', 'medalId'])
 export class MemberMedal {
   @PrimaryGeneratedColumn('uuid')
   id: string;

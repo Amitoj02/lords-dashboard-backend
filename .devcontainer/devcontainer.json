@@ -1,0 +1,27 @@
+{
+  "name": "Lords Dashboard API (api container)",
+  "dockerComposeFile": ["../docker-compose.yml", "../docker-compose.override.yml"],
+  "service": "api",
+  "workspaceFolder": "/app",
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [3000, 4200, 3307],
+  "portsAttributes": {
+    "3000": { "label": "API" },
+    "4200": { "label": "Web (ng serve)" },
+    "3307": { "label": "MySQL" }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "firsttris.vscode-jest-runner"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      }
+    }
+  },
+  "postCreateCommand": "node -v && npm -v"
+}

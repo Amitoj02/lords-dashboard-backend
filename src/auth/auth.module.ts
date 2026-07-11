@@ -10,6 +10,7 @@ import { Regiment } from '../regiments/entities/regiment.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { DiscordOAuthService } from './discord-oauth.service';
+import { MockDiscordOAuthService } from './mock-discord-oauth.service';
 import { DiscordIdentity } from './entities/discord-identity.entity';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
@@ -34,7 +35,17 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   controllers: [AuthController],
   providers: [
     AuthService,
-    DiscordOAuthService,
+    // Swap the real Discord OAuth client for the in-process mock when
+    // `discord.mock` is set. AuthService depends on DiscordOAuthService by
+    // class token, so nothing downstream knows which implementation it got.
+    {
+      provide: DiscordOAuthService,
+      useFactory: (config: ConfigService<AppConfig, true>) =>
+        config.get('discord', { infer: true }).mock
+          ? new MockDiscordOAuthService(config)
+          : new DiscordOAuthService(config),
+      inject: [ConfigService],
+    },
     JwtStrategy,
     // Protect every route by default; @Public() opts out.
     { provide: APP_GUARD, useClass: JwtAuthGuard },

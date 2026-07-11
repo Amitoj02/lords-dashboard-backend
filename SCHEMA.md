@@ -1,6 +1,6 @@
 # Lords Dashboard — Database Schema
 
-MySQL 8 (XAMPP, `localhost:3306`), database **`lords_dashboard`**, charset `utf8mb4` / collation
+MySQL 8 (the Docker Compose `db` service), database **`lords_dashboard`**, charset `utf8mb4` / collation
 `utf8mb4_unicode_ci`. ORM: **TypeORM 0.3** with the `SnakeNamingStrategy` (entity properties are
 camelCase in code, columns/tables are `snake_case` in MySQL). Schema is owned exclusively by
 **migrations** — `synchronize` is permanently off.

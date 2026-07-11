@@ -1,8 +1,7 @@
 import 'reflect-metadata';
-import { join } from 'path';
 import { config as loadEnv } from 'dotenv';
-import { runSeeders } from 'typeorm-extension';
 import dataSource from '../data-source';
+import MainSeeder from '../seeds/main.seeder';
 
 loadEnv();
 
@@ -11,19 +10,18 @@ loadEnv();
  * Seeders are designed to be idempotent (upsert by natural key) so this can be
  * re-run safely against an existing database.
  *
+ * MainSeeder is invoked directly rather than through typeorm-extension's
+ * glob-based `runSeeders`, whose dynamic `import()` loader fails on `.ts`
+ * seeders under ts-node/CommonJS ("Cannot use import statement outside a
+ * module"). Direct invocation also keeps this runnable from compiled JS in the
+ * slim production image (no ts-node), which the containerized deploy relies on.
+ *
  *   npm run seed
  */
 async function seed(): Promise<void> {
   await dataSource.initialize();
   try {
-    // typeorm-extension's glob matcher needs forward slashes — normalize so it
-    // works on Windows (path.join yields backslashes that match nothing).
-    const toGlob = (...parts: string[]) => join(...parts).replace(/\\/g, '/');
-    await runSeeders(dataSource, {
-      seeds: [toGlob(__dirname, '..', 'seeds', '*.seeder.{ts,js}')],
-      factories: [toGlob(__dirname, '..', 'factories', '*.factory.{ts,js}')],
-    });
-
+    await new MainSeeder().run(dataSource);
     console.log('✓ Seeding complete');
   } finally {
     await dataSource.destroy();

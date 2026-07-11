@@ -1,0 +1,87 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Unified stack for the Lords Regiment Dashboard: api (this repo) + db (MySQL 8)
+# + web (the Angular frontend, built from the sibling ../lords-regiment-dashboard).
+#
+#   docker compose up                      → DEV (auto-merges docker-compose.override.yml):
+#                                            hot-reload api + `ng serve` web, host ports.
+#   docker compose -f docker-compose.yml \
+#                  -f docker-compose.prod.yml up -d   → PROD: built images, nginx web,
+#                                            one-shot migrate/seed, restart policies.
+#
+# Zero-config: the dev secrets below are throwaway and Joi-valid, so a fresh
+# `docker compose up` boots with no hand-editing. PROD secrets are injected via
+# the host environment in docker-compose.prod.yml — never use these in prod.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-devpassword}
+      MYSQL_DATABASE: ${DB_DATABASE:-lords_dashboard}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      # Use 127.0.0.1 (TCP), NOT localhost (unix socket): the app connects over
+      # TCP, and the socket accepts pings before the TCP listener is ready — so a
+      # socket healthcheck can go "healthy" while migrate still gets ECONNREFUSED.
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-p${DB_PASSWORD:-devpassword}']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks: [lords]
+
+  api:
+    build:
+      context: .
+      target: prod
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      API_PREFIX: api
+      DB_HOST: db
+      DB_PORT: '3306'
+      DB_USERNAME: root
+      DB_PASSWORD: ${DB_PASSWORD:-devpassword}
+      DB_DATABASE: ${DB_DATABASE:-lords_dashboard}
+      # Throwaway, Joi-valid DEV secrets so `docker compose up` needs no editing.
+      # PROD overrides all of these via the host environment (docker-compose.prod.yml).
+      JWT_SECRET: ${JWT_SECRET:-dev-only-throwaway-jwt-secret-change-me}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-6465760000000000000000000000000000000000000000000000000000000000}
+      # Same-origin proxied topology: the browser always talks to the web origin,
+      # which proxies /api to this service — so OAuth + redirects use that origin.
+      CORS_ORIGINS: ${WEB_ORIGIN:-http://localhost:4200}
+      FRONTEND_URL: ${WEB_ORIGIN:-http://localhost:4200}
+      DISCORD_CALLBACK_URL: ${WEB_ORIGIN:-http://localhost:4200}/api/auth/discord/callback
+      FRONTEND_AUTH_SUCCESS_REDIRECT: ${WEB_ORIGIN:-http://localhost:4200}/auth/callback
+      FRONTEND_AUTH_FAILURE_REDIRECT: ${WEB_ORIGIN:-http://localhost:4200}/login
+      # Discord is mocked until real credentials are provided (see .env.example).
+      DISCORD_MOCK: ${DISCORD_MOCK:-true}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+    healthcheck:
+      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/api/health']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [lords]
+
+  web:
+    build:
+      context: ../lords-regiment-dashboard
+      target: prod
+    depends_on:
+      - api
+    networks: [lords]
+
+volumes:
+  db-data:
+
+networks:
+  lords:
+    driver: bridge
