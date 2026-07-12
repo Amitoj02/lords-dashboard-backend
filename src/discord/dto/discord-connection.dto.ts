@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { BotConnectionStatus } from '../../common/enums';
 import { BotOperation } from '../entities/bot-operation.entity';
 import { DiscordConnection } from '../entities/discord-connection.entity';
-import { DiscordGatewayStatus } from '../gateway/discord-gateway';
+import { DiscordChannel, DiscordGatewayStatus, DiscordRole } from '../gateway/discord-gateway';
 
 /** Live bot connection + authority snapshot for the wizard / bot-status screen. */
 export class DiscordConnectionDto {
@@ -30,6 +30,42 @@ export class DiscordConnectionDto {
         ? connection.lastHeartbeatAt.toISOString()
         : null,
       lastFullSyncAt: connection?.lastFullSyncAt ? connection.lastFullSyncAt.toISOString() : null,
+    };
+  }
+}
+
+/** A guild role, for the role pickers (join role, Ban role). */
+export class DiscordRoleDto {
+  @ApiProperty() id: string;
+  @ApiProperty() name: string;
+  @ApiProperty() position: number;
+}
+
+/** A guild text channel, for the channel pickers (announcements, routing). */
+export class DiscordChannelDto {
+  @ApiProperty() id: string;
+  @ApiProperty() name: string;
+}
+
+/**
+ * verify-connection response: the connection snapshot plus the guild's roles and
+ * text channels, so the Settings pickers (join/Ban roles, routed channels) can
+ * populate from one call. Roles/channels are empty when the bot is disconnected.
+ */
+export class DiscordVerifyConnectionDto extends DiscordConnectionDto {
+  @ApiProperty({ type: [DiscordRoleDto] }) roles: DiscordRoleDto[];
+  @ApiProperty({ type: [DiscordChannelDto] }) channels: DiscordChannelDto[];
+
+  static fromStatus(
+    status: DiscordGatewayStatus,
+    connection: DiscordConnection | null,
+    roles: DiscordRole[],
+    channels: DiscordChannel[],
+  ): DiscordVerifyConnectionDto {
+    return {
+      ...DiscordConnectionDto.from(status, connection),
+      roles: roles.map((r) => ({ id: r.id, name: r.name, position: r.position })),
+      channels: channels.map((c) => ({ id: c.id, name: c.name })),
     };
   }
 }

@@ -19,7 +19,11 @@ import { RequireCapability } from '../authz/decorators/require-capability.decora
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { Capability } from '../common/enums';
 import { DiscordService } from './discord.service';
-import { BotOperationDto, DiscordConnectionDto } from './dto/discord-connection.dto';
+import {
+  BotOperationDto,
+  DiscordConnectionDto,
+  DiscordVerifyConnectionDto,
+} from './dto/discord-connection.dto';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
 import {
   AnnounceDto,
@@ -51,12 +55,14 @@ export class DiscordController {
   @Post('verify-connection')
   @HttpCode(HttpStatus.OK)
   @RequireCapability(Capability.ManageSettings)
-  @ApiOperation({ summary: 'Run a live connection check and persist the snapshot' })
-  @ApiOkResponse({ type: DiscordConnectionDto })
+  @ApiOperation({
+    summary: 'Run a live connection check; returns the snapshot + guild roles/channels',
+  })
+  @ApiOkResponse({ type: DiscordVerifyConnectionDto })
   verifyConnection(
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
-  ): Promise<DiscordConnectionDto> {
+  ): Promise<DiscordVerifyConnectionDto> {
     return this.discordService.verifyConnection(user, req.ip ?? null);
   }
 
@@ -70,7 +76,7 @@ export class DiscordController {
 
   @Patch('settings')
   @RequireCapability(Capability.ManageSettings)
-  @ApiOperation({ summary: 'Update the bot configuration (kickOnBan is sensitive)' })
+  @ApiOperation({ summary: 'Update the bot configuration (applyBanRoleOnBan is sensitive)' })
   @ApiOkResponse({ type: DiscordBotSettingsDto })
   updateSettings(
     @Body() dto: UpdateDiscordSettingsDto,

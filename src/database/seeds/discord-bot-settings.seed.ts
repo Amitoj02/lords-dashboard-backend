@@ -4,9 +4,9 @@ import { ensure, REGIMENT_ID } from './seed.util';
 
 /**
  * A default, DORMANT Discord bot config for the seeded regiment: the bot is
- * disabled (nothing is enqueued) and the sensitive kick-on-ban is off. An admin
- * turns the bot on and wires channels/roles from the Settings UI once real
- * credentials exist.
+ * disabled (nothing is enqueued) and the sensitive apply-Ban-role-on-ban is off.
+ * An admin turns the bot on and wires channels/roles from the Settings UI once
+ * real credentials exist.
  */
 export async function seedDiscordBotSettings(ds: DataSource): Promise<void> {
   await ensure(
@@ -17,7 +17,7 @@ export async function seedDiscordBotSettings(ds: DataSource): Promise<void> {
       joinRoleName: 'Guest',
       welcomeMessage: 'Welcome to the Lords Regiment! An officer will be with you shortly.',
       syncRolesOnChange: true,
-      kickOnBan: false,
+      applyBanRoleOnBan: false,
     },
   );
 }

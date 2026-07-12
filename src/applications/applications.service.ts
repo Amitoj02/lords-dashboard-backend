@@ -7,9 +7,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { ApplicantType, ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
+import { ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -21,17 +23,13 @@ import { DeclineApplicationDto } from './dto/decline-application.dto';
 import { HoldApplicationDto } from './dto/hold-application.dto';
 import { Application } from './entities/application.entity';
 
-/** The rank name new members are placed at, keyed by applicant type. */
-const ENTRY_RANK_NAME: Record<ApplicantType, string> = {
-  [ApplicantType.Mercenary]: 'Mercenary',
-  [ApplicantType.Applicant]: 'Recruit',
-};
-
-/** The member role assigned on approval, keyed by applicant type. */
-const ENTRY_ROLE: Record<ApplicantType, MemberRole> = {
-  [ApplicantType.Mercenary]: MemberRole.Mercenary,
-  [ApplicantType.Applicant]: MemberRole.Member,
-};
+/**
+ * Every approved applicant enlists as a Member at the entry rank. The old
+ * Applicant/Mercenary split was retired with the enlistment-form reshape
+ * (T-0039); the form no longer collects an applicant type.
+ */
+const ENTRY_RANK_NAME = 'Recruit';
+const ENTRY_ROLE = MemberRole.Member;
 
 /**
  * Recruitment applications: applicant self-submit + the staff review queue
@@ -47,6 +45,12 @@ export class ApplicationsService {
     private readonly settings: Repository<RegimentSettings>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    // Drops the applicant's cached authorization context on approval so they
+    // gain Member capabilities on their very next request (T-0046).
+    private readonly sessionContext: SessionContextService,
+    // Best-effort: cross-post new enlistments to the enlistments channel (T-0042).
+    // Never fails intake — a disabled bot or enqueue error silently no-ops.
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   /**
@@ -78,21 +82,31 @@ export class ApplicationsService {
       discordIdentityId: user.identityId,
       applicantName: dto.applicantName,
       inGameName: dto.inGameName,
-      platform: dto.platform,
-      applicantType: dto.applicantType ?? ApplicantType.Applicant,
       discordTag: dto.discordTag ?? null,
-      timezone: dto.timezone ?? null,
-      whyJoin: dto.whyJoin,
+      currentRegiment: dto.currentRegiment,
       howFound: dto.howFound,
-      priorExperience: dto.priorExperience ?? null,
-      ageConfirmed: dto.ageConfirmed,
-      ageConfirmedAt: now,
+      preferredClasses: dto.preferredClasses,
+      skillsToImprove: dto.skillsToImprove,
+      interestConfirmed: dto.interestConfirmed,
+      representativeNote: dto.representativeNote ?? null,
       status: ApplicationStatus.Pending,
       isReapplication: priors.length > 0,
       isDraft: false,
       submittedAt: now,
     });
     const saved = await this.applications.save(application);
+
+    // Best-effort cross-post to the enlistments channel (never throws / no-ops
+    // when the bot is disabled or no enlistments channel is configured).
+    await this.discordSync.enqueueApplicationSubmitted(user.regimentId, {
+      applicantName: saved.applicantName,
+      inGameName: saved.inGameName,
+      currentRegiment: saved.currentRegiment,
+      howFound: saved.howFound,
+      preferredClasses: saved.preferredClasses,
+      skillsToImprove: saved.skillsToImprove,
+      representativeNote: saved.representativeNote,
+    });
 
     // TODO(audit): no `application.submit` action code exists in the seed; the
     // submit is an applicant self-action, so it is intentionally not audited.
@@ -146,8 +160,8 @@ export class ApplicationsService {
       const memberRepo = manager.getRepository(Member);
       const applicationRepo = manager.getRepository(Application);
 
-      const rankName = ENTRY_RANK_NAME[application.applicantType];
-      const role = ENTRY_ROLE[application.applicantType];
+      const rankName = ENTRY_RANK_NAME;
+      const role = ENTRY_ROLE;
       const rank = await rankRepo.findOneOrFail({
         where: { regimentId: user.regimentId, name: rankName },
       });
@@ -161,8 +175,6 @@ export class ApplicationsService {
         inGameName: application.inGameName,
         role,
         status: MemberStatus.Active,
-        platform: application.platform,
-        timezone: application.timezone,
         discordLinked: !!application.discordIdentityId,
         joinedAt: now,
         lastSeenAt: now,
@@ -201,8 +213,12 @@ export class ApplicationsService {
         memberId: member.id,
         label: savedApplication.applicantName,
       },
-      detail: `Approved application; promoted to ${member.role} (${ENTRY_RANK_NAME[application.applicantType]}).`,
+      detail: `Approved application; promoted to ${member.role} (${ENTRY_RANK_NAME}).`,
     });
+
+    // The applicant is now a member: drop their cached (Applicant) context so
+    // the promotion is reflected on their next request with the same token.
+    this.sessionContext.invalidate(application.discordIdentityId);
 
     return ApplicationDto.from(savedApplication);
   }

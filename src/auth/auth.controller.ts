@@ -81,8 +81,14 @@ export class AuthController {
   @Post('logout')
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Clear the session cookie' })
-  logout(@Res({ passthrough: true }) res: Response): { success: boolean } {
+  @ApiOperation({ summary: 'Clear the session cookie and invalidate outstanding tokens' })
+  async logout(
+    @CurrentUser() user: AuthenticatedUser,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<{ success: boolean }> {
+    // Advance the identity's session cutoff so this token (and any concurrent
+    // ones) are rejected on their next use, not just cleared from this browser.
+    await this.authService.logout(user);
     res.clearCookie(TOKEN_COOKIE);
     return { success: true };
   }

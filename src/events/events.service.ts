@@ -10,6 +10,7 @@ import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { EventStatus, Platform, RsvpStatus } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { AttendeeDto } from './dto/attendee.dto';
@@ -73,6 +74,9 @@ export class EventsService {
     private readonly dataSource: DataSource,
     // AuditService is global; used by every mutation below.
     private readonly audit: AuditService,
+    // Best-effort: announce a newly published event to the event-announcements
+    // channel (T-0044). No-ops when the bot is off or no channel is set.
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   // ── Public reads (no authenticated caller) ───────────────────────────────────
@@ -170,6 +174,16 @@ export class EventsService {
       target: { type: 'event', id: saved.id, label: saved.title },
       after: this.snapshot(saved),
     });
+
+    // Best-effort: announce a published (non-draft) event to the dedicated
+    // event-announcements channel (T-0044). Drafts are never announced.
+    if (!saved.isDraft) {
+      const desc = saved.description ? `\n${saved.description}` : '';
+      await this.discordSync.enqueueEventAnnounce(
+        user.regimentId,
+        `📅 **New event: ${saved.title}**${desc}\nStarts: ${saved.startsAt.toISOString()}`,
+      );
+    }
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
   }

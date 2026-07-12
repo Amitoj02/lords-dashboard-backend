@@ -7,10 +7,10 @@ import { AppConfig } from '../config/configuration';
 import { MemberRole } from '../common/enums';
 import { AuthzService } from '../authz/authz.service';
 import { Member } from '../members/entities/member.entity';
-import { Regiment } from '../regiments/entities/regiment.entity';
 import { CurrentUserDto } from './dto/current-user.dto';
 import { DiscordOAuthService } from './discord-oauth.service';
 import { DiscordIdentity } from './entities/discord-identity.entity';
+import { SessionContextService } from './session-context.service';
 import { AuthenticatedUser } from './types/authenticated-user.interface';
 import { JwtPayload } from './types/jwt-payload.interface';
 
@@ -23,19 +23,16 @@ export interface SignInResult {
 
 @Injectable()
 export class AuthService {
-  private defaultRegimentId: string | null = null;
-
   constructor(
     @InjectRepository(DiscordIdentity)
     private readonly identities: Repository<DiscordIdentity>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
-    @InjectRepository(Regiment)
-    private readonly regiments: Repository<Regiment>,
     private readonly discordOAuth: DiscordOAuthService,
     private readonly jwt: JwtService,
     private readonly config: ConfigService<AppConfig, true>,
     private readonly authz: AuthzService,
+    private readonly sessionContext: SessionContextService,
   ) {}
 
   /**
@@ -66,14 +63,37 @@ export class AuthService {
       where: { discordIdentityId: identity.id },
       relations: { rank: true },
     });
+    // A ban/suspend must not be defeatable by re-authenticating: refuse to mint a
+    // token for a banned member or one under an active suspension (the resolver
+    // also rejects such tokens per request as defence in depth).
+    if (member && (member.bannedAt || this.isActivelySuspended(member))) {
+      throw new UnauthorizedException('This account is banned or suspended');
+    }
     if (member) {
       member.lastSeenAt = new Date();
       member.discordLinked = true;
       await this.members.save(member);
     }
 
-    const jwtToken = await this.issueToken(identity, member);
+    // A fresh sign-in may have just linked a member to this identity; drop any
+    // cached context so the resolver re-reads the live role on the next request.
+    this.sessionContext.invalidate(identity.id);
+
+    const jwtToken = await this.issueToken(identity);
     return { token: jwtToken, identity, member, isMember: member !== null };
+  }
+
+  /**
+   * Invalidate the caller's outstanding tokens on logout (T-0048): advance the
+   * identity's session cutoff so this and any concurrent tokens are rejected.
+   */
+  async logout(user: AuthenticatedUser): Promise<void> {
+    await this.sessionContext.invalidateSessions(user.identityId);
+  }
+
+  /** True when a member is currently within an active suspension window. */
+  private isActivelySuspended(member: Member): boolean {
+    return !!member.suspendedUntil && member.suspendedUntil.getTime() > Date.now();
   }
 
   /** Create or update the Discord identity keyed by the stable snowflake. */
@@ -109,14 +129,16 @@ export class AuthService {
     return this.identities.save(identity);
   }
 
-  /** Sign a JWT for the session. */
-  async issueToken(identity: DiscordIdentity, member: Member | null): Promise<string> {
+  /**
+   * Sign a JWT for the session. The payload is deliberately slim (T-0047): only
+   * stable identity claims (`sub`, `did`). Role/regiment/member are resolved
+   * fresh from the DB per request by {@link SessionContextService}, so they can
+   * never go stale in the token.
+   */
+  async issueToken(identity: DiscordIdentity): Promise<string> {
     const payload: JwtPayload = {
       sub: identity.id,
-      mid: member?.id ?? null,
       did: identity.discordUserId,
-      role: member?.role ?? MemberRole.Applicant,
-      rid: member?.regimentId ?? (await this.getDefaultRegimentId()),
     };
     return this.jwt.signAsync(payload);
   }
@@ -183,19 +205,5 @@ export class AuthService {
       // Filled in by getCurrentUser from the role_permissions matrix.
       capabilities: [],
     };
-  }
-
-  /** Resolve (and cache) the single regiment's id for identity-only sessions. */
-  private async getDefaultRegimentId(): Promise<string> {
-    if (this.defaultRegimentId) return this.defaultRegimentId;
-    const regiment = await this.regiments.findOne({
-      where: {},
-      order: { createdAt: 'ASC' },
-    });
-    if (!regiment) {
-      throw new UnauthorizedException('No regiment configured');
-    }
-    this.defaultRegimentId = regiment.id;
-    return regiment.id;
   }
 }

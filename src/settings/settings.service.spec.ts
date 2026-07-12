@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
 import { RolePermission } from '../authz/entities/role-permission.entity';
@@ -85,6 +86,7 @@ describe('SettingsService', () => {
   const memberRepo = { findOne: jest.fn() };
   const authz = { invalidate: jest.fn() };
   const audit = { record: jest.fn() };
+  const sessionContext = { invalidate: jest.fn() };
   const dataSource = { transaction: jest.fn() };
 
   beforeEach(async () => {
@@ -106,6 +108,7 @@ describe('SettingsService', () => {
         { provide: getRepositoryToken(Member), useValue: memberRepo },
         { provide: AuthzService, useValue: authz },
         { provide: AuditService, useValue: audit },
+        { provide: SessionContextService, useValue: sessionContext },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();

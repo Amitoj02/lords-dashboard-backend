@@ -1,9 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { AuditActorType, AuditSeverity } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuditQueryDto } from './dto/audit-query.dto';
 import { AuditLogEntryDto } from './dto/audit-log-entry.dto';
 import { AuditAction } from './entities/audit-action.entity';
@@ -57,6 +59,9 @@ export class AuditService {
     private readonly entries: Repository<AuditLogEntry>,
     @InjectRepository(AuditAction)
     private readonly actions: Repository<AuditAction>,
+    // Resolved lazily (via ModuleRef) to mirror entries to Discord without a DI
+    // cycle — AuditModule is @Global and DiscordModule depends on it (T-0043).
+    private readonly moduleRef: ModuleRef,
   ) {}
 
   /** Build an actor descriptor from the authenticated request user. */
@@ -99,9 +104,45 @@ export class AuditService {
         anonymisedAt: null,
       });
       await this.entries.save(entry);
+      // Best-effort mirror to the audit-log Discord channel (fire-and-forget so
+      // it can never slow or fail the audited mutation).
+      this.mirrorToDiscord(
+        input.regimentId,
+        input.action,
+        actor.label ?? null,
+        severity,
+        input.detail ?? null,
+      );
     } catch (error) {
       this.logger.error(`Failed to record audit '${input.action}': ${(error as Error).message}`);
     }
+  }
+
+  /**
+   * Cross-post an audit entry to the configured audit-log channel (T-0043).
+   * Fire-and-forget + best-effort; never awaited on the mutation path. The
+   * `discord.sync.failed` action is EXCLUDED to break a feedback loop: a failed
+   * mirror produces exactly that entry, which would otherwise re-enqueue forever.
+   */
+  private mirrorToDiscord(
+    regimentId: string,
+    action: string,
+    actorLabel: string | null,
+    severity: AuditSeverity,
+    detail: string | null,
+  ): void {
+    if (action === 'discord.sync.failed') return;
+    let sync: DiscordSyncService;
+    try {
+      sync = this.moduleRef.get(DiscordSyncService, { strict: false });
+    } catch {
+      return; // DiscordSyncService not available (e.g. narrow test module) — skip.
+    }
+    void sync
+      .enqueueAuditLog(regimentId, { action, actorLabel, detail, severity })
+      .catch((error: unknown) =>
+        this.logger.error(`Audit Discord mirror failed: ${(error as Error).message}`),
+      );
   }
 
   /** Paginated, filtered read of the ledger for a regiment (most recent first). */

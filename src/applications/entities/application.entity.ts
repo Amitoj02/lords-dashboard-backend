@@ -9,11 +9,18 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
-import { ApplicantType, ApplicationStatus, HowFound, Platform } from '../../common/enums';
+import { ApplicationStatus } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
-/** A recruitment application. Identity 1—* applications; *—0..1 member on approval. */
+/**
+ * A recruitment application, shaped to the regiment's live "Application for
+ * Enlistment" form (T-0039): in-game name, current regiment, how they found us
+ * (free text), preferred classes, skills to improve, an interest/enlist-in-game
+ * confirmation, and an optional representative/guest note. Identity 1—*
+ * applications; *—0..1 member on approval. Age is a client-side terms
+ * attestation only and is intentionally NOT stored here (T-0039 Q2).
+ */
 @Entity('applications')
 @Index(['regimentId', 'status'])
 export class Application {
@@ -58,29 +65,29 @@ export class Application {
   @Column({ type: 'varchar', length: 120 })
   inGameName: string;
 
-  @Column({ type: 'enum', enum: Platform })
-  platform: Platform;
+  /** The applicant's current/most-recent regiment (free text; "None" is common). */
+  @Column({ type: 'varchar', length: 255, default: '' })
+  currentRegiment: string;
 
-  @Column({ type: 'enum', enum: ApplicantType, default: ApplicantType.Applicant })
-  applicantType: ApplicantType;
+  /** Free-text "how did you find/hear about the Lords of Holdfast?" answer. */
+  @Column({ type: 'varchar', length: 500, default: '' })
+  howFound: string;
 
-  @Column({ type: 'varchar', length: 40, nullable: true })
-  timezone: string | null;
+  /** Classes the applicant prefers to play (free text / comma-joined). */
+  @Column({ type: 'varchar', length: 500, default: '' })
+  preferredClasses: string;
 
-  @Column({ type: 'text' })
-  whyJoin: string;
+  /** What the applicant wants to improve at. */
+  @Column({ type: 'varchar', length: 1000, default: '' })
+  skillsToImprove: string;
 
-  @Column({ type: 'enum', enum: HowFound })
-  howFound: HowFound;
-
-  @Column({ type: 'varchar', length: 600, nullable: true })
-  priorExperience: string | null;
-
+  /** Confirms interest + willingness to enlist in-game (required at intake). */
   @Column({ default: false })
-  ageConfirmed: boolean;
+  interestConfirmed: boolean;
 
-  @Column({ type: 'datetime', precision: 6, nullable: true })
-  ageConfirmedAt: Date | null;
+  /** Optional note when a representative/guest applies on someone's behalf. */
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  representativeNote: string | null;
 
   @Column({ type: 'enum', enum: ApplicationStatus, default: ApplicationStatus.Pending })
   status: ApplicationStatus;

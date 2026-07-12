@@ -5,6 +5,12 @@ export interface DiscordRole {
   position: number;
 }
 
+/** A Discord text channel the bot can post to (surfaced to the channel picker). */
+export interface DiscordChannel {
+  id: string;
+  name: string;
+}
+
 /** A guild member as the bot sees it (role snowflakes it currently holds). */
 export interface DiscordGuildMemberRef {
   id: string;
@@ -35,12 +41,12 @@ export type MemberJoinHandler = (discordUserId: string) => void | Promise<void>;
 export abstract class DiscordGateway {
   abstract getStatus(): Promise<DiscordGatewayStatus>;
   abstract listRoles(): Promise<DiscordRole[]>;
+  abstract listChannels(): Promise<DiscordChannel[]>;
   abstract assignRole(discordUserId: string, roleId: string): Promise<void>;
   abstract removeRole(discordUserId: string, roleId: string): Promise<void>;
   abstract sendChannelMessage(channelId: string, content: string): Promise<{ messageId: string }>;
   abstract sendDirectMessage(discordUserId: string, content: string): Promise<void>;
   abstract fetchMember(discordUserId: string): Promise<DiscordGuildMemberRef | null>;
-  abstract kickMember(discordUserId: string, reason?: string): Promise<void>;
 
   /** Register the onboarding handler fired on GuildMemberAdd (best-effort). */
   abstract registerMemberJoinHandler(handler: MemberJoinHandler): void;

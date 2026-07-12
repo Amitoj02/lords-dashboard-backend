@@ -9,6 +9,7 @@ import { Regiment } from '../regiments/entities/regiment.entity';
 import { AuthzService } from '../authz/authz.service';
 import { AuthService } from './auth.service';
 import { DiscordOAuthService } from './discord-oauth.service';
+import { SessionContextService } from './session-context.service';
 import { DiscordIdentity } from './entities/discord-identity.entity';
 import { AuthenticatedUser } from './types/authenticated-user.interface';
 import { JwtPayload } from './types/jwt-payload.interface';
@@ -47,12 +48,14 @@ describe('AuthService', () => {
   >;
   let jwt: { signAsync: jest.Mock };
   let authz: { grantedCapabilities: jest.Mock };
+  let sessionContext: { invalidate: jest.Mock; invalidateSessions: jest.Mock };
 
   beforeEach(async () => {
     identities = repoMock<DiscordIdentity>();
     members = repoMock<Member>();
     regiments = repoMock<Regiment>();
     authz = { grantedCapabilities: jest.fn().mockResolvedValue([]) };
+    sessionContext = { invalidate: jest.fn(), invalidateSessions: jest.fn() };
     discord = {
       exchangeCode: jest.fn().mockResolvedValue(TOKEN),
       fetchUser: jest.fn().mockResolvedValue(NEW_PROFILE),
@@ -74,6 +77,7 @@ describe('AuthService', () => {
           useValue: { get: jest.fn().mockReturnValue({ guildId: 'guild-1' }) },
         },
         { provide: AuthzService, useValue: authz },
+        { provide: SessionContextService, useValue: sessionContext },
       ],
     }).compile();
 
@@ -111,15 +115,12 @@ describe('AuthService', () => {
       expect(result.member).toBeNull();
       expect(members.save).not.toHaveBeenCalled();
 
-      // JWT carries Applicant role and a null member id.
+      // The slim JWT carries only stable identity claims (T-0047): no role/mid/rid.
       const payload = jwt.signAsync.mock.calls[0][0] as JwtPayload;
-      expect(payload).toMatchObject({
-        sub: 'identity-new',
-        mid: null,
-        did: '999000111222',
-        role: MemberRole.Applicant,
-        rid: 'regiment-1',
-      });
+      expect(payload).toEqual({ sub: 'identity-new', did: '999000111222' });
+      expect(payload).not.toHaveProperty('mid');
+      expect(payload).not.toHaveProperty('role');
+      expect(payload).not.toHaveProperty('rid');
       expect(result.token).toBe('signed.jwt.token');
     });
 
@@ -147,14 +148,10 @@ describe('AuthService', () => {
       expect(savedMember.discordLinked).toBe(true);
       expect(savedMember.lastSeenAt).toBeInstanceOf(Date);
 
+      // The slim JWT carries only { sub, did } (T-0047) — role/regiment/member
+      // are resolved fresh per request now, so they are never embedded.
       const payload = jwt.signAsync.mock.calls[0][0] as JwtPayload;
-      expect(payload).toMatchObject({
-        mid: 'member-owner',
-        role: MemberRole.Owner,
-        rid: 'regiment-1',
-      });
-      // Existing regiment came from the member — no default lookup needed.
-      expect(regiments.findOne).not.toHaveBeenCalled();
+      expect(payload).toEqual({ sub: 'identity-owner', did: '100000000000000001' });
     });
 
     it('does not check guild membership when no guild is configured', async () => {
@@ -168,6 +165,7 @@ describe('AuthService', () => {
           { provide: JwtService, useValue: jwt },
           { provide: ConfigService, useValue: { get: () => ({ guildId: '' }) } },
           { provide: AuthzService, useValue: authz },
+          { provide: SessionContextService, useValue: sessionContext },
         ],
       }).compile();
       const svc = module.get(AuthService);

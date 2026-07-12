@@ -1,11 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ApplicantType, ApplicationStatus, HowFound, Platform } from '../../common/enums';
+import { ApplicationStatus } from '../../common/enums';
 import { Application } from '../entities/application.entity';
 
 /**
- * Client-facing projection of a recruitment application. Deliberately omits
- * internal/PII columns (discordIdentityId, discordDmMessage) — never expose the
- * raw entity.
+ * Client-facing projection of a recruitment application (T-0039 enlistment
+ * fields). Deliberately omits internal/PII columns (discordIdentityId,
+ * discordDmMessage) — never expose the raw entity.
  */
 export class ApplicationDto {
   @ApiProperty({ format: 'uuid' })
@@ -20,32 +20,29 @@ export class ApplicationDto {
   @ApiProperty({ example: 'JaneTheGreat' })
   inGameName: string;
 
-  @ApiProperty({ enum: Platform })
-  platform: Platform;
+  @ApiProperty({ example: 'None' })
+  currentRegiment: string;
 
-  @ApiProperty({ enum: ApplicantType })
-  applicantType: ApplicantType;
+  @ApiProperty({ description: 'Free-text "how did you hear about us?" answer' })
+  howFound: string;
 
-  @ApiProperty({ nullable: true, example: 'America/Toronto' })
-  timezone: string | null;
+  @ApiProperty({ example: 'Line Infantry, Rifleman' })
+  preferredClasses: string;
 
-  @ApiProperty({ description: 'Free-text "why do you want to join" answer' })
-  whyJoin: string;
+  @ApiProperty({ description: 'What the applicant wants to improve at' })
+  skillsToImprove: string;
 
-  @ApiProperty({ enum: HowFound })
-  howFound: HowFound;
+  @ApiProperty({ description: 'Confirms interest + willingness to enlist in-game' })
+  interestConfirmed: boolean;
 
-  @ApiProperty({ nullable: true })
-  priorExperience: string | null;
+  @ApiProperty({ nullable: true, description: 'Optional representative/guest note' })
+  representativeNote: string | null;
 
   @ApiProperty({ enum: ApplicationStatus })
   status: ApplicationStatus;
 
   @ApiProperty({ description: 'True when this identity has applied before' })
   isReapplication: boolean;
-
-  @ApiProperty()
-  ageConfirmed: boolean;
 
   @ApiProperty({ example: 0 })
   mutualEventsCount: number;
@@ -78,15 +75,14 @@ export class ApplicationDto {
       applicantName: application.applicantName,
       discordTag: application.discordTag,
       inGameName: application.inGameName,
-      platform: application.platform,
-      applicantType: application.applicantType,
-      timezone: application.timezone,
-      whyJoin: application.whyJoin,
+      currentRegiment: application.currentRegiment,
       howFound: application.howFound,
-      priorExperience: application.priorExperience,
+      preferredClasses: application.preferredClasses,
+      skillsToImprove: application.skillsToImprove,
+      interestConfirmed: application.interestConfirmed,
+      representativeNote: application.representativeNote,
       status: application.status,
       isReapplication: application.isReapplication,
-      ageConfirmed: application.ageConfirmed,
       mutualEventsCount: application.mutualEventsCount,
       moderatorNote: application.moderatorNote,
       declineReason: application.declineReason,

@@ -7,6 +7,7 @@ import {
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
+import { SessionContextService } from '../auth/session-context.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { MemberRole, MemberStatus, Platform } from '../common/enums';
@@ -109,7 +110,12 @@ describe('MembersService', () => {
   // are enqueued without a real bot.
   const discordSync = {
     enqueueRoleSync: jest.fn().mockResolvedValue(null),
-    enqueueMemberKick: jest.fn().mockResolvedValue(null),
+    enqueueMemberBanRole: jest.fn().mockResolvedValue(null),
+  };
+  // Caller-context cache hooks (T-0046/48) — assert invalidation without a DB.
+  const sessionContext = {
+    invalidate: jest.fn(),
+    invalidateSessions: jest.fn().mockResolvedValue(undefined),
   };
 
   beforeEach(async () => {
@@ -155,6 +161,7 @@ describe('MembersService', () => {
         { provide: getRepositoryToken(Regiment), useValue: regimentRepo },
         { provide: AuditService, useValue: audit },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: SessionContextService, useValue: sessionContext },
       ],
     }).compile();
 
