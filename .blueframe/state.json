@@ -4,7 +4,7 @@
   "lastSyncedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
   "lastSyncedAt": "2026-07-12T02:35:00Z",
   "notesForNextSession": "POST-MVP HARDENING COMPLETE on feat/post-mvp-hardening (backend PR + frontend PR against main). Shipped T-0034/35/36 (ban->Ban-role), T-0039/40/37-superseded/38 (applications reshape + 18+ copy), T-0041/42/43/44/45 (per-purpose Discord channels), T-0046/47/48/49 (auth resolver + slim JWT + iat session invalidation, with ban/suspend now enforced at the resolver). 212 unit + 28 e2e green; lint+build clean; adversarial review (2 findings fixed: ban/suspend re-login bypass + announce length cap). VERIFIED END-TO-END against the REAL Discord test guild (guild 1425324636534603842): /auth/me resolves the Owner from a slim token, rank change syncs a real role, announce posts to #lobby, enlistment posts to #new-enlistments, every audit entry mirrors to #audit-logs, and ban strips managed roles + applies a Banned role. Browser-verified the Angular Settings pickers (roles+channels from the live guild) and the wired admin applications view. applyBanRoleOnBan stays DEFAULT OFF per the owner. GOTCHAS: (1) the host jest e2e shares the docker MySQL with the running api's REAL worker — STOP the api container (docker stop lords-dashboard-backend-api-1) before `npm run test:e2e` (and run e2e with DISCORD_MOCK=true DISCORD_BOT_MOCK=true) or the live worker drains the test jobs. (2) dist/ is root-owned from the container build — build-check with `tsc -p tsconfig.build.json --outDir <scratch>`. T-0033 remaining is human-only: click Discord's OAuth consent + register the PROD redirect URI, then flip prod env. NEXT: owner does T-0032 MVP deploy + the real go-live consent; then T-0025 hardening pass.",
-  "nextIdCounter": 50,
+  "nextIdCounter": 54,
   "connections": [],
   "tasks": [
     {
@@ -2903,6 +2903,230 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Confirmed no client-side JWT claim decoding exists; role/regiment/membership derive solely from GET /auth/me. No code change required."
+        }
+      ]
+    },
+    {
+      "id": "T-0050",
+      "title": "Derive guild membership from the bot, not the OAuth guilds scope",
+      "summary": "At sign-in, stop calling isMemberOfGuild() (which reads the OAuth `guilds` scope via GET /users/@me/guilds) and instead resolve membership through the already-present bot: guildMember = (await discordGateway.fetchMember(discordUserId)) !== null. Wire DiscordGateway into AuthService/AuthModule and degrade to guildMember=false (never block login) if the bot is unavailable, matching today's fetchGuilds([]-on-failure) behaviour.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/auth/auth.service.ts",
+        "src/auth/auth.module.ts",
+        "src/discord/gateway/discord-gateway.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "signing in with a user who IS in the regiment guild sets discord_identities.guild_member = 1 via the bot (no /users/@me/guilds call is made)",
+          "status": "pending"
+        },
+        {
+          "desc": "signing in with a user who is NOT in the guild sets guild_member = 0",
+          "status": "pending"
+        },
+        {
+          "desc": "when the bot/gateway is unavailable, sign-in still succeeds and guild_member falls back to 0 (login is never blocked)",
+          "status": "pending"
+        },
+        {
+          "desc": "member-detail DTO still surfaces guildMember correctly for a roster entry",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "AuthService now calls DiscordGateway.fetchMember inline during the synchronous sign-in path; the gateway was previously invoked only by the outbox worker (which isolates failures), so a slow/throwing bot call must not stall or fail login.",
+          "status": "open",
+          "notedAt": "2026-07-12T15:23:11Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T15:23:11Z",
+      "history": [
+        {
+          "at": "2026-07-12T15:23:11Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: replace OAuth guilds-scope membership check with a bot fetchMember lookup"
+        }
+      ]
+    },
+    {
+      "id": "T-0051",
+      "title": "Drop the `guilds` OAuth scope and retire the dead guilds fetch code",
+      "summary": "Remove `guilds` from DISCORD_SCOPES everywhere it is defaulted (config/env.validation.ts, config/configuration.ts, .env, .env.example) so the consent screen only requests identify + email. Delete the now-unused fetchGuilds()/isMemberOfGuild() from DiscordOAuthService and its mock, and drop `guilds` from the dev-owner seed scopes string.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/config/env.validation.ts",
+        "src/config/configuration.ts",
+        "src/auth/discord-oauth.service.ts",
+        "src/auth/mock-discord-oauth.service.ts",
+        "src/database/seeds/dev-owner.seed.ts",
+        ".env",
+        ".env.example"
+      ],
+      "dependsOn": [
+        "T-0050"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "DISCORD_SCOPES default is `identify email` (no guilds) and the built authorize URL contains scope=identify+email only",
+          "status": "pending"
+        },
+        {
+          "desc": "app boots with the new default; env.validation accepts a guilds-less scope string",
+          "status": "pending"
+        },
+        {
+          "desc": "fetchGuilds/isMemberOfGuild are removed and no remaining src reference calls them (grep clean)",
+          "status": "pending"
+        },
+        {
+          "desc": "dev-owner seed stores scopes without `guilds` and db:setup still runs idempotently",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Existing discord_identities rows persist an `identify email guilds` scopes string; the dropped scope only affects new consents, but any code asserting the stored value must be tolerant of both.",
+          "status": "open",
+          "notedAt": "2026-07-12T15:23:11Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T15:23:11Z",
+      "history": [
+        {
+          "at": "2026-07-12T15:23:11Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: remove the guilds scope from config/env/seed and delete the dead guilds fetch helpers"
+        }
+      ]
+    },
+    {
+      "id": "T-0052",
+      "title": "Mock-mode parity for bot-based membership",
+      "summary": "Ensure DISCORD_MOCK / DISCORD_BOT_MOCK sign-in still yields a correct guildMember without the guilds scope: MockDiscordGateway.fetchMember must return a member (or null) consistent with the mock persona so the mocked auth flow sets guild_member the same way the real bot would.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/discord/gateway/mock-discord-gateway.ts",
+        "src/auth/mock-discord-oauth.service.ts"
+      ],
+      "dependsOn": [
+        "T-0050"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "with DISCORD_BOT_MOCK=true, the default owner persona resolves fetchMember != null and mock sign-in sets guild_member = 1",
+          "status": "pending"
+        },
+        {
+          "desc": "a mock persona modelled as not-in-guild resolves fetchMember == null -> guild_member = 0",
+          "status": "pending"
+        },
+        {
+          "desc": "the full mock sign-in path (mock OAuth + mock gateway) requires no `guilds` scope and needs no real Discord app",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T15:23:11Z",
+      "history": [
+        {
+          "at": "2026-07-12T15:23:11Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: keep mocked sign-in setting guildMember via the mock gateway after the scope is dropped"
+        }
+      ]
+    },
+    {
+      "id": "T-0053",
+      "title": "Update specs + verify the scope removal end-to-end",
+      "summary": "Adjust and extend coverage for the change: discord-oauth.service.spec (scope assertion no longer expects guilds), auth.service.spec (guildMember now sourced from the gateway), mock specs and any seed/e2e fixtures. Then verify against the real test guild that sign-in no longer requests the guilds consent yet guild_member is still set correctly.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/auth/discord-oauth.service.spec.ts",
+        "src/auth/auth.service.spec.ts",
+        "src/auth/mock-discord-oauth.service.spec.ts",
+        "test/"
+      ],
+      "dependsOn": [
+        "T-0050",
+        "T-0051",
+        "T-0052"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "unit + e2e suites are green after the scope/logic change (no spec still asserts scope=identify+guilds)",
+          "status": "pending"
+        },
+        {
+          "desc": "auth.service.spec proves guildMember is derived from DiscordGateway.fetchMember, not from fetchGuilds",
+          "status": "pending"
+        },
+        {
+          "desc": "live smoke on the real test guild: the Discord consent screen no longer lists 'Know what servers you're in', and an in-guild owner sign-in still records guild_member = 1",
+          "status": "pending"
+        },
+        {
+          "desc": "lint + build clean",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T15:23:11Z",
+      "history": [
+        {
+          "at": "2026-07-12T15:23:11Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: update affected specs and verify the guilds scope is gone while membership stays correct"
         }
       ]
     }
