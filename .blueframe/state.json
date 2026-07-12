@@ -3,8 +3,8 @@
   "project": "lords-dashboard-backend",
   "lastSyncedCommit": "b41486a0d0375f91d43714dc227770c821956224",
   "lastSyncedAt": "2026-07-12T19:12:00Z",
-  "notesForNextSession": "GUILDS-SCOPE REMOVAL + APPLICANT SELF-SERVICE EPIC shipped this session on TWO branches (not yet merged): backend feat/guilds-scope-and-applicant-self-service (commit 9ed1dc6) and frontend lords-regiment-dashboard:feat/applicant-self-service (commit d9277e9). BACKEND: T-0050-0053 (drop the Discord `guilds` OAuth scope; derive guildMember from the bot's fetchMember at sign-in, guarded by a 4s timeout + try/catch so it never blocks login) all deploy_ready + VERIFIED LIVE (authorize URL scope = `identify email`; bot REST member lookup 200 in-guild / 404 not). NEW T-0054 (GET/PATCH /applications/mine), T-0055 (applicant blocklist: block/unblock + submit guard, columns on discord_identities), T-0056 (setupComplete flip endpoint). 226 unit + 35 e2e green, lint+build clean, adversarial review clean. Live-verified the whole applicant flow via minted JWTs (submit→mine→edit→block→403 resubmit→unblock). FRONTEND (51 specs green, build clean): applicant status page, apply-as-signin CTA, returning-applicant redirect, edit-pending, admin block UI, Owner first-run routing, and RETIRED the stub owner-setup wizard (→ /admin/settings). Browser-verified the status page (pending+blocked), the pre-filled edit form, and the admin block controls against the live stack. T-0026/27/28 questionnaires archived (answers consumed). T-0003 rank-ladder risk retired (owner: dummy ranks OK, greenfield). DEFERRED / next session: (1) frontend T-0020 wire the account-deletion UI to the existing GDPR endpoints; (2) frontend landing still shows hardcoded stats/officers arrays (wire GET /regiment/stats, and guard un-wired surfaces before the T-0032 public deploy); (3) T-0036 owner-superadmin verify was exercised via a minted owner JWT (full admin panel rendered) — for the REAL owner set OWNER_DISCORD_ID in .env and reseed before seed:prod. HUMAN-ONLY remaining: T-0033 Discord OAuth consent + register the PROD redirect URI; T-0032 MVP DigitalOcean deploy; then the full T-0025 hardening pass. GOTCHAS (unchanged): STOP the api container before host e2e (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true); dist/ is root-owned — build-check with tsc --outDir <scratch>; the api container is dev-mode (start:dev, source bind-mounted, host port 3001).",
-  "nextIdCounter": 57,
+  "notesForNextSession": "GUILDS-SCOPE REMOVAL + APPLICANT SELF-SERVICE EPIC shipped this session on TWO branches (not yet merged): backend feat/guilds-scope-and-applicant-self-service (commit 9ed1dc6) and frontend lords-regiment-dashboard:feat/applicant-self-service (commit d9277e9). BACKEND: T-0050-0053 (drop the Discord `guilds` OAuth scope; derive guildMember from the bot's fetchMember at sign-in, guarded by a 4s timeout + try/catch so it never blocks login) all deploy_ready + VERIFIED LIVE (authorize URL scope = `identify email`; bot REST member lookup 200 in-guild / 404 not). NEW T-0054 (GET/PATCH /applications/mine), T-0055 (applicant blocklist: block/unblock + submit guard, columns on discord_identities), T-0056 (setupComplete flip endpoint). 226 unit + 35 e2e green, lint+build clean, adversarial review clean. Live-verified the whole applicant flow via minted JWTs (submit→mine→edit→block→403 resubmit→unblock). FRONTEND (51 specs green, build clean): applicant status page, apply-as-signin CTA, returning-applicant redirect, edit-pending, admin block UI, Owner first-run routing, and RETIRED the stub owner-setup wizard (→ /admin/settings). Browser-verified the status page (pending+blocked), the pre-filled edit form, and the admin block controls against the live stack. T-0026/27/28 questionnaires archived (answers consumed). T-0003 rank-ladder risk retired (owner: dummy ranks OK, greenfield). DEFERRED / next session: (1) frontend T-0020 wire the account-deletion UI to the existing GDPR endpoints; (2) frontend landing still shows hardcoded stats/officers arrays (wire GET /regiment/stats, and guard un-wired surfaces before the T-0032 public deploy); (3) T-0036 owner-superadmin verify was exercised via a minted owner JWT (full admin panel rendered) — for the REAL owner set OWNER_DISCORD_ID in .env and reseed before seed:prod. HUMAN-ONLY remaining: T-0033 Discord OAuth consent + register the PROD redirect URI; T-0032 MVP DigitalOcean deploy; then the full T-0025 hardening pass. GOTCHAS (unchanged): STOP the api container before host e2e (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true); dist/ is root-owned — build-check with tsc --outDir <scratch>; the api container is dev-mode (start:dev, source bind-mounted, host port 3001). NEXT (T-0057/T-0058 'Admin' owner-name epic, planned): after the backend name-edit lands, I will also add a Display Name field to the frontend profile-edit form in lords-regiment-dashboard (form currently exposes platform/timezone/inGameName/avatar only) so the Owner can rename off the 'Admin' default — owner confirmed I handle the frontend.",
+  "nextIdCounter": 59,
   "connections": [],
   "tasks": [
     {
@@ -3401,6 +3401,143 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Added POST /settings/complete-setup (manage_settings) to flip regiment.setupComplete; SettingsDto now exposes setupComplete; the seed starts a real greenfield deploy (OWNER_DISCORD_ID set) with setup INCOMPLETE while the dev fixture stays complete. Enables the frontend Owner first-run routing. Unit-tested; audited as a settings change."
+        }
+      ]
+    },
+    {
+      "id": "T-0057",
+      "title": "Drop OWNER_NAME env; default the seeded Owner display name to \"Admin\"",
+      "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY — the non-member /auth/me fallback ('Recruit') is left unchanged.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        ".env.example",
+        "src/database/seeds/dev-owner.seed.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "T-0058"
+      ],
+      "questions": [
+        {
+          "q": "\"Default name Admin for all\" — does this also change the non-member /auth/me identity fallback (currently 'Recruit' in auth.service.toIdentityProjection), or only seeded member/owner names? Assuming member/owner names only.",
+          "answer": "Seeded Owner only. Do NOT change the 'Recruit' identity fallback in auth.service.toIdentityProjection; 'Admin' applies solely to the seeded Owner's member.name / identity.globalName.",
+          "askedAt": "2026-07-12T00:00:00Z",
+          "answeredAt": "2026-07-12T00:00:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "db:setup with no OWNER_NAME set -> seeded Owner member.name === 'Admin' and Owner identity.globalName === 'Admin'",
+          "status": "pending"
+        },
+        {
+          "desc": "db:setup with OWNER_DISCORD_ID set (real owner) -> Owner resolves by that snowflake, name defaults to 'Admin', inGameName null",
+          "status": "pending"
+        },
+        {
+          "desc": "seed remains idempotent (re-run does not duplicate or rename an already-customized owner)",
+          "status": "pending"
+        },
+        {
+          "desc": "grep confirms no remaining references to OWNER_NAME in src/ or .env.example",
+          "status": "pending"
+        },
+        {
+          "desc": "non-member /auth/me still falls back to 'Recruit' (unchanged) — no regression to the applicant projection",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Owner seed path touched - shared by the dev fixture (?as=owner mock) and the real prod-owner claim (OWNER_DISCORD_ID first sign-in); a wrong default could mislabel the live Owner.",
+          "status": "open",
+          "notedAt": "2026-07-12T00:00:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-12T00:00:00Z",
+      "updatedAt": "2026-07-12T00:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T00:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-12T00:00:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "human",
+          "note": "scoped to seeded Owner only; Recruit fallback left unchanged (Q answered)"
+        }
+      ]
+    },
+    {
+      "id": "T-0058",
+      "title": "Allow self-service editing of display name in profile PATCH",
+      "summary": "Let an authenticated member (including the Owner) change their own display name via PATCH /members/:id. Add an optional `name` field to UpdateMemberDto and apply it in MembersService.updateSelf alongside the existing platform/timezone/inGameName/avatarUrl fields. This is what lets the Owner rename themselves off the default \"Admin\" after Discord sign-in.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "members",
+      "repo": "",
+      "paths": [
+        "src/members/dto/update-member.dto.ts",
+        "src/members/members.service.ts",
+        "src/members/members.controller.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PATCH /members/:id with { name } on own profile -> 200 and member.name updated",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH another member's :id with { name } -> 403 (updateSelf ownership guard unchanged)",
+          "status": "pending"
+        },
+        {
+          "desc": "name exceeding maxLength -> 400 validation error",
+          "status": "pending"
+        },
+        {
+          "desc": "existing self-editable fields (platform/timezone/inGameName/avatarUrl) still apply unchanged",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /auth/me reflects the new name after the patch",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "updateSelf handler + Swagger contract widened - the frontend profile-edit form must expose the name field; unguarded, a member could previously never rename. No audit row is written for name changes (consistent with existing self-edit policy).",
+          "status": "open",
+          "notedAt": "2026-07-12T00:00:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-12T00:00:00Z",
+      "updatedAt": "2026-07-12T00:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T00:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
         }
       ]
     }
