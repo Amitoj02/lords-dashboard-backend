@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
 import { DiscordOAuthService } from './discord-oauth.service';
-import { DiscordGuild, DiscordTokenResponse, DiscordUser } from './types/discord-api.types';
+import { DiscordTokenResponse, DiscordUser } from './types/discord-api.types';
 
 /** A canned Discord user the mock can "sign in" as. */
 interface MockPersona {
@@ -112,17 +112,6 @@ export class MockDiscordOAuthService extends DiscordOAuthService {
       email: p.email,
       verified: true,
     });
-  }
-
-  override fetchGuilds(): Promise<DiscordGuild[]> {
-    const { guildId } = this.discordCfg;
-    if (!guildId) return Promise.resolve([]);
-    return Promise.resolve([{ id: guildId, name: 'Lords Regiment (mock)', owner: false }]);
-  }
-
-  override isMemberOfGuild(): Promise<boolean> {
-    // In the mock every persona is treated as a guild member.
-    return Promise.resolve(true);
   }
 
   /** Known persona, or a deterministic synthetic one derived from the label. */

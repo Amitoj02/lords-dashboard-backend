@@ -6,6 +6,7 @@ import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { DiscordOAuthService } from '../src/auth/discord-oauth.service';
 import { DiscordIdentity } from '../src/auth/entities/discord-identity.entity';
+import { Application } from '../src/applications/entities/application.entity';
 import { RolePermission } from '../src/authz/entities/role-permission.entity';
 import { MemberRole } from '../src/common/enums';
 import { RegimentEvent } from '../src/events/entities/event.entity';
@@ -34,10 +35,9 @@ const fakeDiscord = {
     refresh_token: 'rt',
     token_type: 'Bearer',
     expires_in: 604800,
-    scope: 'identify email guilds',
+    scope: 'identify email',
   }),
   fetchUser: jest.fn().mockImplementation(() => Promise.resolve(currentProfile)),
-  isMemberOfGuild: jest.fn().mockResolvedValue(true),
   buildAvatarUrl: () => null,
 };
 
@@ -377,6 +377,129 @@ describe('Post-MVP feature modules (e2e)', () => {
       // the cell as text instead of evaluating it.
       expect(csv.text).toContain(`"'=HYPERLINK`);
       expect(csv.text).not.toContain(`"=HYPERLINK`);
+    });
+  });
+
+  // ── Applicant self-service + blocklist (T-0054/T-0055) ──────────────────────
+  describe('applicant self-service + blocklist', () => {
+    const SELF_DISCORD_ID = '900900900900900903';
+    const selfProfile = {
+      id: SELF_DISCORD_ID,
+      username: 'e2e_selfservice_applicant',
+      global_name: 'Self Service',
+      discriminator: '0',
+      avatar: null,
+      email: 'selfservice@example.com',
+    };
+    const validApp = {
+      applicantName: 'Self Service',
+      inGameName: 'SelfService1',
+      currentRegiment: 'None',
+      howFound: 'e2e',
+      preferredClasses: 'Line Infantry',
+      skillsToImprove: 'Aim',
+      interestConfirmed: true,
+    };
+    let selfToken: string;
+    let appId: string;
+
+    const cleanupSelf = async (): Promise<void> => {
+      const identity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: SELF_DISCORD_ID } });
+      if (identity) {
+        await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+    };
+
+    beforeAll(async () => {
+      await cleanupSelf();
+      selfToken = (await signIn(selfProfile)).token;
+    });
+
+    afterAll(async () => {
+      await cleanupSelf();
+    });
+
+    it('GET /applications/mine returns null + not blocked before applying', async () => {
+      const res = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(selfToken))
+        .expect(200);
+      expect(res.body.application).toBeNull();
+      expect(res.body.blocked).toBe(false);
+    });
+
+    it('an applicant cannot read the staff queue (manage_applications)', async () => {
+      await request(server()).get('/api/applications').set(bearer(selfToken)).expect(403);
+    });
+
+    it('submit → GET /mine reflects the pending application', async () => {
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(selfToken))
+        .send(validApp)
+        .expect(201);
+      appId = created.body.id as string;
+
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(selfToken))
+        .expect(200);
+      expect(mine.body.application.status).toBe('pending');
+      expect(mine.body.application.inGameName).toBe('SelfService1');
+    });
+
+    it('PATCH /mine edits the pending application', async () => {
+      const patched = await request(server())
+        .patch('/api/applications/mine')
+        .set(bearer(selfToken))
+        .send({ inGameName: 'SelfService2' })
+        .expect(200);
+      expect(patched.body.inGameName).toBe('SelfService2');
+    });
+
+    it('owner blocks the applicant → applicant is blocked and cannot resubmit', async () => {
+      await request(server())
+        .post(`/api/applications/${appId}/block`)
+        .set(bearer(ownerToken))
+        .send({ reason: 'e2e block' })
+        .expect(200);
+
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(selfToken))
+        .expect(200);
+      expect(mine.body.blocked).toBe(true);
+
+      // A blocked identity is refused a new submit even with an existing app.
+      await request(server())
+        .post('/api/applications')
+        .set(bearer(selfToken))
+        .send(validApp)
+        .expect(403);
+    });
+
+    it('an applicant cannot block anyone (needs manage_applications)', async () => {
+      await request(server())
+        .post(`/api/applications/${appId}/block`)
+        .set(bearer(selfToken))
+        .send({})
+        .expect(403);
+    });
+
+    it('owner unblocks → applicant is no longer blocked', async () => {
+      await request(server())
+        .post(`/api/applications/${appId}/unblock`)
+        .set(bearer(ownerToken))
+        .expect(200);
+
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(selfToken))
+        .expect(200);
+      expect(mine.body.blocked).toBe(false);
     });
   });
 });

@@ -38,7 +38,7 @@ export async function seedDevOwner(ds: DataSource): Promise<void> {
       globalName: ownerName,
       avatarUrl: null,
       guildMember: true,
-      scopes: 'identify email guilds',
+      scopes: 'identify email',
     },
   );
 

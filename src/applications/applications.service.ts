@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -7,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
@@ -18,9 +20,12 @@ import { Rank } from '../ranks/entities/rank.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { ApplicationDto } from './dto/application.dto';
 import { ApplicationQueryDto } from './dto/application-query.dto';
+import { BlockApplicantDto } from './dto/block-applicant.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { DeclineApplicationDto } from './dto/decline-application.dto';
 import { HoldApplicationDto } from './dto/hold-application.dto';
+import { MyApplicationDto } from './dto/my-application.dto';
+import { UpdateMyApplicationDto } from './dto/update-my-application.dto';
 import { Application } from './entities/application.entity';
 
 /**
@@ -43,6 +48,8 @@ export class ApplicationsService {
     private readonly applications: Repository<Application>,
     @InjectRepository(RegimentSettings)
     private readonly settings: Repository<RegimentSettings>,
+    @InjectRepository(DiscordIdentity)
+    private readonly identities: Repository<DiscordIdentity>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
     // Drops the applicant's cached authorization context on approval so they
@@ -59,6 +66,13 @@ export class ApplicationsService {
    * second concurrent application, and flags re-applications.
    */
   async submit(user: AuthenticatedUser, dto: CreateApplicationDto): Promise<ApplicationDto> {
+    // An officer can permanently bar an identity from applying (T-0055); reject
+    // before anything else so a blocked user can never create a new application.
+    const identity = await this.identities.findOne({ where: { id: user.identityId } });
+    if (identity?.applicationsBlockedAt) {
+      throw new ForbiddenException('You are no longer permitted to submit an application');
+    }
+
     // honor the settings visibility toggle.
     const settings = await this.settings.findOne({ where: { regimentId: user.regimentId } });
     if (settings && settings.openRecruitment === false) {
@@ -111,6 +125,127 @@ export class ApplicationsService {
     // TODO(audit): no `application.submit` action code exists in the seed; the
     // submit is an applicant self-action, so it is intentionally not audited.
     return ApplicationDto.from(saved);
+  }
+
+  /**
+   * The caller's own application view (T-0054): their most recent application
+   * (or null if they have never applied) plus whether an officer has blocked
+   * them from applying (T-0055). Scoped to the caller's Discord identity.
+   */
+  async getMine(user: AuthenticatedUser): Promise<MyApplicationDto> {
+    const application = await this.applications.findOne({
+      where: { regimentId: user.regimentId, discordIdentityId: user.identityId, isDraft: false },
+      order: { submittedAt: 'DESC' },
+    });
+    const identity = await this.identities.findOne({ where: { id: user.identityId } });
+    return {
+      application: application ? ApplicationDto.from(application) : null,
+      blocked: !!identity?.applicationsBlockedAt,
+    };
+  }
+
+  /**
+   * Edit the caller's own PENDING application (T-0054/T-0031). Only a pending
+   * application can be changed; a decided one (approved/declined) or a held one
+   * is immutable to the applicant. Editing re-bumps it to the top of the officer
+   * queue (which is ordered by submittedAt) — the "within 48 hours" copy is
+   * informational only, so this is safe.
+   */
+  async updateMine(user: AuthenticatedUser, dto: UpdateMyApplicationDto): Promise<ApplicationDto> {
+    const application = await this.applications.findOne({
+      where: { regimentId: user.regimentId, discordIdentityId: user.identityId, isDraft: false },
+      order: { submittedAt: 'DESC' },
+    });
+    if (!application) {
+      throw new NotFoundException('You have no application to edit');
+    }
+    if (application.status !== ApplicationStatus.Pending) {
+      throw new ConflictException('Only a pending application can be edited');
+    }
+
+    if (dto.applicantName !== undefined) application.applicantName = dto.applicantName;
+    if (dto.inGameName !== undefined) application.inGameName = dto.inGameName;
+    if (dto.discordTag !== undefined) application.discordTag = dto.discordTag ?? null;
+    if (dto.currentRegiment !== undefined) application.currentRegiment = dto.currentRegiment;
+    if (dto.howFound !== undefined) application.howFound = dto.howFound;
+    if (dto.preferredClasses !== undefined) application.preferredClasses = dto.preferredClasses;
+    if (dto.skillsToImprove !== undefined) application.skillsToImprove = dto.skillsToImprove;
+    if (dto.interestConfirmed !== undefined) application.interestConfirmed = dto.interestConfirmed;
+    if (dto.representativeNote !== undefined) {
+      application.representativeNote = dto.representativeNote ?? null;
+    }
+    application.submittedAt = new Date();
+
+    const saved = await this.applications.save(application);
+    return ApplicationDto.from(saved);
+  }
+
+  /**
+   * Permanently block the applicant behind an application from submitting any
+   * further applications (T-0055). The block lives on their Discord identity, so
+   * it survives across applications. Audited.
+   */
+  async blockApplicant(
+    user: AuthenticatedUser,
+    id: string,
+    dto: BlockApplicantDto,
+    ip: string | null,
+  ): Promise<ApplicationDto> {
+    const application = await this.loadOrFail(user, id);
+    if (!application.discordIdentityId) {
+      throw new BadRequestException('This application has no linked Discord identity to block');
+    }
+    const identity = await this.identities.findOne({
+      where: { id: application.discordIdentityId },
+    });
+    if (!identity) {
+      throw new NotFoundException('Applicant identity not found');
+    }
+
+    identity.applicationsBlockedAt = new Date();
+    identity.applicationsBlockedByMemberId = user.memberId;
+    identity.applicationsBlockedReason = dto.reason ?? null;
+    await this.identities.save(identity);
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'application.block',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'application', id: application.id, label: application.applicantName },
+      detail: dto.reason ?? null,
+    });
+
+    return ApplicationDto.from(application);
+  }
+
+  /** Re-enable a previously blocked applicant (T-0055). Audited. */
+  async unblockApplicant(
+    user: AuthenticatedUser,
+    id: string,
+    ip: string | null,
+  ): Promise<ApplicationDto> {
+    const application = await this.loadOrFail(user, id);
+    if (application.discordIdentityId) {
+      const identity = await this.identities.findOne({
+        where: { id: application.discordIdentityId },
+      });
+      if (identity?.applicationsBlockedAt) {
+        identity.applicationsBlockedAt = null;
+        identity.applicationsBlockedByMemberId = null;
+        identity.applicationsBlockedReason = null;
+        await this.identities.save(identity);
+      }
+    }
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'application.unblock',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'application', id: application.id, label: application.applicantName },
+      detail: null,
+    });
+
+    return ApplicationDto.from(application);
   }
 
   /** Admin queue: paginated, optionally status-filtered, drafts excluded. */

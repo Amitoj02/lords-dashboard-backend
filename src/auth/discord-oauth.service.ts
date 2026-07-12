@@ -1,7 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../config/configuration';
-import { DiscordGuild, DiscordTokenResponse, DiscordUser } from './types/discord-api.types';
+import { DiscordTokenResponse, DiscordUser } from './types/discord-api.types';
 
 /**
  * Thin wrapper around Discord's OAuth2 + REST endpoints using the global `fetch`.
@@ -71,25 +71,6 @@ export class DiscordOAuthService {
       throw new UnauthorizedException('Could not retrieve Discord profile');
     }
     return (await res.json()) as DiscordUser;
-  }
-
-  /** Fetch the user's guilds (guilds scope). Returns [] on failure. */
-  async fetchGuilds(accessToken: string): Promise<DiscordGuild[]> {
-    const res = await fetch(`${this.apiBase}/users/@me/guilds`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) {
-      this.logger.warn(`Discord guilds fetch failed: ${res.status}`);
-      return [];
-    }
-    return (await res.json()) as DiscordGuild[];
-  }
-
-  /** Whether the user belongs to the configured regiment guild. */
-  async isMemberOfGuild(accessToken: string, guildId: string): Promise<boolean> {
-    if (!guildId) return false;
-    const guilds = await this.fetchGuilds(accessToken);
-    return guilds.some((g) => g.id === guildId);
   }
 
   /** Build the CDN avatar URL from the user's avatar hash. */

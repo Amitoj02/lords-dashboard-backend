@@ -1,8 +1,14 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
@@ -79,6 +85,7 @@ describe('ApplicationsService', () => {
   let service: ApplicationsService;
   let applications: MockRepo<Application>;
   let settings: MockRepo<RegimentSettings>;
+  let identities: MockRepo<DiscordIdentity>;
   let audit: { record: jest.Mock };
   let sessionContext: { invalidate: jest.Mock };
   let discordSync: { enqueueApplicationSubmitted: jest.Mock };
@@ -108,6 +115,13 @@ describe('ApplicationsService', () => {
       createQueryBuilder: jest.fn(),
     };
     settings = { findOne: jest.fn() };
+    // Default: the applicant identity exists and is NOT blocked from applying.
+    identities = {
+      findOne: jest
+        .fn()
+        .mockResolvedValue({ id: 'identity-applicant', applicationsBlockedAt: null }),
+      save: jest.fn((x: unknown) => Promise.resolve(x)),
+    };
     audit = { record: jest.fn() };
     sessionContext = { invalidate: jest.fn() };
     discordSync = { enqueueApplicationSubmitted: jest.fn().mockResolvedValue(null) };
@@ -141,6 +155,7 @@ describe('ApplicationsService', () => {
         ApplicationsService,
         { provide: getRepositoryToken(Application), useValue: applications },
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
+        { provide: getRepositoryToken(DiscordIdentity), useValue: identities },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: SessionContextService, useValue: sessionContext },
@@ -214,6 +229,143 @@ describe('ApplicationsService', () => {
       // Sensitive columns are never projected.
       expect(result).not.toHaveProperty('discordIdentityId');
       expect(result).not.toHaveProperty('discordDmMessage');
+    });
+
+    it('rejects submission when the applicant is blocked from applying (T-0055)', async () => {
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        applicationsBlockedAt: new Date(),
+      });
+
+      await expect(service.submit(APPLICANT, validCreateDto())).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      // Blocked before recruitment/priors are even checked.
+      expect(settings.findOne).not.toHaveBeenCalled();
+      expect(applications.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getMine', () => {
+    it("returns the caller's latest application (scoped to their identity) + not blocked", async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ status: ApplicationStatus.Declined, declineReason: 'Too few hours' }),
+      );
+
+      const result = await service.getMine(APPLICANT);
+
+      expect(applications.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            regimentId: 'regiment-1',
+            discordIdentityId: 'identity-applicant',
+            isDraft: false,
+          }),
+          order: { submittedAt: 'DESC' },
+        }),
+      );
+      expect(result.application?.id).toBe('app-1');
+      expect(result.application?.declineReason).toBe('Too few hours');
+      expect(result.blocked).toBe(false);
+    });
+
+    it('returns a null application and blocked=true when never applied but blocked', async () => {
+      applications.findOne!.mockResolvedValue(null);
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        applicationsBlockedAt: new Date(),
+      });
+
+      const result = await service.getMine(APPLICANT);
+      expect(result.application).toBeNull();
+      expect(result.blocked).toBe(true);
+    });
+  });
+
+  describe('updateMine', () => {
+    it('throws NotFound when the caller has no application', async () => {
+      applications.findOne!.mockResolvedValue(null);
+      await expect(service.updateMine(APPLICANT, { inGameName: 'X' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('throws Conflict when the application is not pending', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ status: ApplicationStatus.Declined }),
+      );
+      await expect(service.updateMine(APPLICANT, { inGameName: 'X' })).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('updates only provided fields, re-bumps submittedAt, and returns the projection', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ status: ApplicationStatus.Pending }),
+      );
+
+      const result = await service.updateMine(APPLICANT, {
+        inGameName: 'NewName',
+        preferredClasses: 'Sapper',
+      });
+
+      const saved = applications.save!.mock.calls[0][0] as Application;
+      expect(saved.inGameName).toBe('NewName');
+      expect(saved.preferredClasses).toBe('Sapper');
+      // A field not in the patch is preserved.
+      expect(saved.currentRegiment).toBe('None');
+      // Re-bumped to the top of the officer queue.
+      expect(saved.submittedAt.getTime()).toBeGreaterThan(
+        new Date('2026-06-22T18:00:00.000Z').getTime(),
+      );
+      expect(result.inGameName).toBe('NewName');
+    });
+  });
+
+  describe('blockApplicant', () => {
+    it('sets the block on the applicant identity and audits it', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        applicationsBlockedAt: null,
+      });
+
+      const result = await service.blockApplicant(STAFF, 'app-1', { reason: 'spam' }, '2.2.2.2');
+
+      const savedIdentity = identities.save!.mock.calls[0][0] as DiscordIdentity;
+      expect(savedIdentity.applicationsBlockedAt).toBeInstanceOf(Date);
+      expect(savedIdentity.applicationsBlockedByMemberId).toBe('member-staff');
+      expect(savedIdentity.applicationsBlockedReason).toBe('spam');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'application.block' }),
+      );
+      expect(result.id).toBe('app-1');
+    });
+
+    it('throws BadRequest when the application has no linked identity to block', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication({ discordIdentityId: null }));
+      await expect(service.blockApplicant(STAFF, 'app-1', {}, null)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+  });
+
+  describe('unblockApplicant', () => {
+    it('clears the block on the applicant identity and audits it', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        applicationsBlockedAt: new Date(),
+      });
+
+      await service.unblockApplicant(STAFF, 'app-1', null);
+
+      const savedIdentity = identities.save!.mock.calls[0][0] as DiscordIdentity;
+      expect(savedIdentity.applicationsBlockedAt).toBeNull();
+      expect(savedIdentity.applicationsBlockedByMemberId).toBeNull();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'application.unblock' }),
+      );
     });
   });
 

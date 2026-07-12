@@ -166,6 +166,34 @@ describe('SettingsService', () => {
     });
   });
 
+  describe('completeSetup', () => {
+    it('flips setupComplete false → true, saves, and audits', async () => {
+      regimentRepo.findOne.mockResolvedValue(buildRegiment({ setupComplete: false }));
+      settingsRepo.findOne.mockResolvedValue(buildSettings());
+
+      const dto = await service.completeSetup(user(), null);
+
+      expect(regimentRepo.save).toHaveBeenCalledTimes(1);
+      const saved = regimentRepo.save.mock.calls[0][0] as Regiment;
+      expect(saved.setupComplete).toBe(true);
+      expect(dto.setupComplete).toBe(true);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'settings.update', after: { setupComplete: true } }),
+      );
+    });
+
+    it('is a no-op (no save, no audit) when setup is already complete', async () => {
+      regimentRepo.findOne.mockResolvedValue(buildRegiment({ setupComplete: true }));
+      settingsRepo.findOne.mockResolvedValue(buildSettings());
+
+      const dto = await service.completeSetup(user(), null);
+
+      expect(regimentRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(dto.setupComplete).toBe(true);
+    });
+  });
+
   describe('getPermissions', () => {
     it('projects a full matrix, defaulting absent cells to false', async () => {
       permissionRepo.find.mockResolvedValue(ownerCoreRows());

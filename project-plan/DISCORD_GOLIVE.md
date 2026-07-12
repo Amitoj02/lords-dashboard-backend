@@ -10,7 +10,8 @@ all environment configuration + a Developer-Portal setup.
 2. **OAuth2** → copy the **Client ID** + **Client Secret**; add the redirect URI:
    - dev: `http://localhost:4200/api/auth/discord/callback`
    - prod: `https://lordsofholdfast.com/api/auth/discord/callback`
-   - scopes used: `identify email guilds`.
+   - scopes used: `identify email` (no `guilds` — guild membership is resolved from
+     the bot at sign-in, so the consent screen never asks "know what servers you're in").
 3. **Bot** → add a bot, copy the **Bot Token**. Enable the **SERVER MEMBERS INTENT**
    (privileged) — the bot needs it to see members and manage roles.
 4. Invite the bot to the guild with the `bot` scope and only the **Manage Roles** +

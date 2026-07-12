@@ -103,7 +103,7 @@ export default (): AppConfig => ({
     clientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',
     callbackUrl:
       process.env.DISCORD_CALLBACK_URL ?? 'http://localhost:3000/api/auth/discord/callback',
-    scopes: (process.env.DISCORD_SCOPES ?? 'identify email guilds').split(' ').filter(Boolean),
+    scopes: (process.env.DISCORD_SCOPES ?? 'identify email').split(' ').filter(Boolean),
     guildId: process.env.DISCORD_GUILD_ID ?? '',
     // Default the mock ON only when no real client id is configured, so a fresh
     // `docker compose up` works with zero Discord setup; an explicit

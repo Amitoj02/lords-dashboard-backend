@@ -4,6 +4,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MemberRole, MemberStatus } from '../common/enums';
+import { DiscordGateway } from '../discord/gateway/discord-gateway';
 import { Member } from '../members/entities/member.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { AuthzService } from '../authz/authz.service';
@@ -26,7 +27,7 @@ const TOKEN = {
   refresh_token: 'refresh-token',
   token_type: 'Bearer',
   expires_in: 604800,
-  scope: 'identify email guilds',
+  scope: 'identify email',
 };
 
 const NEW_PROFILE = {
@@ -44,8 +45,9 @@ describe('AuthService', () => {
   let members: MockRepo<Member>;
   let regiments: MockRepo<Regiment>;
   let discord: jest.Mocked<
-    Pick<DiscordOAuthService, 'exchangeCode' | 'fetchUser' | 'isMemberOfGuild' | 'buildAvatarUrl'>
+    Pick<DiscordOAuthService, 'exchangeCode' | 'fetchUser' | 'buildAvatarUrl'>
   >;
+  let gateway: { fetchMember: jest.Mock };
   let jwt: { signAsync: jest.Mock };
   let authz: { grantedCapabilities: jest.Mock };
   let sessionContext: { invalidate: jest.Mock; invalidateSessions: jest.Mock };
@@ -59,8 +61,12 @@ describe('AuthService', () => {
     discord = {
       exchangeCode: jest.fn().mockResolvedValue(TOKEN),
       fetchUser: jest.fn().mockResolvedValue(NEW_PROFILE),
-      isMemberOfGuild: jest.fn().mockResolvedValue(true),
       buildAvatarUrl: jest.fn().mockReturnValue('https://cdn/avatar.png'),
+    };
+    // Guild membership is now resolved from the bot gateway (T-0050): a non-null
+    // fetchMember means the user is in the guild.
+    gateway = {
+      fetchMember: jest.fn().mockResolvedValue({ id: NEW_PROFILE.id, roles: [], joinedAt: null }),
     };
     jwt = { signAsync: jest.fn().mockResolvedValue('signed.jwt.token') };
 
@@ -71,6 +77,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(Member), useValue: members },
         { provide: getRepositoryToken(Regiment), useValue: regiments },
         { provide: DiscordOAuthService, useValue: discord },
+        { provide: DiscordGateway, useValue: gateway },
         { provide: JwtService, useValue: jwt },
         {
           provide: ConfigService,
@@ -109,6 +116,9 @@ describe('AuthService', () => {
         lastSignInIp: '1.2.3.4',
       });
       expect(saved.tokenExpiresAt).toBeInstanceOf(Date);
+      // guildMember is derived from the bot gateway (T-0050), keyed by the Discord
+      // user id — NOT from the OAuth `guilds` scope.
+      expect(gateway.fetchMember).toHaveBeenCalledWith('999000111222');
 
       // No roster member yet.
       expect(result.isMember).toBe(false);
@@ -154,7 +164,7 @@ describe('AuthService', () => {
       expect(payload).toEqual({ sub: 'identity-owner', did: '100000000000000001' });
     });
 
-    it('does not check guild membership when no guild is configured', async () => {
+    it('does not query the bot for guild membership when no guild is configured', async () => {
       const module: TestingModule = await Test.createTestingModule({
         providers: [
           AuthService,
@@ -162,6 +172,7 @@ describe('AuthService', () => {
           { provide: getRepositoryToken(Member), useValue: members },
           { provide: getRepositoryToken(Regiment), useValue: regiments },
           { provide: DiscordOAuthService, useValue: discord },
+          { provide: DiscordGateway, useValue: gateway },
           { provide: JwtService, useValue: jwt },
           { provide: ConfigService, useValue: { get: () => ({ guildId: '' }) } },
           { provide: AuthzService, useValue: authz },
@@ -178,7 +189,67 @@ describe('AuthService', () => {
       regiments.findOne!.mockResolvedValue({ id: 'regiment-1' });
 
       await svc.signInWithDiscord('code', null);
-      expect(discord.isMemberOfGuild).not.toHaveBeenCalled();
+      expect(gateway.fetchMember).not.toHaveBeenCalled();
+      const saved = identities.save!.mock.calls[0][0] as DiscordIdentity;
+      expect(saved.guildMember).toBe(false);
+    });
+
+    it('records guildMember=false when the bot does not find the user in the guild', async () => {
+      identities.findOne!.mockResolvedValue(null);
+      identities.save!.mockImplementation((x: DiscordIdentity) =>
+        Promise.resolve({ ...x, id: 'i' }),
+      );
+      members.findOne!.mockResolvedValue(null);
+      regiments.findOne!.mockResolvedValue({ id: 'regiment-1' });
+      // The bot reports the user is NOT in the guild.
+      gateway.fetchMember.mockResolvedValue(null);
+
+      await service.signInWithDiscord('code', null);
+
+      const saved = identities.save!.mock.calls[0][0] as DiscordIdentity;
+      expect(saved.guildMember).toBe(false);
+    });
+
+    it('never blocks login when the bot lookup throws — falls back to guildMember=false', async () => {
+      identities.findOne!.mockResolvedValue(null);
+      identities.save!.mockImplementation((x: DiscordIdentity) =>
+        Promise.resolve({ ...x, id: 'i' }),
+      );
+      members.findOne!.mockResolvedValue(null);
+      regiments.findOne!.mockResolvedValue({ id: 'regiment-1' });
+      // A disconnected/slow bot surfaces as a thrown error; login must still succeed.
+      gateway.fetchMember.mockRejectedValue(new Error('gateway not connected'));
+
+      const result = await service.signInWithDiscord('code', null);
+
+      expect(result.token).toBe('signed.jwt.token');
+      const saved = identities.save!.mock.calls[0][0] as DiscordIdentity;
+      expect(saved.guildMember).toBe(false);
+    });
+
+    it('never blocks login when the bot lookup HANGS — times out to guildMember=false', async () => {
+      jest.useFakeTimers();
+      try {
+        identities.findOne!.mockResolvedValue(null);
+        identities.save!.mockImplementation((x: DiscordIdentity) =>
+          Promise.resolve({ ...x, id: 'i' }),
+        );
+        members.findOne!.mockResolvedValue(null);
+        regiments.findOne!.mockResolvedValue({ id: 'regiment-1' });
+        // A hung gateway call that never settles — the inline timeout must abandon it.
+        gateway.fetchMember.mockReturnValue(new Promise<never>(() => {}));
+
+        const pending = service.signInWithDiscord('code', null);
+        // Advance past GUILD_LOOKUP_TIMEOUT_MS (4000ms) so withTimeout rejects.
+        await jest.advanceTimersByTimeAsync(4000);
+        const result = await pending;
+
+        expect(result.token).toBe('signed.jwt.token');
+        const saved = identities.save!.mock.calls[0][0] as DiscordIdentity;
+        expect(saved.guildMember).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 

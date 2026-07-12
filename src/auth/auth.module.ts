@@ -5,6 +5,7 @@ import { JwtModule, JwtSignOptions } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppConfig } from '../config/configuration';
+import { DiscordModule } from '../discord/discord.module';
 import { Member } from '../members/entities/member.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { AuthController } from './auth.controller';
@@ -19,6 +20,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     TypeOrmModule.forFeature([DiscordIdentity, Member, Regiment]),
     PassportModule,
+    // Provides DiscordGateway so sign-in can resolve guild membership via the bot
+    // (T-0050) rather than the OAuth `guilds` scope. DiscordModule does not import
+    // AuthModule, so this is a one-way edge (no circular dependency).
+    DiscordModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],

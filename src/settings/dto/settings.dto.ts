@@ -42,6 +42,11 @@ export class SettingsDto {
   @ApiProperty({ nullable: true })
   discordServerName: string | null;
 
+  @ApiProperty({
+    description: 'False until the Owner has completed first-run setup (drives first-run routing).',
+  })
+  setupComplete: boolean;
+
   // ── Privacy toggles ──────────────────────────────────────────────────────────
 
   @ApiProperty()
@@ -116,6 +121,7 @@ export class SettingsDto {
     dto.discordInviteUrl = regiment.discordInviteUrl;
     dto.discordServerId = regiment.discordServerId;
     dto.discordServerName = regiment.discordServerName;
+    dto.setupComplete = regiment.setupComplete;
     dto.publicRoster = settings.publicRoster;
     dto.publicGallery = settings.publicGallery;
     dto.publicEvents = settings.publicEvents;

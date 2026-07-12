@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { AppConfig } from '../config/configuration';
 import { MemberRole } from '../common/enums';
 import { AuthzService } from '../authz/authz.service';
+import { DiscordGateway } from '../discord/gateway/discord-gateway';
 import { Member } from '../members/entities/member.entity';
 import { CurrentUserDto } from './dto/current-user.dto';
 import { DiscordOAuthService } from './discord-oauth.service';
@@ -21,8 +22,17 @@ export interface SignInResult {
   isMember: boolean;
 }
 
+/**
+ * Upper bound on the inline guild-membership lookup during sign-in. The bot call
+ * is best-effort (regression risk T-0050#0): a slow/hung gateway must never block
+ * login, so we abandon the lookup after this and fall back to guildMember=false.
+ */
+const GUILD_LOOKUP_TIMEOUT_MS = 4000;
+
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @InjectRepository(DiscordIdentity)
     private readonly identities: Repository<DiscordIdentity>,
@@ -33,6 +43,7 @@ export class AuthService {
     private readonly config: ConfigService<AppConfig, true>,
     private readonly authz: AuthzService,
     private readonly sessionContext: SessionContextService,
+    private readonly discordGateway: DiscordGateway,
   ) {}
 
   /**
@@ -52,10 +63,9 @@ export class AuthService {
     const token = await this.discordOAuth.exchangeCode(code);
     const profile = await this.discordOAuth.fetchUser(token.access_token);
 
-    const guildId = this.config.get('discord', { infer: true }).guildId;
-    const guildMember = guildId
-      ? await this.discordOAuth.isMemberOfGuild(token.access_token, guildId)
-      : false;
+    // Guild membership is resolved from the bot (T-0050), not the OAuth `guilds`
+    // scope — so the consent screen no longer asks "know what servers you're in".
+    const guildMember = await this.resolveGuildMembership(profile.id);
 
     const identity = await this.upsertIdentity(profile, token, guildMember, ip);
 
@@ -94,6 +104,57 @@ export class AuthService {
   /** True when a member is currently within an active suspension window. */
   private isActivelySuspended(member: Member): boolean {
     return !!member.suspendedUntil && member.suspendedUntil.getTime() > Date.now();
+  }
+
+  /**
+   * Whether the signing-in Discord user is in the regiment guild, resolved via
+   * the bot's gateway (T-0050) rather than the OAuth `guilds` scope. Runs INLINE
+   * on the synchronous sign-in path, so it is deliberately defensive (regression
+   * risk T-0050#0): it never throws and is bounded by {@link GUILD_LOOKUP_TIMEOUT_MS},
+   * so a slow, failing, or disconnected bot can never stall or block login —
+   * membership simply falls back to `false` (parity with the old
+   * fetchGuilds([]-on-failure) behaviour). Returns `false` when no guild is
+   * configured (nothing to check against).
+   */
+  private async resolveGuildMembership(discordUserId: string): Promise<boolean> {
+    const guildId = this.config.get('discord', { infer: true }).guildId;
+    if (!guildId) return false;
+    try {
+      const member = await this.withTimeout(
+        this.discordGateway.fetchMember(discordUserId),
+        GUILD_LOOKUP_TIMEOUT_MS,
+      );
+      return member !== null;
+    } catch (error) {
+      this.logger.warn(
+        `Guild membership lookup failed for ${discordUserId}; treating as non-member: ${
+          (error as Error).message
+        }`,
+      );
+      return false;
+    }
+  }
+
+  /** Reject with a timeout error if `promise` has not settled within `ms`. */
+  private withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error(`gateway lookup timed out after ${ms}ms`)),
+        ms,
+      );
+      // Don't let the timer hold the event loop open (e.g. during shutdown/tests).
+      timer.unref?.();
+      promise.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (err: unknown) => {
+          clearTimeout(timer);
+          reject(err instanceof Error ? err : new Error(String(err)));
+        },
+      );
+    });
   }
 
   /** Create or update the Discord identity keyed by the stable snowflake. */

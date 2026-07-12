@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -25,9 +26,12 @@ import { Capability } from '../common/enums';
 import { ApplicationsService } from './applications.service';
 import { ApplicationDto } from './dto/application.dto';
 import { ApplicationQueryDto } from './dto/application-query.dto';
+import { BlockApplicantDto } from './dto/block-applicant.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { DeclineApplicationDto } from './dto/decline-application.dto';
 import { HoldApplicationDto } from './dto/hold-application.dto';
+import { MyApplicationDto } from './dto/my-application.dto';
+import { UpdateMyApplicationDto } from './dto/update-my-application.dto';
 
 @ApiTags('applications')
 @ApiBearerAuth('access-token')
@@ -44,6 +48,27 @@ export class ApplicationsController {
     @Body() dto: CreateApplicationDto,
   ): Promise<ApplicationDto> {
     return this.applicationsService.submit(user, dto);
+  }
+
+  // NOTE: /mine is declared BEFORE the /:id routes so it is not captured as an
+  // application id (an applicant lacks manage_applications and would 403).
+  @Get('mine')
+  @RequireCapability(Capability.ApplyToJoin)
+  @ApiOperation({ summary: "Fetch the caller's own application + blocked state (applicant)" })
+  @ApiOkResponse({ type: MyApplicationDto, description: 'The caller’s application view.' })
+  getMine(@CurrentUser() user: AuthenticatedUser): Promise<MyApplicationDto> {
+    return this.applicationsService.getMine(user);
+  }
+
+  @Patch('mine')
+  @RequireCapability(Capability.ApplyToJoin)
+  @ApiOperation({ summary: "Edit the caller's own PENDING application (applicant)" })
+  @ApiOkResponse({ type: ApplicationDto, description: 'The updated application.' })
+  updateMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateMyApplicationDto,
+  ): Promise<ApplicationDto> {
+    return this.applicationsService.updateMine(user, dto);
   }
 
   @Get()
@@ -107,5 +132,34 @@ export class ApplicationsController {
     @Req() req: Request,
   ): Promise<ApplicationDto> {
     return this.applicationsService.hold(user, id, dto, req.ip ?? null);
+  }
+
+  @Post(':id/block')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.ManageApplications)
+  @ApiOperation({
+    summary: 'Permanently block this applicant from submitting further applications',
+  })
+  @ApiOkResponse({ type: ApplicationDto, description: 'The application (applicant now blocked).' })
+  block(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: BlockApplicantDto,
+    @Req() req: Request,
+  ): Promise<ApplicationDto> {
+    return this.applicationsService.blockApplicant(user, id, dto, req.ip ?? null);
+  }
+
+  @Post(':id/unblock')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.ManageApplications)
+  @ApiOperation({ summary: 'Re-enable a previously blocked applicant' })
+  @ApiOkResponse({ type: ApplicationDto, description: 'The application (applicant re-enabled).' })
+  unblock(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Req() req: Request,
+  ): Promise<ApplicationDto> {
+    return this.applicationsService.unblockApplicant(user, id, req.ip ?? null);
   }
 }
