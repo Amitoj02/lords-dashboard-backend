@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "5e726f7e0310b42ec535452e9e1512ba8f953097",
-  "lastSyncedAt": "2026-07-12T17:39:21Z",
-  "notesForNextSession": "POST-MVP HARDENING NOW MERGED TO main via PR #5 (merge 2a35a4e). T-0034-0049 (ban->Ban-role, applications reshape + 18+ copy, per-purpose Discord channels, auth resolver + slim JWT + iat session invalidation) are all deploy_ready on main; backend + frontend shipped in lockstep. Real Discord bot go-live (T-0033) is VERIFIED against the REAL test guild (guild 1425324636534603842) and deploy_ready: /auth/me resolves the Owner from a slim token, rank change syncs a real role, announce/enlistment/audit-mirror/ban-role all fire live. applyBanRoleOnBan stays DEFAULT OFF per the owner. NEW PLANNED SCOPE from a bf-plan session (T-0050-0053, all `planned`, not started): stop requesting the Discord `guilds` OAuth scope and instead derive guild membership from the bot's DiscordGateway.fetchMember at sign-in (T-0050), drop the scope + delete the dead fetchGuilds/isMemberOfGuild helpers from config/env/seed (T-0051), keep mock-mode parity so mocked sign-in still sets guildMember via the mock gateway (T-0052), and update specs + verify end-to-end on the test guild (T-0053). Two open risks noted for that work: fetchMember now runs inline on the synchronous login path (T-0050#0) and stored `identify email guilds` scope strings must stay tolerated (T-0051#0). Also: .env.example now documents API_HOST_PORT (host-port override for the api container; wiring already existed in docker-compose.override.yml since 192885f) — the fix for the port-3000-occupied gotcha; recorded under T-0031. GOTCHAS (unchanged): (1) the host jest e2e shares the docker MySQL with the running api's REAL worker — STOP the api container (docker stop lords-dashboard-backend-api-1) before `npm run test:e2e` (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true) or the live worker drains the test jobs. (2) dist/ is root-owned from the container build — build-check with `tsc -p tsconfig.build.json --outDir <scratch>`. T-0033 remaining is human-only: click Discord's OAuth consent + register the PROD redirect URI, then flip prod env. NEXT: implement the T-0050-0053 guilds-scope removal, then owner does T-0032 MVP deploy + the real go-live consent, then the T-0025 hardening pass.",
-  "nextIdCounter": 54,
+  "lastSyncedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
+  "lastSyncedAt": "2026-07-12T19:02:09Z",
+  "notesForNextSession": "GUILDS-SCOPE REMOVAL + APPLICANT SELF-SERVICE EPIC shipped this session on TWO branches (not yet merged): backend feat/guilds-scope-and-applicant-self-service (commit 9ed1dc6) and frontend lords-regiment-dashboard:feat/applicant-self-service (commit d9277e9). BACKEND: T-0050-0053 (drop the Discord `guilds` OAuth scope; derive guildMember from the bot's fetchMember at sign-in, guarded by a 4s timeout + try/catch so it never blocks login) all deploy_ready + VERIFIED LIVE (authorize URL scope = `identify email`; bot REST member lookup 200 in-guild / 404 not). NEW T-0054 (GET/PATCH /applications/mine), T-0055 (applicant blocklist: block/unblock + submit guard, columns on discord_identities), T-0056 (setupComplete flip endpoint). 226 unit + 35 e2e green, lint+build clean, adversarial review clean. Live-verified the whole applicant flow via minted JWTs (submit→mine→edit→block→403 resubmit→unblock). FRONTEND (51 specs green, build clean): applicant status page, apply-as-signin CTA, returning-applicant redirect, edit-pending, admin block UI, Owner first-run routing, and RETIRED the stub owner-setup wizard (→ /admin/settings). Browser-verified the status page (pending+blocked), the pre-filled edit form, and the admin block controls against the live stack. T-0026/27/28 questionnaires archived (answers consumed). T-0003 rank-ladder risk retired (owner: dummy ranks OK, greenfield). DEFERRED / next session: (1) frontend T-0020 wire the account-deletion UI to the existing GDPR endpoints; (2) frontend landing still shows hardcoded stats/officers arrays (wire GET /regiment/stats, and guard un-wired surfaces before the T-0032 public deploy); (3) T-0036 owner-superadmin verify was exercised via a minted owner JWT (full admin panel rendered) — for the REAL owner set OWNER_DISCORD_ID in .env and reseed before seed:prod. HUMAN-ONLY remaining: T-0033 Discord OAuth consent + register the PROD redirect URI; T-0032 MVP DigitalOcean deploy; then the full T-0025 hardening pass. GOTCHAS (unchanged): STOP the api container before host e2e (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true); dist/ is root-owned — build-check with tsc --outDir <scratch>; the api container is dev-mode (start:dev, source bind-mounted, host port 3001).",
+  "nextIdCounter": 57,
   "connections": [],
   "tasks": [
     {
@@ -125,14 +125,17 @@
       "regressionRisk": [
         {
           "desc": "the seeded rank ladder may not match the canonical ladder (see T-0026 Q1); reseeding after correction is destructive",
-          "status": "open",
-          "notedAt": "2026-07-11T00:50:59Z"
+          "status": "resolved",
+          "notedAt": "2026-07-11T00:50:59Z",
+          "resolvedAt": "2026-07-12T19:02:09Z",
+          "resolvedBy": "claude",
+          "note": "Retired by the owner's T-0026 answer: dummy ranks are fine for now ('I will figure it out with the regiment owner later'), and the project is greenfield with no production data (T-0028/T-0039), so a corrective reseed is non-destructive. No canonical ladder to enforce yet."
         }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": "eb74fb1435b2283290ede4f76b1ce5e6f37b0472",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T00:50:59Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1185,7 +1188,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T02:30:00Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1207,6 +1210,13 @@
           "to": "planned",
           "by": "claude",
           "note": "bf-plan re-scope: now the POST-MVP full go-live (depends on MVP deploy T-0032); split MVP deploy into T-0032; updated frontend deps to T-0017/T-0024/T-0025"
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "Partial: ran an adversarial security review of the new applicant self-service + blocklist + setup-complete surface this session (IDOR/ownership, route shadowing, mass-assignment, blocklist bypass, privilege escalation, info-leak, login DoS). The FULL hardening pass + cross-stack bot E2E + prod re-deploy stay blocked on the T-0032 owner deploy."
         }
       ]
     },
@@ -1214,7 +1224,7 @@
       "id": "T-0026",
       "title": "Questionnaire — domain model decisions",
       "summary": "Open product decisions that shape seeding and validation before Phase 02 builds on them.",
-      "status": "in_progress",
+      "status": "archived",
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
@@ -1254,7 +1264,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1283,6 +1293,13 @@
           "to": "in_progress",
           "by": "claude",
           "note": "answers consumed by the MVP build (T-0026 rank ladder/repeatable medals; T-0027 ban->discord-kick flagged for bot; T-0028 recruitment-off/real-stats/hosting)."
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "in_progress",
+          "to": "archived",
+          "by": "claude",
+          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action — archived as a completed questionnaire."
         }
       ]
     },
@@ -1290,7 +1307,7 @@
       "id": "T-0027",
       "title": "Questionnaire — Discord / bot decisions",
       "summary": "Open decisions that shape the Discord bot phases (07-09) and the new migration.",
-      "status": "in_progress",
+      "status": "archived",
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
@@ -1338,7 +1355,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1360,6 +1377,13 @@
           "to": "in_progress",
           "by": "claude",
           "note": "answers consumed by the MVP build (T-0026 rank ladder/repeatable medals; T-0027 ban->discord-kick flagged for bot; T-0028 recruitment-off/real-stats/hosting)."
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "in_progress",
+          "to": "archived",
+          "by": "claude",
+          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action — archived as a completed questionnaire."
         }
       ]
     },
@@ -1367,7 +1391,7 @@
       "id": "T-0028",
       "title": "Questionnaire — product flows & ops/deploy",
       "summary": "Open product-flow and deployment decisions needed before Phase 12 (and some feature phases).",
-      "status": "in_progress",
+      "status": "archived",
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
@@ -1424,7 +1448,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1453,6 +1477,13 @@
           "to": "in_progress",
           "by": "claude",
           "note": "answers consumed by the MVP build (T-0026 rank ladder/repeatable medals; T-0027 ban->discord-kick flagged for bot; T-0028 recruitment-off/real-stats/hosting)."
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "in_progress",
+          "to": "archived",
+          "by": "claude",
+          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action — archived as a completed questionnaire."
         }
       ]
     },
@@ -2918,7 +2949,7 @@
       "id": "T-0050",
       "title": "Derive guild membership from the bot, not the OAuth guilds scope",
       "summary": "At sign-in, stop calling isMemberOfGuild() (which reads the OAuth `guilds` scope via GET /users/@me/guilds) and instead resolve membership through the already-present bot: guildMember = (await discordGateway.fetchMember(discordUserId)) !== null. Wire DiscordGateway into AuthService/AuthModule and degrade to guildMember=false (never block login) if the bot is unavailable, matching today's fetchGuilds([]-on-failure) behaviour.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -2935,32 +2966,35 @@
       "testPlan": [
         {
           "desc": "signing in with a user who IS in the regiment guild sets discord_identities.guild_member = 1 via the bot (no /users/@me/guilds call is made)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "signing in with a user who is NOT in the guild sets guild_member = 0",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "when the bot/gateway is unavailable, sign-in still succeeds and guild_member falls back to 0 (login is never blocked)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "member-detail DTO still surfaces guildMember correctly for a roster entry",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "AuthService now calls DiscordGateway.fetchMember inline during the synchronous sign-in path; the gateway was previously invoked only by the outbox worker (which isolates failures), so a slow/throwing bot call must not stall or fail login.",
-          "status": "open",
-          "notedAt": "2026-07-12T15:23:11Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T15:23:11Z",
+          "resolvedAt": "2026-07-12T19:02:09Z",
+          "resolvedBy": "claude",
+          "note": "Resolved: resolveGuildMembership wraps DiscordGateway.fetchMember in a 4s timeout + try/catch and returns false on any error, so a slow/hung/throwing bot can never stall or fail login (parity with the old fetchGuilds([]-on-failure)). Adversarial review confirmed non-throwing on every failure mode; unit-tested throw + hang branches."
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -2968,6 +3002,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan: replace OAuth guilds-scope membership check with a bot fetchMember lookup"
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         }
       ]
     },
@@ -2975,7 +3016,7 @@
       "id": "T-0051",
       "title": "Drop the `guilds` OAuth scope and retire the dead guilds fetch code",
       "summary": "Remove `guilds` from DISCORD_SCOPES everywhere it is defaulted (config/env.validation.ts, config/configuration.ts, .env, .env.example) so the consent screen only requests identify + email. Delete the now-unused fetchGuilds()/isMemberOfGuild() from DiscordOAuthService and its mock, and drop `guilds` from the dev-owner seed scopes string.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -2998,32 +3039,35 @@
       "testPlan": [
         {
           "desc": "DISCORD_SCOPES default is `identify email` (no guilds) and the built authorize URL contains scope=identify+email only",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "app boots with the new default; env.validation accepts a guilds-less scope string",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "fetchGuilds/isMemberOfGuild are removed and no remaining src reference calls them (grep clean)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "dev-owner seed stores scopes without `guilds` and db:setup still runs idempotently",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "Existing discord_identities rows persist an `identify email guilds` scopes string; the dropped scope only affects new consents, but any code asserting the stored value must be tolerant of both.",
-          "status": "open",
-          "notedAt": "2026-07-12T15:23:11Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T15:23:11Z",
+          "resolvedAt": "2026-07-12T19:02:09Z",
+          "resolvedBy": "claude",
+          "note": "Resolved: no code branches on the stored `scopes` string value (grep-confirmed — only writes). Existing `identify email guilds` rows are inert; the next sign-in overwrites with `identify email`. dev-owner seed updated."
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3031,6 +3075,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan: remove the guilds scope from config/env/seed and delete the dead guilds fetch helpers"
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         }
       ]
     },
@@ -3038,7 +3089,7 @@
       "id": "T-0052",
       "title": "Mock-mode parity for bot-based membership",
       "summary": "Ensure DISCORD_MOCK / DISCORD_BOT_MOCK sign-in still yields a correct guildMember without the guilds scope: MockDiscordGateway.fetchMember must return a member (or null) consistent with the mock persona so the mocked auth flow sets guild_member the same way the real bot would.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -3056,22 +3107,22 @@
       "testPlan": [
         {
           "desc": "with DISCORD_BOT_MOCK=true, the default owner persona resolves fetchMember != null and mock sign-in sets guild_member = 1",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "a mock persona modelled as not-in-guild resolves fetchMember == null -> guild_member = 0",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "the full mock sign-in path (mock OAuth + mock gateway) requires no `guilds` scope and needs no real Discord app",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3079,6 +3130,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan: keep mocked sign-in setting guildMember via the mock gateway after the scope is dropped"
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         }
       ]
     },
@@ -3086,7 +3144,7 @@
       "id": "T-0053",
       "title": "Update specs + verify the scope removal end-to-end",
       "summary": "Adjust and extend coverage for the change: discord-oauth.service.spec (scope assertion no longer expects guilds), auth.service.spec (guildMember now sourced from the gateway), mock specs and any seed/e2e fixtures. Then verify against the real test guild that sign-in no longer requests the guilds consent yet guild_member is still set correctly.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -3108,26 +3166,26 @@
       "testPlan": [
         {
           "desc": "unit + e2e suites are green after the scope/logic change (no spec still asserts scope=identify+guilds)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "auth.service.spec proves guildMember is derived from DiscordGateway.fetchMember, not from fetchGuilds",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "live smoke on the real test guild: the Discord consent screen no longer lists 'Know what servers you're in', and an in-guild owner sign-in still records guild_member = 1",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "lint + build clean",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T15:23:11Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3135,6 +3193,200 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan: update affected specs and verify the guilds scope is gone while membership stays correct"
+        },
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+        }
+      ]
+    },
+    {
+      "id": "T-0054",
+      "title": "Applicant self-service API (GET/PATCH /applications/mine)",
+      "summary": "Applicant-facing read + edit of their own application: GET /applications/mine (the caller's current application or null, plus a blocked flag) and PATCH /applications/mine (edit a PENDING application; re-bumps it in the officer queue). Scoped to the caller's Discord identity, gated by apply_to_join. Backs the frontend status page + edit flow.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/applications/applications.controller.ts",
+        "src/applications/applications.service.ts",
+        "src/applications/dto/my-application.dto.ts",
+        "src/applications/dto/update-my-application.dto.ts"
+      ],
+      "dependsOn": [
+        "T-0014"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /applications/mine returns the caller's latest application (or null) + blocked flag, scoped to their identity",
+          "status": "passed"
+        },
+        {
+          "desc": "PATCH /applications/mine edits only a PENDING application owned by the caller; a decided/held one is 409",
+          "status": "passed"
+        },
+        {
+          "desc": "an applicant (apply_to_join, not manage_applications) cannot reach the admin GET/:id, approve or block routes",
+          "status": "passed"
+        },
+        {
+          "desc": "full unit + e2e suite green; verified live end-to-end (submit → mine → edit)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "New applicant read/write contract; the Angular status page + apply-edit + application.model must ship in lockstep.",
+          "status": "resolved",
+          "notedAt": "2026-07-12T19:02:09Z",
+          "resolvedAt": "2026-07-12T19:02:09Z",
+          "resolvedBy": "claude",
+          "note": "Frontend applicant self-service (status page, edit mode, model/service) shipped in lockstep on lords-regiment-dashboard:feat/applicant-self-service and browser-verified."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
+      "createdAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
+      "history": [
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built GET /applications/mine + PATCH /applications/mine (apply_to_join, scoped to the caller's Discord identity; edit only a PENDING app, re-bumps the officer queue). 226 unit + 35 e2e green; verified live via JWT smoke (submit→mine→edit round-trips). Frontend status page + edit form shipped in lockstep (lords-regiment-dashboard:T-0028/29/31)."
+        }
+      ]
+    },
+    {
+      "id": "T-0055",
+      "title": "Applicant blocklist (block / re-enable from applying)",
+      "summary": "An officer can permanently bar a Discord identity from submitting further applications, and re-enable them (manage_applications). Stored as applications_blocked_at/by/reason columns on discord_identities (mirroring the member ban/suspend-as-columns convention); enforced first thing in submit(). Backs the frontend admin block action and the applicant reapply gating.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/database/migrations/1782440000000-ApplicationBlocklist.ts",
+        "src/auth/entities/discord-identity.entity.ts",
+        "src/applications/applications.controller.ts",
+        "src/applications/applications.service.ts",
+        "src/applications/dto/block-applicant.dto.ts",
+        "src/database/seeds/audit-actions.seed.ts"
+      ],
+      "dependsOn": [
+        "T-0014"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "migration adds applications_blocked_* idempotently; db:setup re-runs clean",
+          "status": "passed"
+        },
+        {
+          "desc": "block/unblock are manage_applications-gated; an applicant cannot call them (403)",
+          "status": "passed"
+        },
+        {
+          "desc": "a blocked identity is refused a new submit (403) — checked before recruitment/priors",
+          "status": "passed"
+        },
+        {
+          "desc": "block/unblock audited (application.block / application.unblock); verified live",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "discord_identities schema + a new intake rejection path; the admin applications view must add the block/unblock action and the reapply gating in lockstep.",
+          "status": "resolved",
+          "notedAt": "2026-07-12T19:02:09Z",
+          "resolvedAt": "2026-07-12T19:02:09Z",
+          "resolvedBy": "claude",
+          "note": "Frontend admin Block-from-applying / Re-enable action + applicant reapply gating shipped in lockstep and browser-verified."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
+      "createdAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
+      "history": [
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built the applicant blocklist: POST /applications/:id/{block,unblock} (manage_applications) set/clear applications_blocked_* on discord_identities (idempotent migration), and submit() rejects a blocked identity FIRST. Audited (application.block/unblock seeded). Verified live: block → applicant sees blocked + resubmit 403; applicant-block 403; unblock clears. Frontend admin block UI shipped in lockstep."
+        }
+      ]
+    },
+    {
+      "id": "T-0056",
+      "title": "Regiment first-run setup flip (setupComplete write path)",
+      "summary": "Expose + flip regiment.setupComplete so the Owner can be guided through first-run setup: POST /settings/complete-setup marks it done, SettingsDto surfaces it, and the seed starts a genuine greenfield deploy incomplete (dev fixture stays complete). Backs the frontend first-run routing.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/settings/settings.controller.ts",
+        "src/settings/settings.service.ts",
+        "src/settings/dto/settings.dto.ts",
+        "src/database/seeds/regiment.seed.ts"
+      ],
+      "dependsOn": [
+        "T-0019"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST /settings/complete-setup flips setupComplete=true (idempotent no-op if already), manage_settings-gated + audited",
+          "status": "passed"
+        },
+        {
+          "desc": "SettingsDto exposes setupComplete; the regiment profile already did",
+          "status": "passed"
+        },
+        {
+          "desc": "seed starts setupComplete=false for a real greenfield owner, true for the dev fixture (dev/e2e unaffected)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Settings contract gains setupComplete + a flip endpoint; the frontend first-run routing (Owner → admin settings) must consume it.",
+          "status": "resolved",
+          "notedAt": "2026-07-12T19:02:09Z",
+          "resolvedAt": "2026-07-12T19:02:09Z",
+          "resolvedBy": "claude",
+          "note": "Frontend first-run routing (routeAfterLogin: Owner + setupComplete=false → /admin/settings) shipped in lockstep on lords-regiment-dashboard:T-0037."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
+      "createdAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-12T19:02:09Z",
+      "history": [
+        {
+          "at": "2026-07-12T19:02:09Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Added POST /settings/complete-setup (manage_settings) to flip regiment.setupComplete; SettingsDto now exposes setupComplete; the seed starts a real greenfield deploy (OWNER_DISCORD_ID set) with setup INCOMPLETE while the dev fixture stays complete. Enables the frontend Owner first-run routing. Unit-tested; audited as a settings change."
         }
       ]
     }

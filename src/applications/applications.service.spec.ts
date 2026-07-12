@@ -299,6 +299,17 @@ describe('ApplicationsService', () => {
       );
     });
 
+    it('refuses to edit when the applicant is blocked (cannot re-bump the queue)', async () => {
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        applicationsBlockedAt: new Date(),
+      });
+      await expect(service.updateMine(APPLICANT, { inGameName: 'X' })).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(applications.save).not.toHaveBeenCalled();
+    });
+
     it('updates only provided fields, re-bumps submittedAt, and returns the projection', async () => {
       applications.findOne!.mockResolvedValue(
         baseApplication({ status: ApplicationStatus.Pending }),
@@ -323,12 +334,26 @@ describe('ApplicationsService', () => {
   });
 
   describe('blockApplicant', () => {
-    it('sets the block on the applicant identity and audits it', async () => {
+    /** Chainable stub for the bulk "decline open applications" query builder. */
+    const declineQb = () => {
+      const qb: Record<string, jest.Mock> = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({}),
+      };
+      return qb;
+    };
+
+    it('sets the block, declines the open application, and audits it', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
       identities.findOne!.mockResolvedValue({
         id: 'identity-applicant',
         applicationsBlockedAt: null,
       });
+      const qb = declineQb();
+      applications.createQueryBuilder!.mockReturnValue(qb);
 
       const result = await service.blockApplicant(STAFF, 'app-1', { reason: 'spam' }, '2.2.2.2');
 
@@ -336,6 +361,11 @@ describe('ApplicationsService', () => {
       expect(savedIdentity.applicationsBlockedAt).toBeInstanceOf(Date);
       expect(savedIdentity.applicationsBlockedByMemberId).toBe('member-staff');
       expect(savedIdentity.applicationsBlockedReason).toBe('spam');
+      // Open applications by this identity are declined so they leave the queue.
+      expect(qb.set).toHaveBeenCalledWith(
+        expect.objectContaining({ status: ApplicationStatus.Declined }),
+      );
+      expect(qb.execute).toHaveBeenCalled();
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'application.block' }),
       );

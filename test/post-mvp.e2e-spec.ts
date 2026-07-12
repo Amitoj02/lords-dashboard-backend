@@ -460,24 +460,32 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(patched.body.inGameName).toBe('SelfService2');
     });
 
-    it('owner blocks the applicant → applicant is blocked and cannot resubmit', async () => {
-      await request(server())
+    it('owner blocks the applicant → app is declined, frozen, and no resubmit', async () => {
+      const blocked = await request(server())
         .post(`/api/applications/${appId}/block`)
         .set(bearer(ownerToken))
         .send({ reason: 'e2e block' })
         .expect(200);
+      // Blocking also declines the open application so it leaves the queue.
+      expect(blocked.body.status).toBe('declined');
 
       const mine = await request(server())
         .get('/api/applications/mine')
         .set(bearer(selfToken))
         .expect(200);
       expect(mine.body.blocked).toBe(true);
+      expect(mine.body.application.status).toBe('declined');
 
-      // A blocked identity is refused a new submit even with an existing app.
+      // A blocked identity is refused a new submit AND cannot edit (re-bump).
       await request(server())
         .post('/api/applications')
         .set(bearer(selfToken))
         .send(validApp)
+        .expect(403);
+      await request(server())
+        .patch('/api/applications/mine')
+        .set(bearer(selfToken))
+        .send({ inGameName: 'SneakyEdit' })
         .expect(403);
     });
 

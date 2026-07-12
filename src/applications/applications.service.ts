@@ -152,6 +152,13 @@ export class ApplicationsService {
    * informational only, so this is safe.
    */
   async updateMine(user: AuthenticatedUser, dto: UpdateMyApplicationDto): Promise<ApplicationDto> {
+    // A blocked applicant is frozen: they cannot edit (which would otherwise
+    // re-bump them into the officer queue). Mirrors the submit() guard (T-0055).
+    const identity = await this.identities.findOne({ where: { id: user.identityId } });
+    if (identity?.applicationsBlockedAt) {
+      throw new ForbiddenException('You are no longer permitted to submit an application');
+    }
+
     const application = await this.applications.findOne({
       where: { regimentId: user.regimentId, discordIdentityId: user.identityId, isDraft: false },
       order: { submittedAt: 'DESC' },
@@ -183,7 +190,9 @@ export class ApplicationsService {
   /**
    * Permanently block the applicant behind an application from submitting any
    * further applications (T-0055). The block lives on their Discord identity, so
-   * it survives across applications. Audited.
+   * it survives across applications. Any open (Pending/Held) application by that
+   * identity is also declined in the same action, so a blocked applicant leaves
+   * the officer queue and cannot be approved despite the block. Audited.
    */
   async blockApplicant(
     user: AuthenticatedUser,
@@ -202,10 +211,29 @@ export class ApplicationsService {
       throw new NotFoundException('Applicant identity not found');
     }
 
-    identity.applicationsBlockedAt = new Date();
+    const now = new Date();
+    identity.applicationsBlockedAt = now;
     identity.applicationsBlockedByMemberId = user.memberId;
     identity.applicationsBlockedReason = dto.reason ?? null;
     await this.identities.save(identity);
+
+    // Decline any still-open application by this identity so they drop out of the
+    // pending queue and can never be approved while blocked.
+    await this.applications
+      .createQueryBuilder()
+      .update(Application)
+      .set({
+        status: ApplicationStatus.Declined,
+        declineReason: dto.reason ?? 'Blocked from applying by an officer',
+        decidedByMemberId: user.memberId,
+        decidedAt: now,
+      })
+      .where('regimentId = :regimentId', { regimentId: user.regimentId })
+      .andWhere('discordIdentityId = :identityId', { identityId: identity.id })
+      .andWhere('status IN (:...open)', {
+        open: [ApplicationStatus.Pending, ApplicationStatus.Held],
+      })
+      .execute();
 
     await this.audit.record({
       regimentId: user.regimentId,
@@ -215,7 +243,8 @@ export class ApplicationsService {
       detail: dto.reason ?? null,
     });
 
-    return ApplicationDto.from(application);
+    // Reload so the returned projection reflects the (possibly now-declined) status.
+    return ApplicationDto.from(await this.loadOrFail(user, id));
   }
 
   /** Re-enable a previously blocked applicant (T-0055). Audited. */
