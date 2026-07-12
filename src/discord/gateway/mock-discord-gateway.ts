@@ -28,6 +28,16 @@ const MOCK_CHANNELS: DiscordChannel[] = [
 ];
 
 /**
+ * Discord snowflakes the mock treats as already in the guild at boot, so a
+ * sign-in via the mock OAuth `owner` persona resolves guildMember=true without a
+ * prior assignRole/simulateMemberJoin (T-0052 parity for bot-based membership).
+ * This is the seeded dev-owner snowflake, matching MockDiscordOAuthService's
+ * `owner` persona and seed.util's OWNER_DISCORD_USER_ID. Any other persona (e.g.
+ * `recruit`) is deliberately absent → fetchMember=null → guildMember=false.
+ */
+const PRE_JOINED_MEMBER_IDS = ['100000000000000001'];
+
+/**
  * Drop-in {@link DiscordGateway} that performs NO network I/O. It keeps an
  * in-memory guild (roles + members) so role assign/remove/kick and message sends
  * are observable and deterministic, and logs each operation. Wired in place of
@@ -44,6 +54,11 @@ export class MockDiscordGateway extends DiscordGateway {
 
   constructor() {
     super();
+    // Seed the well-known guild members so bot-based membership resolves the same
+    // way the real gateway would (the owner is already in the guild).
+    for (const id of PRE_JOINED_MEMBER_IDS) {
+      this.members.set(id, new Set());
+    }
     this.logger.warn(
       'Discord bot is MOCKED (DISCORD_BOT_MOCK). No real gateway/Client is created — ' +
         'set DISCORD_BOT_MOCK=false with a real DISCORD_BOT_TOKEN to go live.',

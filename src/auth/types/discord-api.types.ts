@@ -17,9 +17,3 @@ export interface DiscordUser {
   email?: string | null;
   verified?: boolean;
 }
-
-export interface DiscordGuild {
-  id: string;
-  name: string;
-  owner?: boolean;
-}

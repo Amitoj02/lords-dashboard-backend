@@ -24,7 +24,10 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
  * gateway is swapped for MockDiscordGateway when `discord.botMock` is set, so the
  * whole pipeline runs with no real bot (mirrors the OAuth mock/real seam).
  * Exports DiscordSyncService so feature modules can enqueue syncs on
- * rank/role/medal changes and ban→kick — without importing this module's guts.
+ * rank/role/medal changes and the ban→Ban-role action — without importing this
+ * module's guts.
+ * Also exports the DiscordGateway abstraction so AuthModule can resolve guild
+ * membership from the bot at sign-in (T-0050) instead of the OAuth guilds scope.
  */
 @Module({
   imports: [
@@ -56,6 +59,6 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
       inject: [ConfigService],
     },
   ],
-  exports: [DiscordSyncService],
+  exports: [DiscordSyncService, DiscordGateway],
 })
 export class DiscordModule {}

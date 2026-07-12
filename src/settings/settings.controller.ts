@@ -44,6 +44,15 @@ export class SettingsController {
     return this.settingsService.update(user, dto, req.ip ?? null);
   }
 
+  @Post('complete-setup')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.ManageSettings)
+  @ApiOperation({ summary: 'Mark first-run setup complete (stops first-run routing)' })
+  @ApiOkResponse({ type: SettingsDto })
+  completeSetup(@CurrentUser() user: AuthenticatedUser, @Req() req: Request): Promise<SettingsDto> {
+    return this.settingsService.completeSetup(user, req.ip ?? null);
+  }
+
   @Get('permissions')
   @RequireCapability(Capability.ManageSettings)
   @ApiOperation({ summary: 'Get the authorization matrix (capability × role)' })

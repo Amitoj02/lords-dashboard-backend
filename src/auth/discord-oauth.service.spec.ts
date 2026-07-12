@@ -14,7 +14,7 @@ describe('DiscordOAuthService', () => {
       clientId: 'cid',
       clientSecret: 'sec',
       callbackUrl: 'http://localhost/cb',
-      scopes: ['identify', 'guilds'],
+      scopes: ['identify', 'email'],
       guildId: 'gid',
     }),
   } as unknown as ConfigService<AppConfig, true>;
@@ -27,7 +27,9 @@ describe('DiscordOAuthService', () => {
   it('buildAuthorizeUrl includes client_id, scope, state', () => {
     const url = service.buildAuthorizeUrl('st8');
     expect(url).toContain('client_id=cid');
-    expect(url).toContain('scope=identify+guilds');
+    // No `guilds` scope — membership is resolved from the bot (T-0050/T-0051).
+    expect(url).toContain('scope=identify+email');
+    expect(url).not.toContain('guilds');
     expect(url).toContain('state=st8');
     expect(url).toContain('response_type=code');
   });
@@ -57,18 +59,6 @@ describe('DiscordOAuthService', () => {
   it('fetchUser throws Unauthorized when Discord rejects the token', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue(fakeResponse(false, {}, 401));
     await expect(service.fetchUser('bad')).rejects.toBeInstanceOf(UnauthorizedException);
-  });
-
-  it('isMemberOfGuild reflects guild membership', async () => {
-    jest
-      .spyOn(global, 'fetch')
-      .mockResolvedValue(fakeResponse(true, [{ id: 'gid', name: 'Lords' }]));
-    await expect(service.isMemberOfGuild('at', 'gid')).resolves.toBe(true);
-
-    jest
-      .spyOn(global, 'fetch')
-      .mockResolvedValue(fakeResponse(true, [{ id: 'other', name: 'Elsewhere' }]));
-    await expect(service.isMemberOfGuild('at', 'gid')).resolves.toBe(false);
   });
 
   it('buildAvatarUrl picks gif for animated, png otherwise, null when missing', () => {

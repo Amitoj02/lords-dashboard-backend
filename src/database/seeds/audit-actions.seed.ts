@@ -15,6 +15,16 @@ const ACTIONS = [
     defaultSeverity: AuditSeverity.Info,
   },
   { code: 'application.hold', label: 'Application held', defaultSeverity: AuditSeverity.Info },
+  {
+    code: 'application.block',
+    label: 'Applicant blocked from applying',
+    defaultSeverity: AuditSeverity.Warn,
+  },
+  {
+    code: 'application.unblock',
+    label: 'Applicant re-enabled for applying',
+    defaultSeverity: AuditSeverity.Info,
+  },
   { code: 'rank.change', label: 'Rank changed', defaultSeverity: AuditSeverity.Info },
   { code: 'rank.create', label: 'Rank created', defaultSeverity: AuditSeverity.Info },
   { code: 'rank.update', label: 'Rank updated', defaultSeverity: AuditSeverity.Info },

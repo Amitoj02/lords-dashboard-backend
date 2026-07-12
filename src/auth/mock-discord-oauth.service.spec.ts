@@ -8,7 +8,7 @@ function configWith(overrides: Partial<DiscordConfig> = {}): ConfigService<AppCo
     clientId: '',
     clientSecret: '',
     callbackUrl: 'http://localhost:3000/api/auth/discord/callback',
-    scopes: ['identify', 'email', 'guilds'],
+    scopes: ['identify', 'email'],
     guildId: '999',
     mock: true,
     mockDefaultPersona: 'owner',
@@ -59,10 +59,5 @@ describe('MockDiscordOAuthService', () => {
     // Distinct labels yield distinct ids.
     const bob = await svc.fetchUser((await svc.exchangeCode('mock:bob')).access_token);
     expect(bob.id).not.toBe(first.id);
-  });
-
-  it('treats every persona as a guild member', async () => {
-    const svc = new MockDiscordOAuthService(configWith());
-    await expect(svc.isMemberOfGuild()).resolves.toBe(true);
   });
 });

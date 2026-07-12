@@ -16,6 +16,19 @@ describe('MockDiscordGateway', () => {
     expect(channels.length).toBeGreaterThan(0);
   });
 
+  it('treats the seeded owner persona as already in the guild (T-0052)', async () => {
+    // The dev-owner snowflake is pre-joined so mock sign-in resolves
+    // guildMember=true without a prior assignRole/simulateMemberJoin.
+    const owner = await gateway.fetchMember('100000000000000001');
+    expect(owner).not.toBeNull();
+    expect(owner?.id).toBe('100000000000000001');
+  });
+
+  it('returns null for a user who is not in the guild', async () => {
+    // e.g. a fresh `recruit` persona — not pre-joined, never assigned a role.
+    await expect(gateway.fetchMember('200000000000000042')).resolves.toBeNull();
+  });
+
   it('tracks role assignment + removal in-memory', async () => {
     await gateway.assignRole('user-1', 'role-a');
     let member = await gateway.fetchMember('user-1');

@@ -30,10 +30,9 @@ const fakeDiscord = {
     refresh_token: 'rt',
     token_type: 'Bearer',
     expires_in: 604800,
-    scope: 'identify email guilds',
+    scope: 'identify email',
   }),
   fetchUser: jest.fn().mockImplementation(() => Promise.resolve(currentProfile)),
-  isMemberOfGuild: jest.fn().mockResolvedValue(true),
   buildAvatarUrl: () => null,
 };
 

@@ -65,6 +65,21 @@ export class DiscordIdentity {
   @Column({ type: 'datetime', precision: 6, nullable: true })
   sessionsValidFrom: Date | null;
 
+  /**
+   * Applicant blocklist (T-0055): when set, an officer has permanently barred
+   * this identity from submitting further recruitment applications. Cleared on
+   * re-enable. Mirrors the member ban/suspend-as-columns convention. Null ⇒ the
+   * identity may apply normally.
+   */
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  applicationsBlockedAt: Date | null;
+
+  @Column({ type: 'char', length: 36, nullable: true })
+  applicationsBlockedByMemberId: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  applicationsBlockedReason: string | null;
+
   @CreateDateColumn({ type: 'datetime', precision: 6 })
   createdAt: Date;
 

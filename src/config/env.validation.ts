@@ -38,7 +38,9 @@ export const envValidationSchema = Joi.object({
   DISCORD_CALLBACK_URL: Joi.string()
     .uri()
     .default('http://localhost:3000/api/auth/discord/callback'),
-  DISCORD_SCOPES: Joi.string().default('identify email guilds'),
+  // `identify email` only — guild membership is resolved from the bot (T-0050),
+  // so the `guilds` scope is no longer requested.
+  DISCORD_SCOPES: Joi.string().default('identify email'),
   DISCORD_GUILD_ID: Joi.string().allow('').default(''),
   // Discord mock — replaces the OAuth2 network calls with an in-process stub so
   // the sign-in flow works with no Discord app. Left optional (no default) so the
