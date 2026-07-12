@@ -4,7 +4,7 @@
   "lastSyncedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
   "lastSyncedAt": "2026-07-11T22:00:00Z",
   "notesForNextSession": "POST-MVP BACKEND COMPLETE (build+verify) on feat/post-mvp-features → PR #4 (Amitoj02/lords-dashboard-backend). 195 unit + 27 e2e green; lint/build clean; two adversarial-review passes (10 findings fixed). Shipped: Events/Gallery/Audit-read/Notifications/Settings (T-0015-19, all deploy_ready) + the Discord bot MOCK-first (T-0020-22 deploy_ready). Discord seam mirrors OAuth: MockDiscordGateway runs the whole outbox pipeline now; discord.js RealDiscordGateway is inert until DISCORD_BOT_TOKEN + DISCORD_BOT_MOCK=false. SENSITIVE: app ban→Discord kick is wired but gated by kickOnBan (DEFAULT OFF) and re-checked at drain time — re-review with the owner before enabling (T-0027 Q4). Browser-verified the full dev stack (Angular↔API↔mock bot): login→dashboard/settings/audit/Quartermaster all render real data. Frontend counterpart: lords-regiment-dashboard PR #4 (feat/post-mvp-integration). NEXT: T-0033 real Discord go-live (owner brings creds; flip mocks off; kickOnBan re-review) — see project-plan/DISCORD_GOLIVE.md; then T-0032 MVP deploy + T-0025 full hardening pass. Env gotcha: host port 3000 is taken by capybara-grafana — bring the dev stack up with API_HOST_PORT=3001 WEB_HOST_PORT=4300 WEB_ORIGIN=http://localhost:4300.",
-  "nextIdCounter": 34,
+  "nextIdCounter": 50,
   "connections": [],
   "tasks": [
     {
@@ -1755,13 +1755,15 @@
       "questions": [
         {
           "q": "Provide the real Discord app credentials (client id/secret, bot token, application id, guild id) so we can flip off the mocks and test the live bot together.",
-          "answer": null,
-          "askedAt": "2026-07-11T22:00:00Z"
+          "answer": "i have provided real credss, but it is for test server on discord, so you can treat as real creds",
+          "askedAt": "2026-07-11T22:00:00Z",
+          "answeredAt": "2026-07-12T00:54:54.294Z"
         },
         {
           "q": "Confirm (re-review) whether to enable kickOnBan in production — an app ban would then also kick the member from the Discord guild.",
-          "answer": null,
-          "askedAt": "2026-07-11T22:00:00Z"
+          "answer": "no, check latest tasks on blueframe",
+          "askedAt": "2026-07-11T22:00:00Z",
+          "answeredAt": "2026-07-12T00:55:18.808Z"
         }
       ],
       "testPlan": [
@@ -1774,7 +1776,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T22:00:00Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-12T00:55:18.808Z",
       "history": [
         {
           "at": "2026-07-11T22:00:00Z",
@@ -1782,6 +1784,973 @@
           "to": "blocked",
           "by": "claude",
           "note": "created post-MVP: everything is built + mock-tested; blocked on the owner returning with real Discord credentials (see DISCORD_GOLIVE.md)."
+        }
+      ]
+    },
+    {
+      "id": "T-0034",
+      "title": "Add a 'Ban' role to Discord bot settings",
+      "summary": "Add a nullable `banRoleId` (+`banRoleName`) column to discord_bot_settings, expose it through the settings DTO/control API, and let admins pick it from the existing verify-connection role picker (same wiring as `joinRoleId`). This is the role the owner creates with no access that the bot will apply on an app-side ban.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/entities/discord-bot-settings.entity.ts",
+        "src/database/migrations/",
+        "src/discord/dto/discord-settings.dto.ts",
+        "src/discord/dto/discord-inputs.dto.ts",
+        "src/discord/discord.controller.ts",
+        "src/database/seeds/discord-bot-settings.seed.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should banRoleId be required before the ban-on-ban behaviour can be enabled, or silently no-op when unset?",
+          "answer": "It should be required.",
+          "askedAt": "2026-07-11T00:00:00Z",
+          "answeredAt": "2026-07-12T00:49:40.508Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "migration adds banRoleId/banRoleName idempotently and db:setup still runs clean",
+          "status": "pending"
+        },
+        {
+          "desc": "GET settings returns banRoleId; PATCH settings persists a picked banRoleId",
+          "status": "pending"
+        },
+        {
+          "desc": "role picker (verify-connection) surfaces guild roles so a Ban role can be selected",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T00:00:00Z",
+      "updatedAt": "2026-07-12T00:49:40.508Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0035",
+      "title": "Replace ban→kick with strip-roles + apply Ban role",
+      "summary": "Remove the KICK_MEMBERS-dependent `kickMember` path. On an app-side ban the bot instead removes the member's managed Discord roles and assigns the configured Ban role. Rename the `kickOnBan` gate to `applyBanRoleOnBan` (keep the enqueue-time + drain-time double gate), swap the `member.kick` job type/audit action for `member.ban_role`, and drop `kickMember` from the gateway abstraction and both implementations.",
+      "status": "planned",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/gateway/discord-gateway.ts",
+        "src/discord/gateway/real-discord-gateway.ts",
+        "src/discord/gateway/mock-discord-gateway.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/entities/discord-sync-job.entity.ts",
+        "src/discord/entities/discord-bot-settings.entity.ts",
+        "src/common/enums/index.ts",
+        "src/members/members.service.ts",
+        "src/discord/gateway/mock-discord-gateway.spec.ts",
+        "src/discord/discord-sync.worker.spec.ts",
+        "src/discord/discord-sync.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0034"
+      ],
+      "blocks": [],
+      "resolvesRisk": [
+        "T-0010#0"
+      ],
+      "questions": [
+        {
+          "q": "Rename kickOnBan → applyBanRoleOnBan (breaking DTO field change), or keep the field name and only change behaviour?",
+          "answer": "Yes, replace it.",
+          "askedAt": "2026-07-11T00:00:00Z",
+          "answeredAt": "2026-07-12T00:49:50.594Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "with applyBanRoleOnBan=false (default) a ban enqueues NO Discord job (parity with old kickOnBan default)",
+          "status": "pending"
+        },
+        {
+          "desc": "with applyBanRoleOnBan=true a ban enqueues a member.ban_role job that removes managed roles and adds banRoleId",
+          "status": "pending"
+        },
+        {
+          "desc": "worker re-checks botEnabled+applyBanRoleOnBan at drain time and skips if either was turned off since enqueue",
+          "status": "pending"
+        },
+        {
+          "desc": "gateway no longer exposes kickMember; RealDiscordGateway never calls member.kick",
+          "status": "pending"
+        },
+        {
+          "desc": "audit shows discord.member.ban_role (not member.kick); full unit + e2e suite stays green",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "settings DTO contract changes (kickOnBan field removed/renamed, member.kick job+audit retired) — the Angular Settings page and any consumers of the audit action string must be updated in lockstep",
+          "status": "open",
+          "notedAt": "2026-07-11T00:00:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T00:00:00Z",
+      "updatedAt": "2026-07-12T00:49:50.594Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0036",
+      "title": "Drop KICK_MEMBERS from bot invite + refresh go-live docs",
+      "summary": "The bot now only needs Manage Roles + Send Messages, so remove Kick Members from the invite instructions and the permissions integer (268437506 → 268437504), and rewrite the 'ban → kick' section of the go-live runbook to describe the Ban-role flow and the renamed setting. Update README and .env.example bot comments to match.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "docs",
+      "repo": "",
+      "paths": [
+        "project-plan/DISCORD_GOLIVE.md",
+        "README.md",
+        ".env.example"
+      ],
+      "dependsOn": [
+        "T-0035"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "DISCORD_GOLIVE.md invite step lists only Manage Roles + Send Messages and permissions=268437504",
+          "status": "pending"
+        },
+        {
+          "desc": "runbook section 4 describes strip-roles + Ban-role apply and the applyBanRoleOnBan gate (no 'kick' language)",
+          "status": "pending"
+        },
+        {
+          "desc": "no remaining reference to a Kick Members permission requirement in README/.env.example/docs",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T00:00:00Z",
+      "updatedAt": "2026-07-11T00:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T00:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0037",
+      "title": "Raise minimum-age requirement 16 → 18 (API copy + schema doc)",
+      "summary": "Applications intake gates only on a boolean `ageConfirmed` self-attestation (@Equals(true)) — there is no stored birthdate or numeric age check. Update every backend statement of the '16' requirement to 18: the create-application DTO's `ageConfirmed` ApiProperty/description and the SCHEMA.md `age_confirmed` note (≥16 consent → ≥18). No migration or logic change.",
+      "status": "planned",
+      "type": "chore",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/applications/dto/create-application.dto.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "The backend enforces no numeric age — `ageConfirmed` is an attestation-only boolean. Is updating the stated requirement to 18 sufficient, or should we also add a real age/DOB gate (new field + validation + migration)?",
+          "answer": "No need of real age check, it is mere terms and conditions and regiment rule that states the user should be 18+",
+          "askedAt": "2026-07-11T22:30:00Z",
+          "answeredAt": "2026-07-12T00:50:28.014Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "existing applications unit + e2e stay green with ageConfirmed=true (no behavioural change)",
+          "status": "pending"
+        },
+        {
+          "desc": "Swagger `ageConfirmed` description states the applicant confirms they are 18 or older",
+          "status": "pending"
+        },
+        {
+          "desc": "grep across src + docs shows no remaining '16'/'≥16' age wording (SCHEMA.md age_confirmed reads ≥18)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the frontend apply-form label still displays '16 years of age or older' until the companion T-0038 ships — client/API copy drift; the two must ship together",
+          "status": "open",
+          "notedAt": "2026-07-11T22:30:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T22:30:00Z",
+      "updatedAt": "2026-07-12T00:50:28.014Z",
+      "history": [
+        {
+          "at": "2026-07-11T22:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: change minimum age requirement 16 → 18 (backend copy + schema doc)"
+        }
+      ]
+    },
+    {
+      "id": "T-0038",
+      "title": "Sync apply-form age copy 16 → 18 (frontend companion)",
+      "summary": "Cross-repo companion to T-0037 in the Angular app. Update the application-form age-confirmation checkbox label ('I confirm that I am 16 years of age or older …') to 18 in lords-regiment-dashboard so the client-facing requirement matches the API. Copy-only; ships with T-0037. Implementation lands in the frontend repo (src/app/features/onboarding/application-form/application-form.component.html); tracked here for coordination.",
+      "status": "planned",
+      "type": "chore",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/app/features/onboarding/application-form/application-form.component.html"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "apply-form checkbox label reads '18 years of age or older'; no remaining '16' age copy in the frontend",
+          "status": "pending"
+        },
+        {
+          "desc": "frontend build + existing application-form specs stay green",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T22:30:00Z",
+      "updatedAt": "2026-07-11T22:30:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T22:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: frontend companion to T-0037 (apply-form age label 16 → 18)"
+        }
+      ]
+    },
+    {
+      "id": "T-0039",
+      "title": "Reshape applications intake to the current enlistment-form fields",
+      "summary": "Replace the generic application questions with the regiment's real 'Application for Enlistment' fields (per the live Discord form): keep inGameName; convert howFound from a constrained enum to the free-text 'How did you find/hear about the Lords of Holdfast?'; add currentRegiment, preferredClasses, skillsToImprove, an interest/enlist-in-game confirmation, and an optional representative/guest note; drop whyJoin and the fields the form no longer collects (platform, timezone, priorExperience, applicantType). Touches the entity, a new idempotent migration, CreateApplicationDto validation, the ApplicationDto projection, the service mapping + reapplication detection, SCHEMA.md §3.5, and the enum barrel. Unit + e2e specs updated.",
+      "status": "planned",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/applications/entities/application.entity.ts",
+        "src/applications/dto/create-application.dto.ts",
+        "src/applications/dto/application.dto.ts",
+        "src/applications/applications.service.ts",
+        "src/applications/applications.service.spec.ts",
+        "src/database/migrations/",
+        "src/common/enums/index.ts",
+        "test/applications.e2e-spec.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "The live form (Discord embed) drops platform, timezone, priorExperience, whyJoin and age confirmation, and asks howFound as free text. Confirm the exact final field set: (a) hard-drop those columns vs keep them nullable/hidden; (b) convert howFound enum → free text (retires the how_found enum + derived label); (c) keep or drop applicantType (Applicant/Mercenary) given the new 'representative/guest note' question.",
+          "answer": "You are free to do anything with database since it is not deployed. we dont have production data so do whatever you want.",
+          "askedAt": "2026-07-11T23:15:00Z",
+          "answeredAt": "2026-07-12T00:51:09.982Z"
+        },
+        {
+          "q": "The new form has no age gate, but T-0037/T-0038 are raising the stated minimum age 16 → 18. Should ageConfirmed be removed entirely (superseding T-0037/T-0038), kept as a separate checkbox alongside the new questions, or handled some other way?",
+          "answer": "it is frontend concern, backend should not be invovled for this",
+          "askedAt": "2026-07-11T23:15:00Z",
+          "answeredAt": "2026-07-12T00:51:36.911Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "migration adds the new columns and drops/retires the removed ones idempotently; db:setup re-runs clean",
+          "status": "pending"
+        },
+        {
+          "desc": "POST /applications accepts the new field set and rejects a body missing a required new field (currentRegiment/preferredClasses/skillsToImprove/interest)",
+          "status": "pending"
+        },
+        {
+          "desc": "e2e: apply (new fields) -> approve -> new member appears on roster with service-record + audit (existing flow still green)",
+          "status": "pending"
+        },
+        {
+          "desc": "ApplicationDto no longer exposes removed fields and returns the new answers to the admin queue",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the applications intake DTO + admin-projection contract changes; the Angular apply form + admin applications view + application.model.ts must ship in lockstep (T-0040), and the destructive column drop must not break the approve->promote path",
+          "status": "open",
+          "notedAt": "2026-07-11T23:15:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:15:00Z",
+      "updatedAt": "2026-07-12T00:51:36.911Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:15:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: change the application form fields to the regiment's current enlistment-form questions (backend schema + intake)"
+        }
+      ]
+    },
+    {
+      "id": "T-0040",
+      "title": "Sync apply form + admin view to the new application fields (frontend companion)",
+      "summary": "Cross-repo companion to T-0039 in the Angular app (lords-regiment-dashboard). Rebuild the application-form to collect the new enlistment questions (in-game name, current regiment, how-found free text, preferred classes, skills to improve, interest/enlist-in-game confirmation, optional representative/guest note), update application.model.ts to the new API shape, and update the admin applications detail view to render the new answers. Copy/shape follows the API contract from T-0039 and ships with it. Tracked here for coordination; implementation lands in the frontend repo.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/app/core/models/application.model.ts",
+        "src/app/core/services/applications.service.ts",
+        "src/app/features/onboarding/application-form/application-form.component.ts",
+        "src/app/features/onboarding/application-form/application-form.component.html",
+        "src/app/features/admin/applications/applications.component.ts",
+        "src/app/features/admin/applications/applications.component.html"
+      ],
+      "dependsOn": [
+        "T-0039"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "apply form renders the new questions and submits a body matching the T-0039 CreateApplicationDto (no removed fields)",
+          "status": "pending"
+        },
+        {
+          "desc": "admin applications detail shows the new answers; no references to removed fields remain",
+          "status": "pending"
+        },
+        {
+          "desc": "frontend build + existing application specs stay green",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:15:00Z",
+      "updatedAt": "2026-07-11T23:15:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:15:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: frontend companion to T-0039 (apply form + admin view + model to the new field set)"
+        }
+      ]
+    },
+    {
+      "id": "T-0041",
+      "title": "Per-purpose Discord channel routing (settings + channel picker)",
+      "summary": "Extend discord_bot_settings with three configurable, admin-editable target channels — enlistments, audit log, and event announcements — alongside the existing announcement/welcome channels. Add a `listChannels()` gateway capability + a text-channel picker surfaced through verify-connection (mirroring the role picker), expose the new ids/names on the settings DTO GET/PATCH, and a new idempotent migration + seed that pre-fills the default channel names (#new-enlistments, #audit-logs, #event-announcements). This is the foundation the three producers (T-0042/T-0043/T-0044) route through.",
+      "status": "planned",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/entities/discord-bot-settings.entity.ts",
+        "src/database/migrations/",
+        "src/database/seeds/discord-bot-settings.seed.ts",
+        "src/discord/dto/discord-settings.dto.ts",
+        "src/discord/gateway/discord-gateway.ts",
+        "src/discord/gateway/real-discord-gateway.ts",
+        "src/discord/gateway/mock-discord-gateway.ts",
+        "src/discord/discord.controller.ts",
+        "src/discord/discord.service.ts"
+      ],
+      "dependsOn": [
+        "T-0020",
+        "T-0021"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Settings store channel snowflakes, but a snowflake can't be seeded without a live guild. How should the #new-enlistments/#audit-logs/#event-announcements defaults be applied: (a) auto-resolve those names to channel ids on connect/verify (and auto-create if missing), or (b) just pre-fill the default name label and require the admin to pick the real channel from the new channel picker?",
+          "answer": "b. btw i dont strongly advise you to have default channel names, i was just checking if it is possible. admin should have full permission to modify which message should go to what channel.",
+          "askedAt": "2026-07-11T23:45:00Z",
+          "answeredAt": "2026-07-12T00:53:02.457Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "migration adds enlistment/auditLog/eventAnnouncement channel id+name columns idempotently; db:setup re-runs clean",
+          "status": "pending"
+        },
+        {
+          "desc": "verify-connection returns the guild's text channels so each purpose channel can be picked",
+          "status": "pending"
+        },
+        {
+          "desc": "GET settings returns the three channel ids/names; PATCH settings persists picked channels",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "discord_bot_settings + the settings DTO contract change; the Angular Settings page must add the channel pickers (T-0045) in lockstep, and the seed/migration touches shared bot config",
+          "status": "open",
+          "notedAt": "2026-07-11T23:45:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:45:00Z",
+      "updatedAt": "2026-07-12T00:53:02.457Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: admin-configurable per-purpose Discord channels (enlistments/audit/events), foundation for the three producers"
+        }
+      ]
+    },
+    {
+      "id": "T-0042",
+      "title": "Post new enlistment applications to the enlistments channel",
+      "summary": "On application submit, cross-post an enlistment embed to the configured enlistments channel (default #new-enlistments) via the outbox. Add an `application.submitted` JobType + an embed builder that renders the reshaped enlistment fields (T-0039), and wire ApplicationsService.submit to best-effort enqueue it (never fail the application if the bot is off or the enqueue errors; no-op when botEnabled is false).",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/common/enums/index.ts",
+        "src/discord/entities/discord-sync-job.entity.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/applications/applications.service.ts",
+        "src/applications/applications.module.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "src/discord/discord-sync.worker.spec.ts",
+        "src/applications/applications.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0041",
+        "T-0039"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "submitting an application enqueues one application.submitted job routed to the enlistments channel (when botEnabled)",
+          "status": "pending"
+        },
+        {
+          "desc": "with botEnabled=false (or enqueue failure) submit still succeeds and enqueues nothing — best-effort, never throws to the applicant",
+          "status": "pending"
+        },
+        {
+          "desc": "worker drains the job and the mock gateway posts an embed carrying the new enlistment fields",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "ApplicationsService gains a new dependency on the Discord sync service — the public POST /applications path must stay best-effort so a bot/enqueue failure can never break intake",
+          "status": "open",
+          "notedAt": "2026-07-11T23:45:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:45:00Z",
+      "updatedAt": "2026-07-11T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: post incoming enlistments to the configured channel (relates to T-0039/T-0040 field reshape)"
+        }
+      ]
+    },
+    {
+      "id": "T-0043",
+      "title": "Mirror audit-log entries to the audit-log channel",
+      "summary": "Cross-post audit entries to the configured audit-log channel (default #audit-logs) via the outbox. Add an `audit.log` JobType + embed builder and enqueue from the AuditService write path, best-effort and no-op when the bot is off. Because audit is high-volume, gate which entries post (e.g. by severity/action) and respect the Discord rate limit.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/common/enums/index.ts",
+        "src/discord/entities/discord-sync-job.entity.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/audit/audit.service.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "src/audit/audit.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0041"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Audit is high-volume: which entries should cross-post to #audit-logs — every entry, or only a filtered set (e.g. warning/critical severity + key moderation/settings actions)? And should posts be batched/throttled to stay within the Discord channel rate limit?",
+          "answer": "every entry",
+          "askedAt": "2026-07-11T23:45:00Z",
+          "answeredAt": "2026-07-12T00:53:19.374Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "a qualifying audit write enqueues one audit.log job routed to the audit-log channel (when botEnabled)",
+          "status": "pending"
+        },
+        {
+          "desc": "non-qualifying entries (per the chosen filter) enqueue nothing; a bot/enqueue failure never breaks the audited mutation",
+          "status": "pending"
+        },
+        {
+          "desc": "worker drains and the mock gateway posts an audit embed; no unbounded burst beyond the rate-limit guard",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "AuditService is on every mutating endpoint's path; adding a Discord enqueue must stay best-effort and off the transaction so it can never fail or slow a mutation, and must not flood the channel",
+          "status": "open",
+          "notedAt": "2026-07-11T23:45:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:45:00Z",
+      "updatedAt": "2026-07-12T00:53:19.374Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: mirror audit entries to the configured audit-log channel"
+        }
+      ]
+    },
+    {
+      "id": "T-0044",
+      "title": "Route event announcements to the event-announcements channel",
+      "summary": "Send event announcements/reminders to the configured event-announcements channel (default #event-announcements) instead of the single generic announcements channel. Add an event-scoped routing path in the announce/enqueue flow so event dispatches target eventAnnouncementChannelId while ad-hoc announcements keep using announcementChannelId.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord.service.ts",
+        "src/events/events.service.ts",
+        "src/discord/discord-sync.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0041",
+        "T-0015"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "an event announcement/reminder enqueues an announce job routed to the event-announcements channel",
+          "status": "pending"
+        },
+        {
+          "desc": "a non-event ad-hoc announcement still routes to the general announcement channel (no regression)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the existing announce path (channelId ?? announcementChannelId) is shared; adding event routing must not change where ad-hoc announcements land",
+          "status": "open",
+          "notedAt": "2026-07-11T23:45:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:45:00Z",
+      "updatedAt": "2026-07-11T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: route event announcements to a dedicated configured channel"
+        }
+      ]
+    },
+    {
+      "id": "T-0045",
+      "title": "Admin channel-picker UI for the three routed channels (frontend companion)",
+      "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): add channel-picker dropdowns to the Discord/bot Settings page for the enlistments, audit-log, and event-announcements channels, populated from the verify-connection channel list and persisted via PATCH /discord/settings (T-0041). Tracked here for coordination; implementation lands in the frontend repo.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/app/core/models/discord.model.ts",
+        "src/app/core/services/discord.service.ts",
+        "src/app/features/admin/settings/settings.component.ts",
+        "src/app/features/admin/settings/settings.component.html"
+      ],
+      "dependsOn": [
+        "T-0041"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Settings page shows three channel dropdowns populated from the verify-connection channel list",
+          "status": "pending"
+        },
+        {
+          "desc": "picking channels and saving PATCHes /discord/settings with the three channel ids; reload reflects the saved values",
+          "status": "pending"
+        },
+        {
+          "desc": "frontend build + existing settings specs stay green",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:45:00Z",
+      "updatedAt": "2026-07-11T23:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: frontend companion for the admin channel pickers (enlistments/audit/events)"
+        }
+      ]
+    },
+    {
+      "id": "T-0046",
+      "title": "Resolve role + regiment + member fresh from DB per request",
+      "summary": "Stop trusting role/regiment/member claims baked into the JWT: given only the identity id (sub) from a validated token, resolve the caller's current member (by discordIdentityId), effective role, regimentId and memberId fresh from the DB on each protected request, populating request.user with those live values. Cache the identity->context lookup (following the AuthzService matrix-cache pattern) with an invalidate() hook so role/member changes take effect on the next request without a DB hit per call. This is the enabling layer that makes stale token claims unnecessary and fixes the acceptance-staleness bug (an approved applicant gains Member capabilities on their next request, no re-login).",
+      "status": "planned",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/auth/strategies/jwt.strategy.ts",
+        "src/auth/auth.service.ts",
+        "src/auth/types/authenticated-user.interface.ts",
+        "src/auth/guards/jwt-auth.guard.ts",
+        "src/auth/guards/roles.guard.ts",
+        "src/authz/guards/capabilities.guard.ts",
+        "src/authz/authz.service.ts"
+      ],
+      "dependsOn": [
+        "T-0004",
+        "T-0006"
+      ],
+      "blocks": [
+        "T-0047"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "a protected request resolves role/regiment/memberId fresh from DB, not from token claims; changing a member's role in the DB takes effect on the next request with the same token (no re-login)",
+          "status": "pending"
+        },
+        {
+          "desc": "an applicant approved to Member gains Member capabilities on their very next request with their existing token (acceptance-staleness bug fixed)",
+          "status": "pending"
+        },
+        {
+          "desc": "resolution is cached per identity and invalidated on role/member change; no per-request N+1 DB hit under repeated calls",
+          "status": "pending"
+        },
+        {
+          "desc": "a token whose identity has no member row resolves as Applicant against the single default regiment (parity with today's identity-only session)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "every protected route depends on this resolver — a bug breaks all authorization, and an uncached lookup adds a DB round-trip to every authenticated request (perf).",
+          "status": "open",
+          "notedAt": "2026-07-11T23:55:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:55:00Z",
+      "updatedAt": "2026-07-11T23:55:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:55:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: derive role/regiment/member server-side so the JWT never carries stale authz claims"
+        }
+      ]
+    },
+    {
+      "id": "T-0047",
+      "title": "Slim the JWT payload to stable claims (drop rid, role, mid; keep sub, did, iat)",
+      "summary": "Now that role/regiment/member are resolved server-side (T-0046), remove the stale-prone claims from the token: drop rid and role (and mid, which goes stale the moment an applicant is approved) from JwtPayload, issueToken() and JwtStrategy.validate(); keep only sub (identity id), did (Discord snowflake) and the auto-issued iat. Update AuthenticatedUser and every consumer to read the freshly-resolved fields instead of token claims. Keeps the /auth/me CurrentUserDto contract identical.",
+      "status": "planned",
+      "type": "chore",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/auth/types/jwt-payload.interface.ts",
+        "src/auth/auth.service.ts",
+        "src/auth/strategies/jwt.strategy.ts",
+        "src/auth/types/authenticated-user.interface.ts",
+        "src/auth/auth.controller.ts"
+      ],
+      "dependsOn": [
+        "T-0046"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Drop `mid` from the token as well? It goes stale on applicant approval (mid stays null) and memberId is now resolved fresh from `sub`, so keeping it would re-introduce stale info. Recommend removing it.",
+          "answer": "sure",
+          "askedAt": "2026-07-11T23:55:00Z",
+          "answeredAt": "2026-07-12T00:53:38.087Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "a freshly issued JWT decodes to exactly { sub, did, iat, exp } — rid, role and mid are absent",
+          "status": "pending"
+        },
+        {
+          "desc": "JwtStrategy.validate no longer reads role/rid/mid; RolesGuard + CapabilitiesGuard authorize off the T-0046-resolved values",
+          "status": "pending"
+        },
+        {
+          "desc": "the /auth/me CurrentUserDto response shape is unchanged (frontend contract preserved)",
+          "status": "pending"
+        },
+        {
+          "desc": "full auth unit + e2e suite stays green after the payload change",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the JWT payload is a public contract — any code (or the frontend) that decodes role/rid/mid out of the raw token will break; must confirm no consumer reads token claims directly.",
+          "status": "open",
+          "notedAt": "2026-07-11T23:55:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:55:00Z",
+      "updatedAt": "2026-07-12T00:53:38.087Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:55:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: remove stale-prone claims (rid/role/mid) from the JWT, keep only stable identity claims + iat"
+        }
+      ]
+    },
+    {
+      "id": "T-0048",
+      "title": "iat-based session invalidation (tokensValidAfter cutoff)",
+      "summary": "Leverage the token's issued-at (iat) to validate a token cheaply without a revocation list: add a `sessionsValidFrom` cutoff on discord_identities (new idempotent migration) and reject any token whose iat predates it in JwtStrategy. Bump the cutoff on logout and on sensitive events (ban/suspend, ownership/Discord transfer) so outstanding tokens are invalidated instantly. Accounts for small clock skew.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/auth/strategies/jwt.strategy.ts",
+        "src/auth/auth.service.ts",
+        "src/auth/auth.controller.ts",
+        "src/auth/entities/discord-identity.entity.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [
+        "T-0047"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Which events should bump sessionsValidFrom (hard-invalidate outstanding tokens): logout only, or also ban/suspend and ownership/Discord transfer? Recommend logout + ban/suspend + transfers.",
+          "answer": "do whatever is best practice and secure",
+          "askedAt": "2026-07-11T23:55:00Z",
+          "answeredAt": "2026-07-12T00:54:10.169Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "a token with iat before the identity's sessionsValidFrom is rejected with 401",
+          "status": "pending"
+        },
+        {
+          "desc": "a normally issued token (iat >= sessionsValidFrom) authenticates as before",
+          "status": "pending"
+        },
+        {
+          "desc": "logout (and the chosen sensitive events) bump sessionsValidFrom and immediately invalidate previously issued tokens",
+          "status": "pending"
+        },
+        {
+          "desc": "the migration adds sessionsValidFrom idempotently and db:setup (create -> migrate -> seed) still runs clean",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "an incorrect cutoff or clock skew could invalidate every live session at once (mass forced re-login); the comparison and any skew tolerance need care.",
+          "status": "open",
+          "notedAt": "2026-07-11T23:55:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:55:00Z",
+      "updatedAt": "2026-07-12T00:54:10.169Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:55:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: use the iat timestamp + a per-identity cutoff to validate/invalidate tokens without a revocation list"
+        }
+      ]
+    },
+    {
+      "id": "T-0049",
+      "title": "Frontend companion — treat /auth/me as the sole source of role/membership",
+      "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): ensure no authorization decision decodes role/regiment/membership out of the raw JWT (those claims are being removed), and that the app re-hydrates from GET /auth/me as the single source of truth — including after an applicant is approved, so the promoted member sees Member access without a manual re-login. Tracked here for coordination; implementation lands in the frontend repo.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/app/core/services/auth.service.ts",
+        "src/app/core/guards/",
+        "src/app/features/auth/callback/"
+      ],
+      "dependsOn": [
+        "T-0047"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "no guard/service reads role, regiment or membership by decoding the JWT; all such state comes from /auth/me",
+          "status": "pending"
+        },
+        {
+          "desc": "after an applicant is approved, re-visiting or refreshing re-fetches /auth/me and reflects Member access without a re-login",
+          "status": "pending"
+        },
+        {
+          "desc": "frontend build + auth specs stay green",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-11T23:55:00Z",
+      "updatedAt": "2026-07-11T23:55:00Z",
+      "history": [
+        {
+          "at": "2026-07-11T23:55:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan: frontend companion so the SPA relies on /auth/me, not token-embedded claims"
         }
       ]
     }
