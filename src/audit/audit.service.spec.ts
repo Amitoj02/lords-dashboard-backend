@@ -16,7 +16,7 @@ describe('AuditService', () => {
     save: jest.fn((x: Partial<AuditLogEntry>) => Promise.resolve(x)),
     findAndCount: jest.fn(),
     find: jest.fn(),
-    findOneBy: jest.fn(),
+    findOne: jest.fn(),
   };
   const actionsRepo = { find: jest.fn() };
   // The Discord audit mirror resolves DiscordSyncService lazily via ModuleRef;
@@ -98,7 +98,7 @@ describe('AuditService', () => {
 
   describe('findOne', () => {
     it('returns the entry projection scoped to the regiment', async () => {
-      entriesRepo.findOneBy.mockResolvedValue({
+      entriesRepo.findOne.mockResolvedValue({
         id: '42',
         regimentId: 'r1',
         occurredAt: new Date('2026-06-22T18:30:00.000Z'),
@@ -118,14 +118,17 @@ describe('AuditService', () => {
 
       const dto = await service.findOne('r1', '42');
 
-      expect(entriesRepo.findOneBy).toHaveBeenCalledWith({ id: '42', regimentId: 'r1' });
+      expect(entriesRepo.findOne).toHaveBeenCalledWith({
+        where: { id: '42', regimentId: 'r1' },
+        relations: { actorMember: true, targetMember: true },
+      });
       expect(dto.id).toBe('42');
       expect(dto.occurredAt).toBe('2026-06-22T18:30:00.000Z');
       expect(dto.action).toBe('rank.change');
     });
 
     it('throws NotFound for a missing/wrong-regiment entry', async () => {
-      entriesRepo.findOneBy.mockResolvedValue(null);
+      entriesRepo.findOne.mockResolvedValue(null);
       await expect(service.findOne('r1', 'nope')).rejects.toBeInstanceOf(NotFoundException);
     });
   });

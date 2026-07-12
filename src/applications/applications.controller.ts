@@ -26,6 +26,7 @@ import { Capability } from '../common/enums';
 import { ApplicationsService } from './applications.service';
 import { ApplicationDto } from './dto/application.dto';
 import { ApplicationQueryDto } from './dto/application-query.dto';
+import { ApproveApplicationDto } from './dto/approve-application.dto';
 import { BlockApplicantDto } from './dto/block-applicant.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { DeclineApplicationDto } from './dto/decline-application.dto';
@@ -101,9 +102,10 @@ export class ApplicationsController {
   approve(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id') id: string,
+    @Body() dto: ApproveApplicationDto,
     @Req() req: Request,
   ): Promise<ApplicationDto> {
-    return this.applicationsService.approve(user, id, req.ip ?? null);
+    return this.applicationsService.approve(user, id, dto, req.ip ?? null);
   }
 
   @Post(':id/decline')

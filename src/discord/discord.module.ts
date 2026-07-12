@@ -1,7 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditLogEntry } from '../audit/entities/audit-log-entry.entity';
 import { AppConfig } from '../config/configuration';
+import { Medal } from '../medals/entities/medal.entity';
+import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
@@ -39,6 +42,11 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
       Member,
       Rank,
       Regiment,
+      // Medal role reconciliation (award grants/revokes a linked role).
+      Medal,
+      MemberMedal,
+      // Audit-mirror sync-status write-back (synced/failed) onto the source row.
+      AuditLogEntry,
     ]),
   ],
   controllers: [DiscordController],

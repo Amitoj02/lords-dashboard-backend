@@ -236,6 +236,35 @@ export class RanksService {
     return RankDto.from(saved, holders);
   }
 
+  /**
+   * Clear a rank's Discord role binding: null the snowflake id and display name
+   * and mark it unlinked. Audited as a rank.update (reusing the link action code)
+   * with a detail note.
+   */
+  async unlinkDiscord(user: AuthenticatedUser, id: string, ip: string | null): Promise<RankDto> {
+    const rank = await this.loadRank(id, user.regimentId);
+    const before = this.snapshot(rank);
+
+    rank.discordRoleId = null;
+    rank.discordRoleName = null;
+    rank.linked = false;
+
+    const saved = await this.ranks.save(rank);
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'rank.update',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'rank', id: saved.id, label: saved.name },
+      before,
+      after: this.snapshot(saved),
+      detail: 'Unlinked from Discord role.',
+    });
+
+    const holders = await this.holderCountFor(saved.id);
+    return RankDto.from(saved, holders);
+  }
+
   /** Load a regiment-scoped rank or throw 404. */
   private async loadRank(id: string, regimentId: string): Promise<Rank> {
     const rank = await this.ranks.findOne({ where: { id, regimentId } });

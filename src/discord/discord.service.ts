@@ -11,6 +11,7 @@ import { DiscordSyncService } from './discord-sync.service';
 import {
   BotOperationDto,
   DiscordConnectionDto,
+  DiscordRoleDto,
   DiscordVerifyConnectionDto,
 } from './dto/discord-connection.dto';
 import { DiscordChannel, DiscordRole } from './gateway/discord-gateway';
@@ -101,6 +102,23 @@ export class DiscordService {
       detail: `Connection verified (${connection.connectionStatus})`,
     });
     return DiscordVerifyConnectionDto.fromStatus(status, connection, roles, channels);
+  }
+
+  /**
+   * List the guild's roles for the rank/medal link pickers (scoped to
+   * edit_ranks_medals, so an editor without manage_settings can still populate
+   * the picker). Best-effort: returns [] when the bot is disconnected/disabled or
+   * the live fetch fails — mirrors the verifyConnection roles pattern.
+   */
+  async listRoles(): Promise<DiscordRoleDto[]> {
+    const status = await this.gateway.getStatus();
+    if (!status.connected) return [];
+    try {
+      const roles = await this.gateway.listRoles();
+      return roles.map((r) => ({ id: r.id, name: r.name, position: r.position }));
+    } catch {
+      return [];
+    }
   }
 
   /** Read the bot settings (materialising defaults). */

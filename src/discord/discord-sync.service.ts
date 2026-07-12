@@ -143,16 +143,25 @@ export class DiscordSyncService {
 
   /**
    * Enqueue an audit-log entry mirror to the audit-log channel (T-0043). No-ops
-   * when the bot is off or no audit-log channel is configured.
+   * when the bot is off or no audit-log channel is configured. The source audit
+   * entry id is threaded through the payload so the worker can write the mirror
+   * outcome (synced/failed) back onto that row. Returns whether a job was
+   * inserted, so the caller can set the entry's initial sync status.
    */
-  async enqueueAuditLog(regimentId: string, entry: AuditSummary): Promise<DiscordSyncJob | null> {
-    return this.guarded(regimentId, async (s) => {
+  async enqueueAuditLog(
+    regimentId: string,
+    entry: AuditSummary,
+    auditEntryId?: string | null,
+  ): Promise<boolean> {
+    const job = await this.guarded(regimentId, async (s) => {
       if (!s.auditLogChannelId) return null;
       return this.insertJob(regimentId, DiscordSyncJobType.AuditLog, {
         channelId: s.auditLogChannelId,
         content: this.buildAuditMessage(entry),
+        auditEntryId: auditEntryId ?? null,
       });
     });
+    return !!job;
   }
 
   /** Compose the enlistment-application message (Discord markdown, capped 2000). */
@@ -185,6 +194,24 @@ export class DiscordSyncService {
         discordUserId,
         channelId: s.welcomeChannelId,
         content,
+      });
+    });
+  }
+
+  /**
+   * Enqueue a decision DM (approve/decline/hold) to an applicant. Best-effort:
+   * no-ops when the bot is disabled. The content + target user id are resolved
+   * by the caller; the worker delivers it as a direct message.
+   */
+  async enqueueApplicationDecision(
+    regimentId: string,
+    payload: { discordUserId: string; content: string },
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async () => {
+      if (!payload.discordUserId) return null;
+      return this.insertJob(regimentId, DiscordSyncJobType.ApplicationDecision, {
+        discordUserId: payload.discordUserId,
+        content: payload.content.slice(0, 2000),
       });
     });
   }

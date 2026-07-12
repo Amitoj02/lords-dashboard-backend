@@ -22,6 +22,7 @@ import { DiscordService } from './discord.service';
 import {
   BotOperationDto,
   DiscordConnectionDto,
+  DiscordRoleDto,
   DiscordVerifyConnectionDto,
 } from './dto/discord-connection.dto';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
@@ -64,6 +65,18 @@ export class DiscordController {
     @Req() req: Request,
   ): Promise<DiscordVerifyConnectionDto> {
     return this.discordService.verifyConnection(user, req.ip ?? null);
+  }
+
+  @Get('roles')
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({
+    summary: 'List the guild roles for the rank/medal link pickers (empty when disconnected)',
+  })
+  @ApiOkResponse({ type: [DiscordRoleDto] })
+  listRoles(): Promise<DiscordRoleDto[]> {
+    // Gating is enforced by @RequireCapability; the roles come from the single
+    // bound guild, so no per-request user context is needed (cf. verifyConnection).
+    return this.discordService.listRoles();
   }
 
   @Get('settings')

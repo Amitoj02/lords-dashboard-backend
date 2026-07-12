@@ -11,4 +11,13 @@ export class HoldApplicationDto {
   @IsString()
   @MaxLength(2000)
   note?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 2000,
+    description: 'Optional custom message DM’d to the applicant instead of the default template',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  discordDmMessage?: string;
 }

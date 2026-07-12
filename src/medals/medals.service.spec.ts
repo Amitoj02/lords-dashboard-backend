@@ -1,6 +1,7 @@
-import { ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { MedalRibbon, MemberRole } from '../common/enums';
@@ -66,6 +67,7 @@ describe('MedalsService', () => {
     createQueryBuilder: jest.fn(),
   };
 
+  const dataSource = { transaction: jest.fn() };
   const audit = { record: jest.fn() };
 
   beforeEach(async () => {
@@ -96,6 +98,7 @@ describe('MedalsService', () => {
         MedalsService,
         { provide: getRepositoryToken(Medal), useValue: medalRepo },
         { provide: getRepositoryToken(MemberMedal), useValue: memberMedalRepo },
+        { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
       ],
     }).compile();
@@ -238,6 +241,53 @@ describe('MedalsService', () => {
     });
   });
 
+  describe('reorder', () => {
+    it('rejects an id set that does not match the regiment medals exactly', async () => {
+      medalRepo.find.mockResolvedValue([
+        buildMedal({ id: 'medal-1' }),
+        buildMedal({ id: 'medal-2', title: 'Campaign Medal' }),
+      ]);
+
+      await expect(
+        service.reorder(user(), { order: ['medal-1', 'medal-3'] }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rewrites precedence in a transaction (offset then final positions)', async () => {
+      medalRepo.find
+        .mockResolvedValueOnce([
+          buildMedal({ id: 'medal-1' }),
+          buildMedal({ id: 'medal-2', title: 'Campaign Medal' }),
+        ]) // validation
+        .mockResolvedValueOnce([]); // trailing findAll reload
+      const managerRepo = { increment: jest.fn(), update: jest.fn() };
+      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
+        cb({ getRepository: () => managerRepo }),
+      );
+
+      await service.reorder(user(), { order: ['medal-2', 'medal-1'] }, null);
+
+      // All rows shifted clear of the target range first, then final positions set.
+      expect(managerRepo.increment).toHaveBeenCalledWith(
+        { regimentId: REGIMENT },
+        'precedence',
+        1000,
+      );
+      expect(managerRepo.update).toHaveBeenCalledWith(
+        { id: 'medal-2', regimentId: REGIMENT },
+        { precedence: 1 },
+      );
+      expect(managerRepo.update).toHaveBeenCalledWith(
+        { id: 'medal-1', regimentId: REGIMENT },
+        { precedence: 2 },
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'medal.reorder' }),
+      );
+    });
+  });
+
   describe('linkDiscord', () => {
     it('sets the role mapping, flags linked, and audits medal.update', async () => {
       medalRepo.findOne.mockResolvedValue(buildMedal());
@@ -256,6 +306,25 @@ describe('MedalsService', () => {
       expect(dto.linked).toBe(true);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'medal.update' }),
+      );
+    });
+  });
+
+  describe('unlinkDiscord', () => {
+    it('clears the role mapping, flags unlinked, and audits medal.update', async () => {
+      medalRepo.findOne.mockResolvedValue(
+        buildMedal({ discordRoleId: '123', discordRoleName: 'Veterans', linked: true }),
+      );
+
+      const dto = await service.unlinkDiscord(user(), 'medal-1', null);
+
+      const saved = medalRepo.save.mock.calls[0][0] as Medal;
+      expect(saved.discordRoleId).toBeNull();
+      expect(saved.discordRoleName).toBeNull();
+      expect(saved.linked).toBe(false);
+      expect(dto.linked).toBe(false);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'medal.update', detail: 'Unlinked from Discord role.' }),
       );
     });
   });

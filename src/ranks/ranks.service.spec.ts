@@ -260,4 +260,24 @@ describe('RanksService', () => {
       expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'rank.update' }));
     });
   });
+
+  describe('unlinkDiscord', () => {
+    it('clears the role binding, flips linked off, and audits a rank.update', async () => {
+      rankRepo.findOne.mockResolvedValue(
+        buildRank({ discordRoleId: '112233445566778899', linked: true }),
+      );
+      memberRepo.count.mockResolvedValue(0);
+
+      const dto = await service.unlinkDiscord(user(), 'rank-1', null);
+
+      const saved = rankRepo.save.mock.calls[0][0] as Rank;
+      expect(saved.discordRoleId).toBeNull();
+      expect(saved.discordRoleName).toBeNull();
+      expect(saved.linked).toBe(false);
+      expect(dto.linked).toBe(false);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'rank.update', detail: 'Unlinked from Discord role.' }),
+      );
+    });
+  });
 });

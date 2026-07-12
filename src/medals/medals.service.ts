@@ -1,14 +1,29 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { CreateMedalDto } from './dto/create-medal.dto';
 import { LinkDiscordDto } from './dto/link-discord.dto';
 import { MedalDto } from './dto/medal.dto';
+import { ReorderMedalsDto } from './dto/reorder-medals.dto';
 import { UpdateMedalDto } from './dto/update-medal.dto';
 import { Medal } from './entities/medal.entity';
 import { MemberMedal } from './entities/member-medal.entity';
+
+/**
+ * Temporary offset added to every medal's precedence during a reorder. Mirrors
+ * the ranks reorder: all rows are first shifted clear of the 1..N target range,
+ * then written to their final positions. Medal precedence is NOT unique so this
+ * is belt-and-braces (kept for parity with ranks). Assumes a regiment never has
+ * anywhere near this many medals.
+ */
+const REORDER_OFFSET = 1000;
 
 /** Derived award counts for a medal (see {@link MedalsService.awardStats}). */
 interface AwardStats {
@@ -32,6 +47,7 @@ export class MedalsService {
     private readonly medals: Repository<Medal>,
     @InjectRepository(MemberMedal)
     private readonly memberMedals: Repository<MemberMedal>,
+    private readonly dataSource: DataSource,
     private readonly audit: AuditService,
   ) {}
 
@@ -153,6 +169,48 @@ export class MedalsService {
   }
 
   /**
+   * Transactionally rewrite the whole catalogue's precedence from a full, ordered
+   * list of medal ids. The set must match the regiment's medals exactly. Mirrors
+   * the ranks reorder: all rows are first shifted by REORDER_OFFSET, then written
+   * to their final 1..N positions (medal precedence is not UNIQUE, so the shift is
+   * belt-and-braces, kept for parity). Audited as `medal.reorder`.
+   */
+  async reorder(
+    user: AuthenticatedUser,
+    dto: ReorderMedalsDto,
+    ip: string | null,
+  ): Promise<MedalDto[]> {
+    const medals = await this.medals.find({ where: { regimentId: user.regimentId } });
+    const existingIds = new Set(medals.map((m) => m.id));
+    const requestedIds = new Set(dto.order);
+
+    const sameSize = dto.order.length === medals.length && requestedIds.size === dto.order.length;
+    const sameMembers = dto.order.every((id) => existingIds.has(id));
+    if (!sameSize || !sameMembers) {
+      throw new BadRequestException('order must list every medal id of the regiment exactly once');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Medal);
+      // Shift all rows clear of the 1..N target range, then assign final positions.
+      await repo.increment({ regimentId: user.regimentId }, 'precedence', REORDER_OFFSET);
+      for (let i = 0; i < dto.order.length; i++) {
+        await repo.update({ id: dto.order[i], regimentId: user.regimentId }, { precedence: i + 1 });
+      }
+    });
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'medal.reorder',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'medal', label: 'catalogue' },
+      detail: `Reordered ${dto.order.length} medals.`,
+    });
+
+    return this.findAll(user);
+  }
+
+  /**
    * Map the medal to a Discord role and flag it linked. Recorded as a
    * `medal.update` audit row (there is no dedicated link action code).
    */
@@ -178,6 +236,34 @@ export class MedalsService {
       target: { type: 'medal', id: saved.id, label: saved.title },
       before,
       after: this.snapshot(saved),
+    });
+
+    return this.project(saved);
+  }
+
+  /**
+   * Clear a medal's Discord role mapping and flag it unlinked. Recorded as a
+   * `medal.update` audit row (reusing the link action code — no dedicated
+   * unlink code) with a detail note.
+   */
+  async unlinkDiscord(user: AuthenticatedUser, id: string, ip: string | null): Promise<MedalDto> {
+    const medal = await this.loadOrFail(user, id);
+    const before = this.snapshot(medal);
+
+    medal.discordRoleId = null;
+    medal.discordRoleName = null;
+    medal.linked = false;
+
+    const saved = await this.medals.save(medal);
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'medal.update',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'medal', id: saved.id, label: saved.title },
+      before,
+      after: this.snapshot(saved),
+      detail: 'Unlinked from Discord role.',
     });
 
     return this.project(saved);

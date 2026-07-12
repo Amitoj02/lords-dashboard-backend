@@ -64,11 +64,13 @@ export class AuditLogEntryDto {
       severity: entry.severity,
       actorType: entry.actorType,
       actorMemberId: entry.actorMemberId,
-      actorLabel: entry.actorLabel,
+      // Prefer the stored denormalised label; fall back to the joined member's
+      // name so human actors/targets are never rendered as null.
+      actorLabel: entry.actorLabel ?? entry.actorMember?.name ?? null,
       targetType: entry.targetType,
       targetId: entry.targetId,
       targetMemberId: entry.targetMemberId,
-      targetLabel: entry.targetLabel,
+      targetLabel: entry.targetLabel ?? entry.targetMember?.name ?? null,
       detail: entry.detail,
       before: entry.beforeValue,
       after: entry.afterValue,

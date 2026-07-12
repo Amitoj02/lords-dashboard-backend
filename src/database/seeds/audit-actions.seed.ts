@@ -34,6 +34,7 @@ const ACTIONS = [
   { code: 'medal.remove', label: 'Medal removed', defaultSeverity: AuditSeverity.Warn },
   { code: 'medal.create', label: 'Medal created', defaultSeverity: AuditSeverity.Info },
   { code: 'medal.update', label: 'Medal updated', defaultSeverity: AuditSeverity.Info },
+  { code: 'medal.reorder', label: 'Medals reordered', defaultSeverity: AuditSeverity.Info },
   { code: 'medal.delete', label: 'Medal deleted', defaultSeverity: AuditSeverity.Warn },
   { code: 'member.rank.change', label: 'Member rank changed', defaultSeverity: AuditSeverity.Info },
   { code: 'member.role.change', label: 'Member role changed', defaultSeverity: AuditSeverity.Warn },

@@ -1,14 +1,25 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
 import { Platform } from '../../common/enums';
 
 /**
  * Self-service profile patch. Deliberately restricted to a small set of fields a
- * member may change about themselves — role/status/rank/name are NOT editable
- * here (those belong to a future admin members endpoint). Every field is optional;
- * only provided fields are applied.
+ * member may change about themselves — including their own display name — while
+ * role/status/rank remain NOT editable here (those belong to a future admin
+ * members endpoint). Every field is optional; only provided fields are applied.
  */
 export class UpdateMemberDto {
+  @ApiPropertyOptional({
+    minLength: 1,
+    maxLength: 120,
+    description: 'Display name shown across the roster and profile',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  name?: string;
+
   @ApiPropertyOptional({
     enum: Platform,
     description: 'Gaming platform the member plays on',

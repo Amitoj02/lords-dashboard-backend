@@ -114,4 +114,17 @@ export class RanksController {
   ): Promise<RankDto> {
     return this.ranksService.linkDiscord(user, id, dto, req.ip ?? null);
   }
+
+  @Post(':id/unlink-discord')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({ summary: 'Unlink a rank from its Discord role' })
+  @ApiOkResponse({ type: RankDto, description: 'The unlinked rank.' })
+  unlinkDiscord(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ): Promise<RankDto> {
+    return this.ranksService.unlinkDiscord(user, id, req.ip ?? null);
+  }
 }
