@@ -1,8 +1,8 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
-  "lastSyncedAt": "2026-07-12T19:02:09Z",
+  "lastSyncedCommit": "b41486a0d0375f91d43714dc227770c821956224",
+  "lastSyncedAt": "2026-07-12T19:12:00Z",
   "notesForNextSession": "GUILDS-SCOPE REMOVAL + APPLICANT SELF-SERVICE EPIC shipped this session on TWO branches (not yet merged): backend feat/guilds-scope-and-applicant-self-service (commit 9ed1dc6) and frontend lords-regiment-dashboard:feat/applicant-self-service (commit d9277e9). BACKEND: T-0050-0053 (drop the Discord `guilds` OAuth scope; derive guildMember from the bot's fetchMember at sign-in, guarded by a 4s timeout + try/catch so it never blocks login) all deploy_ready + VERIFIED LIVE (authorize URL scope = `identify email`; bot REST member lookup 200 in-guild / 404 not). NEW T-0054 (GET/PATCH /applications/mine), T-0055 (applicant blocklist: block/unblock + submit guard, columns on discord_identities), T-0056 (setupComplete flip endpoint). 226 unit + 35 e2e green, lint+build clean, adversarial review clean. Live-verified the whole applicant flow via minted JWTs (submit→mine→edit→block→403 resubmit→unblock). FRONTEND (51 specs green, build clean): applicant status page, apply-as-signin CTA, returning-applicant redirect, edit-pending, admin block UI, Owner first-run routing, and RETIRED the stub owner-setup wizard (→ /admin/settings). Browser-verified the status page (pending+blocked), the pre-filled edit form, and the admin block controls against the live stack. T-0026/27/28 questionnaires archived (answers consumed). T-0003 rank-ladder risk retired (owner: dummy ranks OK, greenfield). DEFERRED / next session: (1) frontend T-0020 wire the account-deletion UI to the existing GDPR endpoints; (2) frontend landing still shows hardcoded stats/officers arrays (wire GET /regiment/stats, and guard un-wired surfaces before the T-0032 public deploy); (3) T-0036 owner-superadmin verify was exercised via a minted owner JWT (full admin panel rendered) — for the REAL owner set OWNER_DISCORD_ID in .env and reseed before seed:prod. HUMAN-ONLY remaining: T-0033 Discord OAuth consent + register the PROD redirect URI; T-0032 MVP DigitalOcean deploy; then the full T-0025 hardening pass. GOTCHAS (unchanged): STOP the api container before host e2e (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true); dist/ is root-owned — build-check with tsc --outDir <scratch>; the api container is dev-mode (start:dev, source bind-mounted, host port 3001).",
   "nextIdCounter": 57,
   "connections": [],
@@ -1188,7 +1188,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-12T19:12:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1217,6 +1217,13 @@
           "to": "planned",
           "by": "claude",
           "note": "Partial: ran an adversarial security review of the new applicant self-service + blocklist + setup-complete surface this session (IDOR/ownership, route shadowing, mass-assignment, blocklist bypass, privilege escalation, info-leak, login DoS). The FULL hardening pass + cross-stack bot E2E + prod re-deploy stay blocked on the T-0032 owner deploy."
+        },
+        {
+          "at": "2026-07-12T19:12:00Z",
+          "from": "planned",
+          "to": "planned",
+          "by": "claude",
+          "note": "Security review DONE for the applicant self-service surface: clean on all 7 audited categories (IDOR/ownership, route shadowing, mass-assignment, blocklist keying, privilege escalation, info-leak, login-DoS) with cited evidence; one LOW finding (blocked applicant not frozen) FIXED this session (T-0055). No critical/high."
         }
       ]
     },
@@ -3320,7 +3327,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T19:02:09Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-12T19:12:00Z",
       "history": [
         {
           "at": "2026-07-12T19:02:09Z",
@@ -3328,6 +3335,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built the applicant blocklist: POST /applications/:id/{block,unblock} (manage_applications) set/clear applications_blocked_* on discord_identities (idempotent migration), and submit() rejects a blocked identity FIRST. Audited (application.block/unblock seeded). Verified live: block → applicant sees blocked + resubmit 403; applicant-block 403; unblock clears. Frontend admin block UI shipped in lockstep."
+        },
+        {
+          "at": "2026-07-12T19:12:00Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Security-review hardening: blocking now also declines any open (Pending/Held) application by that identity and updateMine rejects a blocked identity — so a blocked applicant can no longer PATCH-spam the officer queue or be approved despite the block. e2e asserts block→declined + PATCH-while-blocked 403."
         }
       ]
     },
