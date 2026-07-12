@@ -27,6 +27,7 @@ import { Capability } from '../common/enums';
 import { CreateMedalDto } from './dto/create-medal.dto';
 import { LinkDiscordDto } from './dto/link-discord.dto';
 import { MedalDto } from './dto/medal.dto';
+import { ReorderMedalsDto } from './dto/reorder-medals.dto';
 import { UpdateMedalDto } from './dto/update-medal.dto';
 import { MedalsService } from './medals.service';
 
@@ -59,6 +60,19 @@ export class MedalsController {
     @Req() req: Request,
   ): Promise<MedalDto> {
     return this.medalsService.create(user, dto, req.ip ?? null);
+  }
+
+  @Post('reorder')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({ summary: 'Reorder the whole catalogue (set precedence from an ordered id list)' })
+  @ApiOkResponse({ type: [MedalDto], description: 'The reordered catalogue.' })
+  reorder(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: ReorderMedalsDto,
+    @Req() req: Request,
+  ): Promise<MedalDto[]> {
+    return this.medalsService.reorder(user, dto, req.ip ?? null);
   }
 
   @Patch(':id')
@@ -99,5 +113,18 @@ export class MedalsController {
     @Req() req: Request,
   ): Promise<MedalDto> {
     return this.medalsService.linkDiscord(user, id, dto, req.ip ?? null);
+  }
+
+  @Post(':id/unlink-discord')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({ summary: 'Unlink a medal from its Discord role' })
+  @ApiOkResponse({ type: MedalDto, description: 'The unlinked medal.' })
+  unlinkDiscord(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ): Promise<MedalDto> {
+    return this.medalsService.unlinkDiscord(user, id, req.ip ?? null);
   }
 }

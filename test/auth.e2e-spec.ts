@@ -148,7 +148,9 @@ describe('Auth (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(me.body).toMatchObject({
-      name: 'Lord Commander',
+      // For a linked member, /auth/me returns the seeded roster member.name,
+      // which now defaults to 'Admin' (T-0057) — NOT the Discord global_name.
+      name: 'Admin',
       role: MemberRole.Owner,
       rank: 'General',
       isMember: true,

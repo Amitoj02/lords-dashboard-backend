@@ -1,10 +1,17 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
+import {
+  Between,
+  FindOptionsWhere,
+  IsNull,
+  LessThanOrEqual,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { AuditActorType, AuditSeverity } from '../common/enums';
+import { AuditActorType, AuditSeverity, DiscordSyncStatus } from '../common/enums';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuditQueryDto } from './dto/audit-query.dto';
 import { AuditLogEntryDto } from './dto/audit-log-entry.dto';
@@ -103,16 +110,34 @@ export class AuditService {
         discordSyncStatus: null,
         anonymisedAt: null,
       });
-      await this.entries.save(entry);
-      // Best-effort mirror to the audit-log Discord channel (fire-and-forget so
-      // it can never slow or fail the audited mutation).
-      this.mirrorToDiscord(
+      // Persist first so the mirror job can reference the saved entry id.
+      const saved = await this.entries.save(entry);
+      // Best-effort mirror to the audit-log Discord channel; the returned flag
+      // says whether a mirror job was actually enqueued so we can record a
+      // truthful sync status (pending vs not_applicable) on the entry.
+      const enqueued = await this.mirrorToDiscord(
         input.regimentId,
+        saved.id,
         input.action,
         actor.label ?? null,
         severity,
         input.detail ?? null,
       );
+      // Record the truthful sync status. The mirror job is drainable the instant
+      // it is enqueued, so a fast worker can flip this entry to synced/failed
+      // before we get here; guard the pending write with `discordSyncStatus IS
+      // NULL` so we never clobber a terminal status back to pending.
+      if (enqueued) {
+        await this.entries.update(
+          { id: saved.id, discordSyncStatus: IsNull() },
+          { discordSyncStatus: DiscordSyncStatus.Pending },
+        );
+      } else {
+        await this.entries.update(
+          { id: saved.id },
+          { discordSyncStatus: DiscordSyncStatus.NotApplicable },
+        );
+      }
     } catch (error) {
       this.logger.error(`Failed to record audit '${input.action}': ${(error as Error).message}`);
     }
@@ -120,29 +145,37 @@ export class AuditService {
 
   /**
    * Cross-post an audit entry to the configured audit-log channel (T-0043).
-   * Fire-and-forget + best-effort; never awaited on the mutation path. The
+   * Best-effort; never throws (a mirror failure must not break record()). The
    * `discord.sync.failed` action is EXCLUDED to break a feedback loop: a failed
    * mirror produces exactly that entry, which would otherwise re-enqueue forever.
+   * Returns whether a mirror job was actually enqueued so the caller can set the
+   * source entry's sync status (excluded action / bot off / no channel ⇒ false).
    */
-  private mirrorToDiscord(
+  private async mirrorToDiscord(
     regimentId: string,
+    auditEntryId: string,
     action: string,
     actorLabel: string | null,
     severity: AuditSeverity,
     detail: string | null,
-  ): void {
-    if (action === 'discord.sync.failed') return;
+  ): Promise<boolean> {
+    if (action === 'discord.sync.failed') return false;
     let sync: DiscordSyncService;
     try {
       sync = this.moduleRef.get(DiscordSyncService, { strict: false });
     } catch {
-      return; // DiscordSyncService not available (e.g. narrow test module) — skip.
+      return false; // DiscordSyncService not available (e.g. narrow test module) — skip.
     }
-    void sync
-      .enqueueAuditLog(regimentId, { action, actorLabel, detail, severity })
-      .catch((error: unknown) =>
-        this.logger.error(`Audit Discord mirror failed: ${(error as Error).message}`),
+    try {
+      return await sync.enqueueAuditLog(
+        regimentId,
+        { action, actorLabel, detail, severity },
+        auditEntryId,
       );
+    } catch (error) {
+      this.logger.error(`Audit Discord mirror failed: ${(error as Error).message}`);
+      return false;
+    }
   }
 
   /** Paginated, filtered read of the ledger for a regiment (most recent first). */
@@ -152,6 +185,9 @@ export class AuditService {
   ): Promise<PaginatedResponseDto<AuditLogEntryDto>> {
     const [rows, total] = await this.entries.findAndCount({
       where: this.buildWhere(regimentId, query),
+      // Join the actor/target members so the DTO can resolve a human name when
+      // the denormalised label was not stored (actor FK is onDelete SET NULL).
+      relations: { actorMember: true, targetMember: true },
       order: { occurredAt: 'DESC', id: 'DESC' },
       skip: query.skip,
       take: query.limit,
@@ -167,7 +203,11 @@ export class AuditService {
 
   /** Fetch a single ledger entry, regiment-scoped. 404 when it does not exist. */
   async findOne(regimentId: string, id: string): Promise<AuditLogEntryDto> {
-    const row = await this.entries.findOneBy({ id, regimentId });
+    const row = await this.entries.findOne({
+      where: { id, regimentId },
+      // See findEntries: resolve the actor/target member name when unstored.
+      relations: { actorMember: true, targetMember: true },
+    });
     if (!row) throw new NotFoundException('Audit entry not found');
     return AuditLogEntryDto.from(row);
   }
@@ -180,6 +220,9 @@ export class AuditService {
   async exportCsv(regimentId: string, query: AuditQueryDto): Promise<string> {
     const rows = await this.entries.find({
       where: this.buildWhere(regimentId, query),
+      // Join the actor/target members so the CSV resolves the human name when the
+      // denormalised label was not stored — matching the JSON read paths + DTO.
+      relations: { actorMember: true, targetMember: true },
       order: { occurredAt: 'DESC', id: 'DESC' },
       take: 10000,
     });
@@ -194,11 +237,11 @@ export class AuditService {
           row.action,
           row.severity,
           row.actorType,
-          row.actorLabel,
+          row.actorLabel ?? row.actorMember?.name ?? '',
           row.actorMemberId,
           row.targetType,
           row.targetId,
-          row.targetLabel,
+          row.targetLabel ?? row.targetMember?.name ?? '',
           row.detail,
         ]
           .map((field) => this.escapeCsvField(field))

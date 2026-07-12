@@ -1,7 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
+import { AuditLogEntry } from '../audit/entities/audit-log-entry.entity';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
+import { Medal } from '../medals/entities/medal.entity';
+import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { DiscordSyncWorker } from './discord-sync.worker';
@@ -38,7 +41,10 @@ describe('DiscordSyncWorker', () => {
   const operationsRepo = { create: jest.fn((x) => x), save: jest.fn((x) => Promise.resolve(x)) };
   const membersRepo = { findOne: jest.fn() };
   const ranksRepo = { findOne: jest.fn(), find: jest.fn().mockResolvedValue([]) };
+  const medalsRepo = { find: jest.fn().mockResolvedValue([]) };
+  const memberMedalsRepo = { find: jest.fn().mockResolvedValue([]) };
   const settingsRepo = { findOne: jest.fn() };
+  const auditEntriesRepo = { update: jest.fn().mockResolvedValue(undefined) };
   const gateway = {
     assignRole: jest.fn(),
     removeRole: jest.fn(),
@@ -60,7 +66,10 @@ describe('DiscordSyncWorker', () => {
         { provide: getRepositoryToken(BotOperation), useValue: operationsRepo },
         { provide: getRepositoryToken(Member), useValue: membersRepo },
         { provide: getRepositoryToken(Rank), useValue: ranksRepo },
+        { provide: getRepositoryToken(Medal), useValue: medalsRepo },
+        { provide: getRepositoryToken(MemberMedal), useValue: memberMedalsRepo },
         { provide: getRepositoryToken(DiscordBotSettings), useValue: settingsRepo },
+        { provide: getRepositoryToken(AuditLogEntry), useValue: auditEntriesRepo },
         { provide: DiscordGateway, useValue: gateway },
         { provide: AuditService, useValue: audit },
       ],
@@ -207,6 +216,69 @@ describe('DiscordSyncWorker', () => {
     // The job stays Succeeded (NOT reset to Pending), so it will not be retried.
     expect(j.status).toBe(DiscordSyncJobStatus.Succeeded);
     expect(gateway.assignRole).toHaveBeenCalledTimes(1);
+  });
+
+  describe('role reconcile (RoleSync)', () => {
+    const roleSyncJob = () =>
+      job({
+        jobType: DiscordSyncJobType.RoleSync,
+        payload: { memberId: 'm1', discordUserId: 'u1' },
+      });
+
+    it('assigns the rank role AND every held-medal role', async () => {
+      jobsRepo.find.mockResolvedValue([roleSyncJob()]);
+      membersRepo.findOne.mockResolvedValue({
+        id: 'm1',
+        regimentId: 'regiment-1',
+        rankId: 'rank-1',
+        bannedAt: null,
+      });
+      ranksRepo.findOne.mockResolvedValue({ id: 'rank-1', discordRoleId: 'rank-role-1' });
+      memberMedalsRepo.find.mockResolvedValue([{ medal: { discordRoleId: 'medal-role-1' } }]);
+      settingsRepo.findOne.mockResolvedValue({ joinRoleId: 'join-1' });
+      gateway.fetchMember.mockResolvedValue({ roles: [] });
+
+      await worker.drain();
+
+      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'medal-role-1');
+    });
+
+    it('never re-grants roles to a BANNED member (would undo the ban strip)', async () => {
+      jobsRepo.find.mockResolvedValue([roleSyncJob()]);
+      membersRepo.findOne.mockResolvedValue({
+        id: 'm1',
+        regimentId: 'regiment-1',
+        rankId: 'rank-1',
+        bannedAt: new Date(),
+      });
+
+      const processed = await worker.drain();
+
+      expect(processed).toBe(1);
+      expect(gateway.assignRole).not.toHaveBeenCalled();
+      expect(gateway.removeRole).not.toHaveBeenCalled();
+    });
+
+    it('does NOT strip the assign-only join/Guest role during reconcile', async () => {
+      jobsRepo.find.mockResolvedValue([roleSyncJob()]);
+      membersRepo.findOne.mockResolvedValue({
+        id: 'm1',
+        regimentId: 'regiment-1',
+        rankId: 'rank-1',
+        bannedAt: null,
+      });
+      ranksRepo.findOne.mockResolvedValue({ id: 'rank-1', discordRoleId: 'rank-role-1' });
+      ranksRepo.find.mockResolvedValue([{ discordRoleId: 'rank-role-1' }]);
+      memberMedalsRepo.find.mockResolvedValue([]);
+      settingsRepo.findOne.mockResolvedValue({ joinRoleId: 'join-1' });
+      // Member currently holds the join role + rank role; join must be preserved.
+      gateway.fetchMember.mockResolvedValue({ roles: ['join-1', 'rank-role-1'] });
+
+      await worker.drain();
+
+      expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'join-1');
+    });
   });
 
   describe('orphaned-job reaper', () => {

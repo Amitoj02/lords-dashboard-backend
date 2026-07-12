@@ -2,12 +2,16 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThanOrEqual, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { AuditLogEntry } from '../audit/entities/audit-log-entry.entity';
 import {
   AuditActorType,
   BotConnectionStatus,
   DiscordSyncJobStatus,
   DiscordSyncJobType,
+  DiscordSyncStatus,
 } from '../common/enums';
+import { Medal } from '../medals/entities/medal.entity';
+import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { BotOperation } from './entities/bot-operation.entity';
@@ -56,8 +60,14 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     private readonly members: Repository<Member>,
     @InjectRepository(Rank)
     private readonly ranks: Repository<Rank>,
+    @InjectRepository(Medal)
+    private readonly medals: Repository<Medal>,
+    @InjectRepository(MemberMedal)
+    private readonly memberMedals: Repository<MemberMedal>,
     @InjectRepository(DiscordBotSettings)
     private readonly settings: Repository<DiscordBotSettings>,
+    @InjectRepository(AuditLogEntry)
+    private readonly auditEntries: Repository<AuditLogEntry>,
     private readonly gateway: DiscordGateway,
     private readonly audit: AuditService,
   ) {}
@@ -172,11 +182,22 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       }
       case DiscordSyncJobType.Announce:
       case DiscordSyncJobType.ApplicationSubmitted:
-      case DiscordSyncJobType.AuditLog:
-        // Announcements, enlistment posts and audit mirrors are all pre-composed
-        // channel messages (content + channelId resolved at enqueue), so they
-        // drain identically.
+        // Announcements and enlistment posts are pre-composed channel messages
+        // (content + channelId resolved at enqueue), so they drain identically.
         await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
+        return;
+      case DiscordSyncJobType.AuditLog:
+        await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
+        // The mirror landed: write the outcome back onto the source audit entry.
+        // Guarded so it can NEVER throw here — a throw would retry the job and
+        // re-post a duplicate channel message.
+        if (p.auditEntryId) {
+          await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Synced);
+        }
+        return;
+      case DiscordSyncJobType.ApplicationDecision:
+        // A decision DM to the applicant (approve/decline/hold) — direct message.
+        await this.gateway.sendDirectMessage(String(p.discordUserId), String(p.content));
         return;
       case DiscordSyncJobType.Welcome:
         if (p.channelId) {
@@ -190,7 +211,14 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /** Assign a member's linked rank role (a minimal, extensible reconciliation). */
+  /**
+   * Reconcile a member's bot-managed Discord roles. The DESIRED managed-role set
+   * is the member's linked rank role plus the linked role of every medal they
+   * currently hold. We assign any desired role they lack and remove any MANAGED
+   * role they hold that is no longer desired (e.g. the role of a revoked medal),
+   * only ever touching roles in {@link managedRoleIds} — unmanaged roles are
+   * never added or removed. Best-effort.
+   */
   private async reconcileRoles(
     regimentId: string,
     memberId: string,
@@ -201,11 +229,82 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       relations: { rank: true },
     });
     if (!member) return;
+    // A banned member's Discord roles are owned by the ban strip (applyBanRole);
+    // never re-grant their rank/medal roles via a reconcile — that would undo the
+    // ban (the Ban role would remain but every managed role would come back).
+    if (member.bannedAt) return;
+
+    // Desired = the member's rank role (if linked) ∪ the linked role of every
+    // medal they currently hold.
+    const desired = new Set<string>();
     const rank = member.rankId
       ? await this.ranks.findOne({ where: { id: member.rankId, regimentId } })
       : null;
-    if (rank?.discordRoleId) {
-      await this.gateway.assignRole(discordUserId, rank.discordRoleId);
+    if (rank?.discordRoleId) desired.add(rank.discordRoleId);
+
+    const held = await this.memberMedals.find({
+      where: { memberId },
+      relations: { medal: true },
+    });
+    for (const mm of held) {
+      if (mm.medal?.discordRoleId) desired.add(mm.medal.discordRoleId);
+    }
+
+    const managed = await this.managedRoleIds(regimentId);
+    // The join/Guest role is assign-only (owned by the guild-join flow); a role
+    // reconcile must never strip it even though managedRoleIds lists it (that set
+    // is also used by the ban strip, which SHOULD remove it). Only rank/medal
+    // roles are reconciled here.
+    const settings = await this.settings.findOne({ where: { regimentId } });
+    const joinRoleId = settings?.joinRoleId ?? null;
+
+    // Diff against the member's CURRENT roles when the gateway can report them so
+    // revoked-medal roles are removed; otherwise fall back to an idempotent
+    // assign + explicit strip of every non-held managed medal role.
+    const ref = await this.gateway.fetchMember(discordUserId);
+    const current = ref ? new Set(ref.roles) : null;
+
+    // Assign every desired role the member is missing (idempotent when unknown).
+    for (const roleId of desired) {
+      if (!current || !current.has(roleId)) {
+        await this.gateway.assignRole(discordUserId, roleId);
+      }
+    }
+
+    if (current) {
+      // Remove any MANAGED role the member holds that is no longer desired,
+      // except the assign-only join/Guest role.
+      for (const roleId of current) {
+        if (managed.has(roleId) && roleId !== joinRoleId && !desired.has(roleId)) {
+          await this.gateway.removeRole(discordUserId, roleId);
+        }
+      }
+    } else {
+      // The gateway can't list current roles: explicitly strip the linked role of
+      // every medal the member does NOT currently hold, so a revoked medal's role
+      // is still removed (removeRole is idempotent for a role they never had).
+      const medals = await this.medals.find({ where: { regimentId } });
+      for (const medal of medals) {
+        if (medal.discordRoleId && !desired.has(medal.discordRoleId)) {
+          await this.gateway.removeRole(discordUserId, medal.discordRoleId);
+        }
+      }
+    }
+  }
+
+  /**
+   * Best-effort write-back of a mirror job's outcome onto its source audit entry
+   * (synced/failed). GUARDED so it never throws: on the success path a throw here
+   * would retry the job and re-post the mirror; and record()/handleFailure must
+   * not be broken by a write-back error.
+   */
+  private async markAuditSync(auditEntryId: string, status: DiscordSyncStatus): Promise<void> {
+    try {
+      await this.auditEntries.update({ id: auditEntryId }, { discordSyncStatus: status });
+    } catch (error) {
+      this.logger.error(
+        `Audit sync-status write-back failed for entry ${auditEntryId}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -232,12 +331,20 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     await this.gateway.assignRole(discordUserId, banRoleId);
   }
 
-  /** The set of Discord role snowflakes the bot manages (rank roles + join role). */
+  /**
+   * The set of Discord role snowflakes the bot manages: every rank role, every
+   * medal role, and the join role. Reconciliation and the ban strip only ever
+   * touch roles in this set — unmanaged roles are left untouched.
+   */
   private async managedRoleIds(regimentId: string): Promise<Set<string>> {
     const ids = new Set<string>();
     const ranks = await this.ranks.find({ where: { regimentId } });
     for (const rank of ranks) {
       if (rank.discordRoleId) ids.add(rank.discordRoleId);
+    }
+    const medals = await this.medals.find({ where: { regimentId } });
+    for (const medal of medals) {
+      if (medal.discordRoleId) ids.add(medal.discordRoleId);
     }
     const settings = await this.settings.findOne({ where: { regimentId } });
     if (settings?.joinRoleId) ids.add(settings.joinRoleId);
@@ -262,6 +369,13 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     job.processedAt = new Date();
     await this.jobs.save(job);
     await this.recordOperation(job, false, true);
+    // A mirror job that failed terminally: reflect that on its source audit row.
+    if ((job.jobType as DiscordSyncJobType) === DiscordSyncJobType.AuditLog) {
+      const p = (job.payload ?? {}) as Record<string, string | undefined>;
+      if (p.auditEntryId) {
+        await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Failed);
+      }
+    }
     await this.audit.record({
       regimentId: job.regimentId,
       action: 'discord.sync.failed',
@@ -299,6 +413,14 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
             'Orphaned in-flight (process restarted); not auto-retried (non-idempotent)';
           await this.jobs.save(job);
           await this.recordOperation(job, false, true);
+          // A terminally-failed AuditLog mirror must reflect on its source entry,
+          // else discordSyncStatus is stuck at 'pending' forever (mirrors handleFailure).
+          if ((job.jobType as DiscordSyncJobType) === DiscordSyncJobType.AuditLog) {
+            const p = (job.payload ?? {}) as Record<string, string | undefined>;
+            if (p.auditEntryId) {
+              await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Failed);
+            }
+          }
         }
       }
       this.logger.warn(`Reaped ${orphaned.length} orphaned in-flight sync job(s) on startup`);

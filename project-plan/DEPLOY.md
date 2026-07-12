@@ -35,7 +35,8 @@ cp .env.example .env    # then edit — set REAL secrets:
 - `DISCORD_MOCK=false`
 - `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` — from the Discord app (§3).
 - `OWNER_DISCORD_ID` — the real regiment owner's Discord user id (claims the
-  Owner account on first boot); `OWNER_NAME` — their display name.
+  Owner account on first boot). The seeded Owner's display name defaults to
+  "Admin"; the Owner renames themselves in-app after signing in (profile edit).
 
 ## 3. Discord production app
 1. <https://discord.com/developers/applications> → your app → OAuth2.

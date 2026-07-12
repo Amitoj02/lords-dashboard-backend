@@ -88,7 +88,10 @@ describe('ApplicationsService', () => {
   let identities: MockRepo<DiscordIdentity>;
   let audit: { record: jest.Mock };
   let sessionContext: { invalidate: jest.Mock };
-  let discordSync: { enqueueApplicationSubmitted: jest.Mock };
+  let discordSync: {
+    enqueueApplicationSubmitted: jest.Mock;
+    enqueueApplicationDecision: jest.Mock;
+  };
 
   // Per-test transaction manager repositories.
   let txRanks: MockRepo<Rank>;
@@ -124,7 +127,10 @@ describe('ApplicationsService', () => {
     };
     audit = { record: jest.fn() };
     sessionContext = { invalidate: jest.fn() };
-    discordSync = { enqueueApplicationSubmitted: jest.fn().mockResolvedValue(null) };
+    discordSync = {
+      enqueueApplicationSubmitted: jest.fn().mockResolvedValue(null),
+      enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
+    };
 
     txRanks = { findOneOrFail: jest.fn() };
     txMembers = {
@@ -418,7 +424,9 @@ describe('ApplicationsService', () => {
       applications.findOne!.mockResolvedValue(
         baseApplication({ status: ApplicationStatus.Approved }),
       );
-      await expect(service.approve(STAFF, 'app-1', null)).rejects.toBeInstanceOf(ConflictException);
+      await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
       expect(dataSource.transaction).not.toHaveBeenCalled();
     });
 
@@ -426,7 +434,7 @@ describe('ApplicationsService', () => {
       applications.findOne!.mockResolvedValue(baseApplication());
       txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
-      const result = await service.approve(STAFF, 'app-1', '9.9.9.9');
+      const result = await service.approve(STAFF, 'app-1', {}, '9.9.9.9');
 
       expect(txRanks.findOneOrFail).toHaveBeenCalledWith({
         where: { regimentId: 'regiment-1', name: 'Recruit' },
@@ -465,7 +473,7 @@ describe('ApplicationsService', () => {
       applications.findOne!.mockResolvedValue(baseApplication({ status: ApplicationStatus.Held }));
       txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
-      const result = await service.approve(STAFF, 'app-1', null);
+      const result = await service.approve(STAFF, 'app-1', {}, null);
       expect(result.status).toBe(ApplicationStatus.Approved);
     });
   });

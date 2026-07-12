@@ -145,7 +145,7 @@ export class MembersService {
   /**
    * Self-service profile update. A member may only edit their own profile — any
    * mismatch with the authenticated member id is forbidden. Only the restricted
-   * set of fields (platform/timezone/inGameName/avatarUrl) is mutable here.
+   * set of fields (name/platform/timezone/inGameName/avatarUrl) is mutable here.
    * Changing role/status/rank belongs to the admin actions below and is not
    * permitted through this handler.
    */
@@ -156,6 +156,9 @@ export class MembersService {
 
     const member = await this.loadMember(id, user.regimentId);
 
+    // Display name is self-editable; like the other self-edit fields below it is
+    // intentionally not audited (no security-relevant role/status/rank change).
+    if (dto.name !== undefined) member.name = dto.name;
     if (dto.platform !== undefined) member.platform = dto.platform;
     if (dto.timezone !== undefined) member.timezone = dto.timezone;
     if (dto.inGameName !== undefined) member.inGameName = dto.inGameName;

@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "b41486a0d0375f91d43714dc227770c821956224",
-  "lastSyncedAt": "2026-07-12T19:12:00Z",
-  "notesForNextSession": "GUILDS-SCOPE REMOVAL + APPLICANT SELF-SERVICE EPIC shipped this session on TWO branches (not yet merged): backend feat/guilds-scope-and-applicant-self-service (commit 9ed1dc6) and frontend lords-regiment-dashboard:feat/applicant-self-service (commit d9277e9). BACKEND: T-0050-0053 (drop the Discord `guilds` OAuth scope; derive guildMember from the bot's fetchMember at sign-in, guarded by a 4s timeout + try/catch so it never blocks login) all deploy_ready + VERIFIED LIVE (authorize URL scope = `identify email`; bot REST member lookup 200 in-guild / 404 not). NEW T-0054 (GET/PATCH /applications/mine), T-0055 (applicant blocklist: block/unblock + submit guard, columns on discord_identities), T-0056 (setupComplete flip endpoint). 226 unit + 35 e2e green, lint+build clean, adversarial review clean. Live-verified the whole applicant flow via minted JWTs (submit→mine→edit→block→403 resubmit→unblock). FRONTEND (51 specs green, build clean): applicant status page, apply-as-signin CTA, returning-applicant redirect, edit-pending, admin block UI, Owner first-run routing, and RETIRED the stub owner-setup wizard (→ /admin/settings). Browser-verified the status page (pending+blocked), the pre-filled edit form, and the admin block controls against the live stack. T-0026/27/28 questionnaires archived (answers consumed). T-0003 rank-ladder risk retired (owner: dummy ranks OK, greenfield). DEFERRED / next session: (1) frontend T-0020 wire the account-deletion UI to the existing GDPR endpoints; (2) frontend landing still shows hardcoded stats/officers arrays (wire GET /regiment/stats, and guard un-wired surfaces before the T-0032 public deploy); (3) T-0036 owner-superadmin verify was exercised via a minted owner JWT (full admin panel rendered) — for the REAL owner set OWNER_DISCORD_ID in .env and reseed before seed:prod. HUMAN-ONLY remaining: T-0033 Discord OAuth consent + register the PROD redirect URI; T-0032 MVP DigitalOcean deploy; then the full T-0025 hardening pass. GOTCHAS (unchanged): STOP the api container before host e2e (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true); dist/ is root-owned — build-check with tsc --outDir <scratch>; the api container is dev-mode (start:dev, source bind-mounted, host port 3001). NEXT (T-0057/T-0058 'Admin' owner-name epic, planned): after the backend name-edit lands, I will also add a Display Name field to the frontend profile-edit form in lords-regiment-dashboard (form currently exposes platform/timezone/inGameName/avatar only) so the Owner can rename off the 'Admin' default — owner confirmed I handle the frontend.",
-  "nextIdCounter": 59,
+  "lastSyncedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+  "lastSyncedAt": "2026-07-12T22:20:00Z",
+  "notesForNextSession": "SYNC 2026-07-12T22:20Z: the \"Admin\" owner-name epic + SIX frontend counterparts are implemented on feat/name-edit-and-fe-counterparts (commit 1043851), all deploy_ready. T-0057 (owner name->Admin + idempotent seed), T-0058 (self-edit display name), T-0059 (applicant decision DM), T-0060 (audit actor labels), T-0061 (audit discord-sync status write-back), T-0062 (medals reorder), T-0063 (/discord/roles + rank/medal unlink), T-0064 (medal-linked roles on award). 234 unit tests + eslint + tsc green. An adversarial review ran and ALL 6 findings were fixed (audit pending->synced race guard, CSV actor-name join, reconcile ban-guard, orphan-reaper write-back, UpdateMemberDto MinLength(1), DEPLOY.md OWNER_NAME reference) + 3 new worker specs. LIVE-VERIFIED against the running stack via a minted owner JWT: GET /discord/roles (real guild roles), audit actorLabel names + a real audit entry cross-posting to the Discord audit-log channel with pending->synced write-back, medals reorder + validation, rank/medal link+unlink, self-edit name (+403 on another member), and a live medal award/revoke role.sync on the test guild. NOTE: I enabled the bot (botEnabled=true) in the dev DB for verification (the seed default is false/dormant). FRONTEND companions shipped in lords-regiment-dashboard:feat/admin-completion-ranks-audit-ux (ranks/medals wiring consumes T-0062/63/64; decision-DM UI consumes T-0059; audit honesty consumes T-0060/61). REMAINING (unchanged, all pre-deploy): T-0032 MVP prod deploy (HUMAN: DigitalOcean + Discord OAuth consent + set a REAL OWNER_DISCORD_ID before seed:prod), then the T-0025 hardening pass. The frontend profile-edit form should expose a Display Name field so the Owner can rename off \"Admin\" (companion to T-0058) — confirm it landed in the frontend repo.",
+  "nextIdCounter": 65,
   "connections": [],
   "tasks": [
     {
@@ -3408,7 +3408,7 @@
       "id": "T-0057",
       "title": "Drop OWNER_NAME env; default the seeded Owner display name to \"Admin\"",
       "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY — the non-member /auth/me fallback ('Recruit') is left unchanged.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
@@ -3433,36 +3433,39 @@
       "testPlan": [
         {
           "desc": "db:setup with no OWNER_NAME set -> seeded Owner member.name === 'Admin' and Owner identity.globalName === 'Admin'",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "db:setup with OWNER_DISCORD_ID set (real owner) -> Owner resolves by that snowflake, name defaults to 'Admin', inGameName null",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "seed remains idempotent (re-run does not duplicate or rename an already-customized owner)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "grep confirms no remaining references to OWNER_NAME in src/ or .env.example",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "non-member /auth/me still falls back to 'Recruit' (unchanged) — no regression to the applicant projection",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "Owner seed path touched - shared by the dev fixture (?as=owner mock) and the real prod-owner claim (OWNER_DISCORD_ID first sign-in); a wrong default could mislabel the live Owner.",
-          "status": "open",
-          "notedAt": "2026-07-12T00:00:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T00:00:00Z",
+          "resolvedAt": "2026-07-12T22:20:00Z",
+          "resolvedBy": "T-0057",
+          "note": "Seed made name-idempotent via an insert-only arg on ensure() (customized owner name preserved on re-seed); default is the literal \"Admin\"; other 6 seeders unaffected. Live /auth/me resolves the owner correctly; DEPLOY.md OWNER_NAME reference removed (review). Commit 1043851."
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T00:00:00Z",
-      "updatedAt": "2026-07-12T00:00:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
       "history": [
         {
           "at": "2026-07-12T00:00:00Z",
@@ -3477,6 +3480,13 @@
           "to": "planned",
           "by": "human",
           "note": "scoped to seeded Owner only; Recruit fallback left unchanged (Q answered)"
+        },
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + reviewed; 234 unit tests + tsc + eslint green."
         }
       ]
     },
@@ -3484,7 +3494,7 @@
       "id": "T-0058",
       "title": "Allow self-service editing of display name in profile PATCH",
       "summary": "Let an authenticated member (including the Owner) change their own display name via PATCH /members/:id. Add an optional `name` field to UpdateMemberDto and apply it in MembersService.updateSelf alongside the existing platform/timezone/inGameName/avatarUrl fields. This is what lets the Owner rename themselves off the default \"Admin\" after Discord sign-in.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -3501,36 +3511,39 @@
       "testPlan": [
         {
           "desc": "PATCH /members/:id with { name } on own profile -> 200 and member.name updated",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "PATCH another member's :id with { name } -> 403 (updateSelf ownership guard unchanged)",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "name exceeding maxLength -> 400 validation error",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "existing self-editable fields (platform/timezone/inGameName/avatarUrl) still apply unchanged",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "GET /auth/me reflects the new name after the patch",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "updateSelf handler + Swagger contract widened - the frontend profile-edit form must expose the name field; unguarded, a member could previously never rename. No audit row is written for name changes (consistent with existing self-edit policy).",
-          "status": "open",
-          "notedAt": "2026-07-12T00:00:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T00:00:00Z",
+          "resolvedAt": "2026-07-12T22:20:00Z",
+          "resolvedBy": "T-0058",
+          "note": "updateSelf now applies name (MinLength(1) guard added in review so a member cannot blank a NOT-NULL name); role/rank/status stay non-editable (mass-assignment safe). Live-verified PATCH own name -> 200 + /auth/me reflects it, and 403 on another member. Frontend Display-Name field is the companion in lords-regiment-dashboard. Commit 1043851."
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T00:00:00Z",
-      "updatedAt": "2026-07-12T00:00:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
       "history": [
         {
           "at": "2026-07-12T00:00:00Z",
@@ -3538,6 +3551,327 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + reviewed; live-verified self-edit + ownership 403."
+        }
+      ]
+    },
+    {
+      "id": "T-0059",
+      "title": "Applicant decision DM (custom Discord DM on approve/decline/hold)",
+      "summary": "New DiscordSyncJobType.ApplicationDecision + enqueueApplicationDecision; approve/decline/hold accept an optional discordDmMessage and best-effort enqueue a DM to the applicant’s linked Discord identity (empty message -> per-decision default template). Never blocks or rolls back the decision. Frontend counterpart of lords-regiment-dashboard:T-0045.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/applications/",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/common/enums/index.ts"
+      ],
+      "dependsOn": [
+        "T-0014",
+        "T-0021"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "approve/decline/hold accept discordDmMessage; a decision DM job is enqueued when the applicant has a linked identity",
+          "status": "passed"
+        },
+        {
+          "desc": "no linked identity / null discordUserId -> DM silently skipped, decision still succeeds",
+          "status": "passed"
+        },
+        {
+          "desc": "empty custom message falls back to the per-decision default template",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Threads a best-effort DM into the applications approve/decline/hold path and the shared discord-sync outbox worker; a DM-side error must never fail or roll back a decision (guarded, enqueued after the approve transaction).",
+          "status": "open",
+          "notedAt": "2026-07-12T22:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+      "createdAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built + unit-tested; endpoint + skip-path live-verified. Best-effort DM via the outbox worker."
+        }
+      ]
+    },
+    {
+      "id": "T-0060",
+      "title": "Audit actor/target name resolution on read",
+      "summary": "GET /audit, GET /audit/:id and the CSV export left-join actorMember/targetMember so human actors render their member name instead of a null label / raw UUID (the frontend fallback previously degraded to the UUID). Frontend counterpart of lords-regiment-dashboard:T-0070.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "audit",
+      "repo": "",
+      "paths": [
+        "src/audit/audit.service.ts",
+        "src/audit/dto/audit-log-entry.dto.ts"
+      ],
+      "dependsOn": [
+        "T-0007",
+        "T-0017"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "/audit + /audit/:id return actorLabel populated with the member name for human actors (verified live)",
+          "status": "passed"
+        },
+        {
+          "desc": "CSV export resolves actorLabel/targetLabel names, not blank (fixed in review)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Audit read path + AuditLogEntryDto.from are shared by every audit consumer; the added actorMember/targetMember relations change the query shape (list, detail, and CSV).",
+          "status": "open",
+          "notedAt": "2026-07-12T22:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+      "createdAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built + reviewed (CSV join added in review); live-verified actor names show instead of UUIDs."
+        }
+      ]
+    },
+    {
+      "id": "T-0061",
+      "title": "Audit Discord-sync status write-back",
+      "summary": "record() sets a truthful discordSyncStatus (pending when mirrored, not_applicable otherwise), threads the saved audit-entry id through mirrorToDiscord/enqueueAuditLog, and the outbox worker (plus the orphan reaper) writes back synced/failed. A guarded pending-write prevents a fast worker from clobbering a terminal status back to pending. Frontend counterpart of lords-regiment-dashboard:T-0072.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "audit",
+      "repo": "",
+      "paths": [
+        "src/audit/audit.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord.module.ts"
+      ],
+      "dependsOn": [
+        "T-0007",
+        "T-0017",
+        "T-0021"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "a mirrored audit action goes pending -> synced via the worker write-back; posted to the audit-log channel (verified live on the test guild)",
+          "status": "passed"
+        },
+        {
+          "desc": "bot off / no audit channel / excluded action -> not_applicable",
+          "status": "passed"
+        },
+        {
+          "desc": "terminal mirror failure (handleFailure and the orphan reaper) writes back failed",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Modifies AuditService.record (shared by every mutation) and injects an AuditLogEntry repo into the outbox worker for write-back; a bug affects all audit writes and the drain loop. The pending write is race-guarded (conditional update on IS NULL) so a terminal status is never downgraded.",
+          "status": "open",
+          "notedAt": "2026-07-12T22:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+      "createdAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built + reviewed (race guard + orphan-reaper write-back added in review); live-verified pending->synced on a real Discord audit post."
+        }
+      ]
+    },
+    {
+      "id": "T-0062",
+      "title": "Medals reorder endpoint (POST /medals/reorder)",
+      "summary": "Bulk medal precedence reorder mirroring POST /ranks/reorder: strict id-set validation, transactional precedence rewrite, a medal.reorder audit action. Lets the frontend medal cabinet persist a drag-reorder in one call instead of N writes. Frontend counterpart of lords-regiment-dashboard:T-0067.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "medals",
+      "repo": "",
+      "paths": [
+        "src/medals/medals.controller.ts",
+        "src/medals/medals.service.ts",
+        "src/medals/dto/reorder-medals.dto.ts",
+        "src/database/seeds/audit-actions.seed.ts"
+      ],
+      "dependsOn": [
+        "T-0012"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST /medals/reorder rewrites precedence in the given order (verified live + restored)",
+          "status": "passed"
+        },
+        {
+          "desc": "a wrong/partial id set -> 400 (verified live)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+      "createdAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built + unit-tested; live-verified reorder + validation. Route ordered before :id param routes."
+        }
+      ]
+    },
+    {
+      "id": "T-0063",
+      "title": "Discord roles list endpoint (edit_ranks_medals) + rank/medal unlink",
+      "summary": "GET /discord/roles returns the guild roles gated on edit_ranks_medals so rank/medal editors can populate the link picker without manage_settings. POST /ranks/:id/unlink-discord and POST /medals/:id/unlink-discord clear a linked role (discordRoleId/name null, linked=false, audited). Frontend counterpart of lords-regiment-dashboard:T-0065.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/discord.controller.ts",
+        "src/discord/discord.service.ts",
+        "src/ranks/ranks.controller.ts",
+        "src/ranks/ranks.service.ts",
+        "src/medals/medals.controller.ts",
+        "src/medals/medals.service.ts"
+      ],
+      "dependsOn": [
+        "T-0011",
+        "T-0012",
+        "T-0020"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /discord/roles returns [{id,name,position}] for an edit_ranks_medals caller (verified live: real guild roles)",
+          "status": "passed"
+        },
+        {
+          "desc": "unlink-discord clears the link for ranks and medals (verified live)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+      "createdAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built + unit-tested; live-verified the roles endpoint returns real guild roles and unlink clears state."
+        }
+      ]
+    },
+    {
+      "id": "T-0064",
+      "title": "Apply medal-linked Discord roles on award/revoke",
+      "summary": "The role reconcile now assigns the linked role of every medal a member holds and removes it when the medal is revoked, in addition to the rank role; managedRoleIds includes medal roles. Reconcile never strips the assign-only join/Guest role and skips banned members so it cannot undo a ban strip. Frontend counterpart of lords-regiment-dashboard:T-0065 (Q3).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord.module.ts"
+      ],
+      "dependsOn": [
+        "T-0010",
+        "T-0012",
+        "T-0021"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "awarding a linked medal applies its role; revoking removes it (live role.sync success on the test guild)",
+          "status": "passed"
+        },
+        {
+          "desc": "reconcile never strips the join/Guest role; banned members are skipped (new worker unit specs)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "reconcileRoles + managedRoleIds are the shared bot role-sync core (also drive rank sync and the ban strip); the desired/managed diff now adds AND removes medal roles. Pinned by three new worker specs (medal apply, join-role preserved, banned-member skipped).",
+          "status": "open",
+          "notedAt": "2026-07-12T22:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
+      "createdAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-12T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-12T22:20:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Built + 3 new unit specs; live-verified award/revoke role.sync. Join-role-strip + ban-reconcile bugs caught in review and fixed."
         }
       ]
     }

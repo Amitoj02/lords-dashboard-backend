@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -20,6 +21,7 @@ import { Rank } from '../ranks/entities/rank.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { ApplicationDto } from './dto/application.dto';
 import { ApplicationQueryDto } from './dto/application-query.dto';
+import { ApproveApplicationDto } from './dto/approve-application.dto';
 import { BlockApplicantDto } from './dto/block-applicant.dto';
 import { CreateApplicationDto } from './dto/create-application.dto';
 import { DeclineApplicationDto } from './dto/decline-application.dto';
@@ -43,6 +45,8 @@ const ENTRY_ROLE = MemberRole.Member;
  */
 @Injectable()
 export class ApplicationsService {
+  private readonly logger = new Logger(ApplicationsService.name);
+
   constructor(
     @InjectRepository(Application)
     private readonly applications: Repository<Application>,
@@ -315,7 +319,12 @@ export class ApplicationsService {
    * Approve an application: create the roster Member at the entry rank and mark
    * the application approved, atomically. Audited on commit.
    */
-  async approve(user: AuthenticatedUser, id: string, ip: string | null): Promise<ApplicationDto> {
+  async approve(
+    user: AuthenticatedUser,
+    id: string,
+    dto: ApproveApplicationDto,
+    ip: string | null,
+  ): Promise<ApplicationDto> {
     const application = await this.loadOrFail(user, id);
     this.assertDecidable(application);
 
@@ -380,6 +389,14 @@ export class ApplicationsService {
       detail: `Approved application; promoted to ${member.role} (${ENTRY_RANK_NAME}).`,
     });
 
+    // Best-effort decision DM to the applicant (never affects the approval).
+    await this.enqueueDecisionDm(
+      user.regimentId,
+      application.discordIdentityId,
+      'approve',
+      dto.discordDmMessage,
+    );
+
     // The applicant is now a member: drop their cached (Applicant) context so
     // the promotion is reflected on their next request with the same token.
     this.sessionContext.invalidate(application.discordIdentityId);
@@ -410,6 +427,14 @@ export class ApplicationsService {
       target: { type: 'application', id: saved.id, label: saved.applicantName },
       detail: dto.reason ?? null,
     });
+
+    // Best-effort decision DM to the applicant (never affects the decline).
+    await this.enqueueDecisionDm(
+      user.regimentId,
+      application.discordIdentityId,
+      'decline',
+      dto.discordDmMessage,
+    );
 
     return ApplicationDto.from(saved);
   }
@@ -445,7 +470,66 @@ export class ApplicationsService {
       detail: dto.note ?? null,
     });
 
+    // Best-effort decision DM to the applicant (never affects the hold).
+    await this.enqueueDecisionDm(
+      user.regimentId,
+      application.discordIdentityId,
+      'hold',
+      dto.discordDmMessage,
+    );
+
     return ApplicationDto.from(saved);
+  }
+
+  /**
+   * Best-effort applicant DM on a decision (approve/decline/hold). Resolves the
+   * applicant's Discord user id from the linked identity; if there is no linked
+   * identity or no Discord user id, the DM is skipped silently. The message is
+   * the trimmed custom text when provided, else the per-decision default
+   * template. Wrapped so ANY failure here can never affect the decision result.
+   */
+  private async enqueueDecisionDm(
+    regimentId: string,
+    discordIdentityId: string | null,
+    decision: 'approve' | 'decline' | 'hold',
+    customMessage?: string | null,
+  ): Promise<void> {
+    try {
+      if (!discordIdentityId) return;
+      const identity = await this.identities.findOne({ where: { id: discordIdentityId } });
+      const discordUserId = identity?.discordUserId;
+      if (!discordUserId) return;
+
+      const trimmed = customMessage?.trim();
+      const content =
+        trimmed && trimmed.length > 0
+          ? trimmed
+          : await this.defaultDecisionMessage(regimentId, decision);
+
+      await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
+    } catch (error) {
+      this.logger.error(`Failed to enqueue ${decision} decision DM: ${(error as Error).message}`);
+    }
+  }
+
+  /** Render the default decision DM, substituting the regiment display name. */
+  private async defaultDecisionMessage(
+    regimentId: string,
+    decision: 'approve' | 'decline' | 'hold',
+  ): Promise<string> {
+    const settings = await this.settings.findOne({
+      where: { regimentId },
+      relations: { regiment: true },
+    });
+    const name = settings?.regiment?.name ?? 'the regiment';
+    switch (decision) {
+      case 'approve':
+        return `Your application to ${name} has been approved - welcome aboard! Check the dashboard for your next steps.`;
+      case 'decline':
+        return `Thank you for your interest in ${name}. After review, your application was not successful at this time.`;
+      case 'hold':
+        return `Your application to ${name} is on hold pending further review. We will be in touch soon.`;
+    }
   }
 
   /** Load a regiment-scoped application or throw 404. */

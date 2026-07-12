@@ -118,6 +118,8 @@ export enum DiscordSyncJobType {
   ApplicationSubmitted = 'application.submitted',
   /** Mirror an audit-log entry to the audit-log channel (T-0043). */
   AuditLog = 'audit.log',
+  /** DM an applicant the outcome of a decision (approve/decline/hold). */
+  ApplicationDecision = 'application.decision',
 }
 
 export enum NotificationTone {
