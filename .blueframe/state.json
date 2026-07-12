@@ -1,9 +1,9 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
-  "lastSyncedAt": "2026-07-12T02:35:00Z",
-  "notesForNextSession": "POST-MVP HARDENING COMPLETE on feat/post-mvp-hardening (backend PR + frontend PR against main). Shipped T-0034/35/36 (ban->Ban-role), T-0039/40/37-superseded/38 (applications reshape + 18+ copy), T-0041/42/43/44/45 (per-purpose Discord channels), T-0046/47/48/49 (auth resolver + slim JWT + iat session invalidation, with ban/suspend now enforced at the resolver). 212 unit + 28 e2e green; lint+build clean; adversarial review (2 findings fixed: ban/suspend re-login bypass + announce length cap). VERIFIED END-TO-END against the REAL Discord test guild (guild 1425324636534603842): /auth/me resolves the Owner from a slim token, rank change syncs a real role, announce posts to #lobby, enlistment posts to #new-enlistments, every audit entry mirrors to #audit-logs, and ban strips managed roles + applies a Banned role. Browser-verified the Angular Settings pickers (roles+channels from the live guild) and the wired admin applications view. applyBanRoleOnBan stays DEFAULT OFF per the owner. GOTCHAS: (1) the host jest e2e shares the docker MySQL with the running api's REAL worker — STOP the api container (docker stop lords-dashboard-backend-api-1) before `npm run test:e2e` (and run e2e with DISCORD_MOCK=true DISCORD_BOT_MOCK=true) or the live worker drains the test jobs. (2) dist/ is root-owned from the container build — build-check with `tsc -p tsconfig.build.json --outDir <scratch>`. T-0033 remaining is human-only: click Discord's OAuth consent + register the PROD redirect URI, then flip prod env. NEXT: owner does T-0032 MVP deploy + the real go-live consent; then T-0025 hardening pass.",
+  "lastSyncedCommit": "5e726f7e0310b42ec535452e9e1512ba8f953097",
+  "lastSyncedAt": "2026-07-12T17:39:21Z",
+  "notesForNextSession": "POST-MVP HARDENING NOW MERGED TO main via PR #5 (merge 2a35a4e). T-0034-0049 (ban->Ban-role, applications reshape + 18+ copy, per-purpose Discord channels, auth resolver + slim JWT + iat session invalidation) are all deploy_ready on main; backend + frontend shipped in lockstep. Real Discord bot go-live (T-0033) is VERIFIED against the REAL test guild (guild 1425324636534603842) and deploy_ready: /auth/me resolves the Owner from a slim token, rank change syncs a real role, announce/enlistment/audit-mirror/ban-role all fire live. applyBanRoleOnBan stays DEFAULT OFF per the owner. NEW PLANNED SCOPE from a bf-plan session (T-0050-0053, all `planned`, not started): stop requesting the Discord `guilds` OAuth scope and instead derive guild membership from the bot's DiscordGateway.fetchMember at sign-in (T-0050), drop the scope + delete the dead fetchGuilds/isMemberOfGuild helpers from config/env/seed (T-0051), keep mock-mode parity so mocked sign-in still sets guildMember via the mock gateway (T-0052), and update specs + verify end-to-end on the test guild (T-0053). Two open risks noted for that work: fetchMember now runs inline on the synchronous login path (T-0050#0) and stored `identify email guilds` scope strings must stay tolerated (T-0051#0). Also: .env.example now documents API_HOST_PORT (host-port override for the api container; wiring already existed in docker-compose.override.yml since 192885f) — the fix for the port-3000-occupied gotcha; recorded under T-0031. GOTCHAS (unchanged): (1) the host jest e2e shares the docker MySQL with the running api's REAL worker — STOP the api container (docker stop lords-dashboard-backend-api-1) before `npm run test:e2e` (run with DISCORD_MOCK=true DISCORD_BOT_MOCK=true) or the live worker drains the test jobs. (2) dist/ is root-owned from the container build — build-check with `tsc -p tsconfig.build.json --outDir <scratch>`. T-0033 remaining is human-only: click Discord's OAuth consent + register the PROD redirect URI, then flip prod env. NEXT: implement the T-0050-0053 guilds-scope removal, then owner does T-0032 MVP deploy + the real go-live consent, then the T-0025 hardening pass.",
   "nextIdCounter": 54,
   "connections": [],
   "tasks": [
@@ -1607,7 +1607,8 @@
       "paths": [
         "docker-compose.override.yml",
         ".devcontainer/devcontainer.json",
-        "package.json"
+        "package.json",
+        ".env.example"
       ],
       "dependsOn": [
         "T-0009",
@@ -1630,7 +1631,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-12T17:39:21Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1652,6 +1653,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-12T17:39:21Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "bf-sync: .env.example now documents API_HOST_PORT (host-port override for the api container; the compose wiring `${API_HOST_PORT:-3000}:3000` already existed in docker-compose.override.yml since 192885f). Doc-only backfill for the port-3000-occupied gotcha; no status change (5e726f7)."
         }
       ]
     },
