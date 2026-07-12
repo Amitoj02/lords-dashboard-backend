@@ -6,6 +6,25 @@ import { Member } from '../members/entities/member.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordSyncJob } from './entities/discord-sync-job.entity';
 
+/** The reshaped enlistment fields rendered into the #new-enlistments post. */
+export interface EnlistmentSummary {
+  applicantName: string;
+  inGameName: string;
+  currentRegiment: string;
+  howFound: string;
+  preferredClasses: string;
+  skillsToImprove: string;
+  representativeNote: string | null;
+}
+
+/** The audit fields rendered into the #audit-logs mirror. */
+export interface AuditSummary {
+  action: string;
+  actorLabel: string | null;
+  detail: string | null;
+  severity: string;
+}
+
 /**
  * Enqueue side of the Discord outbox. App mutations call these helpers instead of
  * touching Discord inline; the {@link DiscordSyncWorker} drains the jobs. EVERY
@@ -47,23 +66,30 @@ export class DiscordSyncService {
   }
 
   /**
-   * ⚠️ SENSITIVE (owner decision T-0027 Q4). Enqueue a guild kick for a banned
-   * member — ONLY when the owner has explicitly turned on `kickOnBan`. Defaults
-   * off, so an app-side ban does NOT touch Discord unless deliberately enabled.
+   * ⚠️ SENSITIVE (owner decision T-0027 Q4 → reshaped by T-0035). Enqueue a
+   * strip-managed-roles + apply-Ban-role job for a banned member — ONLY when the
+   * owner has explicitly turned on `applyBanRoleOnBan` AND a Ban role is
+   * configured (T-0034). Defaults off, so an app-side ban does NOT touch Discord
+   * unless deliberately enabled. The worker re-checks both at drain time.
    */
-  async enqueueMemberKick(
+  async enqueueMemberBanRole(
     regimentId: string,
     discordUserId: string | null,
     reason: string | null,
   ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
-      if (!discordUserId || !s.kickOnBan) return null;
-      this.logger.warn(`Enqueuing Discord kick for ${discordUserId} (kickOnBan is ENABLED)`);
-      return this.insertJob(regimentId, DiscordSyncJobType.MemberKick, { discordUserId, reason });
+      if (!discordUserId || !s.applyBanRoleOnBan || !s.banRoleId) return null;
+      this.logger.warn(
+        `Enqueuing Discord ban-role for ${discordUserId} (applyBanRoleOnBan is ENABLED)`,
+      );
+      return this.insertJob(regimentId, DiscordSyncJobType.MemberBanRole, {
+        discordUserId,
+        reason,
+      });
     });
   }
 
-  /** Enqueue an announcement broadcast to a channel (defaults to the configured one). */
+  /** Enqueue an ad-hoc announcement broadcast (defaults to the announcement channel). */
   async enqueueAnnounce(
     regimentId: string,
     content: string,
@@ -74,9 +100,81 @@ export class DiscordSyncService {
       if (!target) return null;
       return this.insertJob(regimentId, DiscordSyncJobType.Announce, {
         channelId: target,
-        content,
+        content: content.slice(0, 2000),
       });
     });
+  }
+
+  /**
+   * Enqueue an EVENT announcement/reminder (T-0044): routes to the dedicated
+   * event-announcements channel, falling back to the general announcement
+   * channel so a partially-configured bot still posts somewhere.
+   */
+  async enqueueEventAnnounce(regimentId: string, content: string): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      const target = s.eventAnnouncementChannelId ?? s.announcementChannelId;
+      if (!target) return null;
+      // Cap at Discord's 2000-char limit so a long event description can't
+      // create a permanently-failing outbox job.
+      return this.insertJob(regimentId, DiscordSyncJobType.Announce, {
+        channelId: target,
+        content: content.slice(0, 2000),
+      });
+    });
+  }
+
+  /**
+   * Enqueue an enlistment-application post to the enlistments channel (T-0042).
+   * No-ops when the bot is off or no enlistments channel is configured. The embed
+   * text is composed here from the reshaped application fields.
+   */
+  async enqueueApplicationSubmitted(
+    regimentId: string,
+    summary: EnlistmentSummary,
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      if (!s.enlistmentChannelId) return null;
+      return this.insertJob(regimentId, DiscordSyncJobType.ApplicationSubmitted, {
+        channelId: s.enlistmentChannelId,
+        content: this.buildEnlistmentMessage(summary),
+      });
+    });
+  }
+
+  /**
+   * Enqueue an audit-log entry mirror to the audit-log channel (T-0043). No-ops
+   * when the bot is off or no audit-log channel is configured.
+   */
+  async enqueueAuditLog(regimentId: string, entry: AuditSummary): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      if (!s.auditLogChannelId) return null;
+      return this.insertJob(regimentId, DiscordSyncJobType.AuditLog, {
+        channelId: s.auditLogChannelId,
+        content: this.buildAuditMessage(entry),
+      });
+    });
+  }
+
+  /** Compose the enlistment-application message (Discord markdown, capped 2000). */
+  private buildEnlistmentMessage(s: EnlistmentSummary): string {
+    const lines = [
+      '📋 **New enlistment application**',
+      `**Applicant:** ${s.applicantName}`,
+      `**In-game name:** ${s.inGameName}`,
+      `**Current regiment:** ${s.currentRegiment}`,
+      `**How they found us:** ${s.howFound}`,
+      `**Preferred classes:** ${s.preferredClasses}`,
+      `**Wants to improve:** ${s.skillsToImprove}`,
+    ];
+    if (s.representativeNote) lines.push(`**Representative note:** ${s.representativeNote}`);
+    return lines.join('\n').slice(0, 2000);
+  }
+
+  /** Compose the audit-entry mirror message (Discord markdown, capped 2000). */
+  private buildAuditMessage(e: AuditSummary): string {
+    const actor = e.actorLabel ?? 'system';
+    const detail = e.detail ? ` — ${e.detail}` : '';
+    return `📝 \`[${e.severity}]\` **${e.action}** by ${actor}${detail}`.slice(0, 2000);
   }
 
   /** Enqueue the welcome message for a newly-joined member. */

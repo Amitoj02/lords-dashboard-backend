@@ -17,10 +17,11 @@ import { Member } from '../src/members/entities/member.entity';
 
 /**
  * End-to-end coverage of the Discord bot (MOCK gateway) against real MySQL:
- * the outbox pipeline (enqueue → drain → bot_operation), the SENSITIVE ban→kick
- * gate (off by default, fires only when kickOnBan is enabled), rank-change role
- * sync, announcements, and join onboarding (welcome + Guest role). The bot runs
- * mocked (no DISCORD_BOT_TOKEN), so nothing touches a real Discord guild.
+ * the outbox pipeline (enqueue → drain → bot_operation), the SENSITIVE ban →
+ * strip-roles + apply-Ban-role gate (off by default, fires only when
+ * applyBanRoleOnBan is enabled AND a Ban role is set), rank-change role sync,
+ * announcements, and join onboarding (welcome + Guest role). The bot runs mocked
+ * (no DISCORD_BOT_TOKEN), so nothing touches a real Discord guild.
  */
 const APPLICANT_DISCORD_ID = '900900900900900903';
 const REGIMENT_ID = '00000000-0000-4000-8000-000000000001';
@@ -92,11 +93,11 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .send({
         applicantName: 'Discord Applicant',
         inGameName: 'DiscordApp',
-        platform: 'steam',
-        applicantType: 'Applicant',
-        whyJoin: 'To be synced',
-        howFound: 'discord',
-        ageConfirmed: true,
+        currentRegiment: 'None',
+        howFound: 'Discord invite',
+        preferredClasses: 'Line Infantry',
+        skillsToImprove: 'Melee',
+        interestConfirmed: true,
       })
       .expect(201);
     ownerToken = (await signIn(ownerProfile)).token;
@@ -110,12 +111,16 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
   afterAll(async () => {
     await cleanup();
     // Reset the bot to its dormant defaults.
-    await dataSource
-      .getRepository(DiscordBotSettings)
-      .update(
-        { regimentId: REGIMENT_ID },
-        { botEnabled: false, kickOnBan: false, joinRoleId: null, announcementChannelId: null },
-      );
+    await dataSource.getRepository(DiscordBotSettings).update(
+      { regimentId: REGIMENT_ID },
+      {
+        botEnabled: false,
+        applyBanRoleOnBan: false,
+        banRoleId: null,
+        joinRoleId: null,
+        announcementChannelId: null,
+      },
+    );
     await app.close();
   });
 
@@ -172,43 +177,51 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     expect(verify.body.connected).toBe(true);
   });
 
-  it('does NOT enqueue a Discord kick on ban while kickOnBan is off (the default)', async () => {
+  it('does NOT enqueue a ban-role job on ban while applyBanRoleOnBan is off (the default)', async () => {
     await request(server())
       .post(`/api/members/${memberId}/ban`)
       .set(bearer(ownerToken))
       .expect(201);
-    expect(await jobsOfType(DiscordSyncJobType.MemberKick)).toHaveLength(0);
+    expect(await jobsOfType(DiscordSyncJobType.MemberBanRole)).toHaveLength(0);
     await request(server())
       .post(`/api/members/${memberId}/unban`)
       .set(bearer(ownerToken))
       .expect(201);
   });
 
-  it('enqueues + drains a Discord kick once kickOnBan is explicitly enabled', async () => {
+  it('rejects enabling applyBanRoleOnBan without a Ban role set', async () => {
     await request(server())
       .patch('/api/discord/settings')
       .set(bearer(ownerToken))
-      .send({ kickOnBan: true })
+      .send({ applyBanRoleOnBan: true })
+      .expect(400);
+  });
+
+  it('enqueues + drains a ban-role job once applyBanRoleOnBan + a Ban role are set', async () => {
+    await request(server())
+      .patch('/api/discord/settings')
+      .set(bearer(ownerToken))
+      .send({ applyBanRoleOnBan: true, banRoleId: '900000000000000006', banRoleName: 'Banned' })
       .expect(200);
 
     await request(server())
       .post(`/api/members/${memberId}/ban`)
       .set(bearer(ownerToken))
       .expect(201);
-    const kicks = await jobsOfType(DiscordSyncJobType.MemberKick);
-    expect(kicks.length).toBeGreaterThanOrEqual(1);
+    const jobs = await jobsOfType(DiscordSyncJobType.MemberBanRole);
+    expect(jobs.length).toBeGreaterThanOrEqual(1);
 
     await drainAll();
-    const drained = await jobsOfType(DiscordSyncJobType.MemberKick);
+    const drained = await jobsOfType(DiscordSyncJobType.MemberBanRole);
     expect(drained.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
 
     const ops = await request(server())
       .get('/api/discord/operations')
       .set(bearer(ownerToken))
       .expect(200);
-    expect(ops.body.data.some((o: { operation: string }) => o.operation === 'member.kick')).toBe(
-      true,
-    );
+    expect(
+      ops.body.data.some((o: { operation: string }) => o.operation === 'member.ban_role'),
+    ).toBe(true);
 
     await request(server())
       .post(`/api/members/${memberId}/unban`)

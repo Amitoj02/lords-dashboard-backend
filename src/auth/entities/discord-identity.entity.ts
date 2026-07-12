@@ -57,6 +57,14 @@ export class DiscordIdentity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   lastSignInIp: string | null;
 
+  /**
+   * iat cutoff for session invalidation (T-0048). A JWT whose `iat` predates
+   * this instant is rejected by JwtStrategy. Bumped on logout and sensitive
+   * events (ban/suspend). Null means no tokens have been invalidated yet.
+   */
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  sessionsValidFrom: Date | null;
+
   @CreateDateColumn({ type: 'datetime', precision: 6 })
   createdAt: Date;
 

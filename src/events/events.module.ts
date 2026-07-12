@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DiscordModule } from '../discord/discord.module';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { EventStatusScheduler } from './event-status.scheduler';
@@ -31,6 +32,8 @@ import { EventsService } from './events.service';
       Member,
       RegimentSettings,
     ]),
+    // For best-effort event announcements to the event-announcements channel.
+    DiscordModule,
   ],
   controllers: [EventsController],
   providers: [EventsService, EventStatusScheduler],

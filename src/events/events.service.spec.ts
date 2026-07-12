@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { EventStatus, MemberRole, RsvpStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
@@ -114,6 +115,7 @@ describe('EventsService', () => {
   const members = { find: jest.fn() };
   const settings = { find: jest.fn(), findOne: jest.fn() };
   const audit = { record: jest.fn() };
+  const discordSync = { enqueueEventAnnounce: jest.fn().mockResolvedValue(null) };
 
   // Transaction manager repositories (rebuilt each test).
   let eventTxRepo: { create: jest.Mock; save: jest.Mock };
@@ -192,6 +194,7 @@ describe('EventsService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
 

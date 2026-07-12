@@ -3,15 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import {
-  ApplicantType,
-  ApplicationStatus,
-  HowFound,
-  MemberRole,
-  MemberStatus,
-  Platform,
-} from '../common/enums';
+import { ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -41,14 +36,13 @@ const APPLICANT: AuthenticatedUser = {
 const validCreateDto = (): CreateApplicationDto => ({
   applicantName: 'Jane Doe',
   inGameName: 'JaneTheGreat',
-  platform: Platform.Steam,
-  applicantType: ApplicantType.Applicant,
   discordTag: '@janedoe',
-  timezone: 'America/Toronto',
-  whyJoin: 'I love line battles.',
-  howFound: HowFound.Discord,
-  priorExperience: 'A bit.',
-  ageConfirmed: true,
+  currentRegiment: 'None',
+  howFound: 'A friend in the Discord invited me.',
+  preferredClasses: 'Line Infantry, Rifleman',
+  skillsToImprove: 'Melee duelling.',
+  interestConfirmed: true,
+  representativeNote: undefined,
 });
 
 const baseApplication = (overrides: Partial<Application> = {}): Application => ({
@@ -60,14 +54,12 @@ const baseApplication = (overrides: Partial<Application> = {}): Application => (
   applicantName: 'Jane Doe',
   discordTag: '@janedoe',
   inGameName: 'JaneTheGreat',
-  platform: Platform.Steam,
-  applicantType: ApplicantType.Applicant,
-  timezone: 'America/Toronto',
-  whyJoin: 'I love line battles.',
-  howFound: HowFound.Discord,
-  priorExperience: 'A bit.',
-  ageConfirmed: true,
-  ageConfirmedAt: new Date('2026-06-22T18:00:00.000Z'),
+  currentRegiment: 'None',
+  howFound: 'A friend in the Discord invited me.',
+  preferredClasses: 'Line Infantry, Rifleman',
+  skillsToImprove: 'Melee duelling.',
+  interestConfirmed: true,
+  representativeNote: null,
   status: ApplicationStatus.Pending,
   isReapplication: false,
   discordInServer: false,
@@ -88,6 +80,8 @@ describe('ApplicationsService', () => {
   let applications: MockRepo<Application>;
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
+  let sessionContext: { invalidate: jest.Mock };
+  let discordSync: { enqueueApplicationSubmitted: jest.Mock };
 
   // Per-test transaction manager repositories.
   let txRanks: MockRepo<Rank>;
@@ -115,6 +109,8 @@ describe('ApplicationsService', () => {
     };
     settings = { findOne: jest.fn() };
     audit = { record: jest.fn() };
+    sessionContext = { invalidate: jest.fn() };
+    discordSync = { enqueueApplicationSubmitted: jest.fn().mockResolvedValue(null) };
 
     txRanks = { findOneOrFail: jest.fn() };
     txMembers = {
@@ -147,6 +143,8 @@ describe('ApplicationsService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        { provide: SessionContextService, useValue: sessionContext },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
 
@@ -189,13 +187,19 @@ describe('ApplicationsService', () => {
         status: ApplicationStatus.Pending,
         isReapplication: true,
         isDraft: false,
-        applicantType: ApplicantType.Applicant,
+        currentRegiment: 'None',
+        preferredClasses: 'Line Infantry, Rifleman',
+        skillsToImprove: 'Melee duelling.',
+        interestConfirmed: true,
       });
       expect(created.submittedAt).toBeInstanceOf(Date);
-      expect(created.ageConfirmedAt).toBeInstanceOf(Date);
       expect(result.status).toBe(ApplicationStatus.Pending);
-      // The applicant self-action is not audited.
+      // The applicant self-action is not audited, but is best-effort cross-posted.
       expect(audit.record).not.toHaveBeenCalled();
+      expect(discordSync.enqueueApplicationSubmitted).toHaveBeenCalledWith(
+        'regiment-1',
+        expect.objectContaining({ applicantName: 'Jane Doe', inGameName: 'JaneTheGreat' }),
+      );
     });
 
     it('treats a first-time submission as not a re-application and allows missing settings', async () => {
@@ -253,9 +257,10 @@ describe('ApplicationsService', () => {
         status: MemberStatus.Active,
         name: 'Jane Doe',
         inGameName: 'JaneTheGreat',
-        platform: Platform.Steam,
         discordLinked: true,
       });
+      // Promotion drops the applicant's cached Applicant context (T-0046).
+      expect(sessionContext.invalidate).toHaveBeenCalledWith('identity-applicant');
       expect(result.status).toBe(ApplicationStatus.Approved);
       expect(result.promotedMemberId).toBe('member-new');
       expect(result.decidedByMemberId).toBe('member-staff');
@@ -272,22 +277,6 @@ describe('ApplicationsService', () => {
           }),
         }),
       );
-    });
-
-    it('uses the Mercenary rank and role for a Mercenary applicant', async () => {
-      applications.findOne!.mockResolvedValue(
-        baseApplication({ applicantType: ApplicantType.Mercenary }),
-      );
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-merc', name: 'Mercenary' });
-
-      await service.approve(STAFF, 'app-1', null);
-
-      expect(txRanks.findOneOrFail).toHaveBeenCalledWith({
-        where: { regimentId: 'regiment-1', name: 'Mercenary' },
-      });
-      const createdMember = txMembers.create!.mock.calls[0][0] as Partial<Member>;
-      expect(createdMember.role).toBe(MemberRole.Mercenary);
-      expect(createdMember.rankId).toBe('rank-merc');
     });
 
     it('approves an application that was on hold', async () => {

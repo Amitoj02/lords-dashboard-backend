@@ -37,12 +37,13 @@ describe('DiscordSyncWorker', () => {
   };
   const operationsRepo = { create: jest.fn((x) => x), save: jest.fn((x) => Promise.resolve(x)) };
   const membersRepo = { findOne: jest.fn() };
-  const ranksRepo = { findOne: jest.fn() };
+  const ranksRepo = { findOne: jest.fn(), find: jest.fn().mockResolvedValue([]) };
   const settingsRepo = { findOne: jest.fn() };
   const gateway = {
     assignRole: jest.fn(),
     removeRole: jest.fn(),
-    kickMember: jest.fn(),
+    fetchMember: jest.fn(),
+    listChannels: jest.fn(),
     sendChannelMessage: jest.fn(),
     sendDirectMessage: jest.fn(),
   };
@@ -116,43 +117,81 @@ describe('DiscordSyncWorker', () => {
     await expect(worker.drain()).resolves.toBe(0);
   });
 
-  describe('sensitive kick re-check at execution time', () => {
-    const kickJob = () =>
+  describe('sensitive ban-role re-check at execution time', () => {
+    const banJob = () =>
       job({
-        jobType: DiscordSyncJobType.MemberKick,
+        jobType: DiscordSyncJobType.MemberBanRole,
         payload: { discordUserId: 'u9', reason: 'spam' },
       });
 
-    it('does NOT kick when kickOnBan was turned off after the job was enqueued', async () => {
-      const j = kickJob();
+    it('does NOT touch Discord when applyBanRoleOnBan was turned off after enqueue', async () => {
+      const j = banJob();
       jobsRepo.find.mockResolvedValue([j]);
-      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, kickOnBan: false });
+      settingsRepo.findOne.mockResolvedValue({
+        botEnabled: true,
+        applyBanRoleOnBan: false,
+        banRoleId: 'ban-1',
+      });
 
       await worker.drain();
 
-      expect(gateway.kickMember).not.toHaveBeenCalled();
+      expect(gateway.assignRole).not.toHaveBeenCalled();
       expect(j.status).toBe(DiscordSyncJobStatus.Succeeded); // resolved as a no-op
     });
 
-    it('does NOT kick when the bot was disabled after the job was enqueued', async () => {
-      const j = kickJob();
-      jobsRepo.find.mockResolvedValue([j]);
-      settingsRepo.findOne.mockResolvedValue({ botEnabled: false, kickOnBan: true });
+    it('does NOT touch Discord when the bot was disabled after enqueue', async () => {
+      jobsRepo.find.mockResolvedValue([banJob()]);
+      settingsRepo.findOne.mockResolvedValue({
+        botEnabled: false,
+        applyBanRoleOnBan: true,
+        banRoleId: 'ban-1',
+      });
 
       await worker.drain();
 
-      expect(gateway.kickMember).not.toHaveBeenCalled();
+      expect(gateway.assignRole).not.toHaveBeenCalled();
     });
 
-    it('kicks only when both switches are still on at execution time', async () => {
-      const j = kickJob();
-      jobsRepo.find.mockResolvedValue([j]);
-      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, kickOnBan: true });
-      gateway.kickMember.mockResolvedValue(undefined);
+    it('does NOT touch Discord when the Ban role was cleared after enqueue', async () => {
+      jobsRepo.find.mockResolvedValue([banJob()]);
+      settingsRepo.findOne.mockResolvedValue({
+        botEnabled: true,
+        applyBanRoleOnBan: true,
+        banRoleId: null,
+      });
 
       await worker.drain();
 
-      expect(gateway.kickMember).toHaveBeenCalledWith('u9', 'spam');
+      expect(gateway.assignRole).not.toHaveBeenCalled();
+    });
+
+    it('strips managed roles and applies the Ban role when all gates pass', async () => {
+      jobsRepo.find.mockResolvedValue([banJob()]);
+      settingsRepo.findOne.mockResolvedValue({
+        botEnabled: true,
+        applyBanRoleOnBan: true,
+        banRoleId: 'ban-1',
+        joinRoleId: 'guest-1',
+      });
+      ranksRepo.find.mockResolvedValue([{ discordRoleId: 'rank-1' }, { discordRoleId: null }]);
+      gateway.fetchMember.mockResolvedValue({
+        id: 'u9',
+        roles: ['rank-1', 'guest-1', 'other-role'],
+        joinedAt: null,
+      });
+      gateway.removeRole.mockResolvedValue(undefined);
+      gateway.assignRole.mockResolvedValue(undefined);
+
+      await worker.drain();
+
+      // Managed roles (rank-1, guest-1) stripped; unmanaged 'other-role' kept.
+      expect(gateway.removeRole).toHaveBeenCalledWith('u9', 'rank-1');
+      expect(gateway.removeRole).toHaveBeenCalledWith('u9', 'guest-1');
+      expect(gateway.removeRole).not.toHaveBeenCalledWith('u9', 'other-role');
+      expect(gateway.assignRole).toHaveBeenCalledWith('u9', 'ban-1');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'discord.member.ban_role' }),
+      );
     });
   });
 
@@ -180,17 +219,19 @@ describe('DiscordSyncWorker', () => {
         status: DiscordSyncJobStatus.Processing,
         jobType: DiscordSyncJobType.RoleSync,
       });
-      const kick = job({
-        id: 'j-kick',
+      // An announce is non-idempotent (re-sending duplicates a message), so it
+      // must NOT be auto-retried — it is surfaced as resolvable instead.
+      const announce = job({
+        id: 'j-announce',
         status: DiscordSyncJobStatus.Processing,
-        jobType: DiscordSyncJobType.MemberKick,
+        jobType: DiscordSyncJobType.Announce,
       });
-      jobsRepo.find.mockResolvedValue([roleSync, kick]);
+      jobsRepo.find.mockResolvedValue([roleSync, announce]);
 
       await reap();
 
       expect(roleSync.status).toBe(DiscordSyncJobStatus.Pending);
-      expect(kick.status).toBe(DiscordSyncJobStatus.Failed);
+      expect(announce.status).toBe(DiscordSyncJobStatus.Failed);
       expect(operationsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ success: false, resolvable: true }),
       );

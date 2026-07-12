@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { DiscordSyncService } from '../discord/discord-sync.service';
@@ -66,9 +67,12 @@ export class MembersService {
     @InjectRepository(Regiment)
     private readonly regiments: Repository<Regiment>,
     private readonly audit: AuditService,
-    // Best-effort Discord side effects (role sync / kick). Every call no-ops
+    // Best-effort Discord side effects (role sync / ban role). Every call no-ops
     // unless the bot is enabled and the relevant switch is on; never throws.
     private readonly discordSync: DiscordSyncService,
+    // Drops/rotates the caller-resolution cache so role/ban changes take effect
+    // on the member's next request without a re-login (T-0046/48).
+    private readonly sessionContext: SessionContextService,
   ) {}
 
   /**
@@ -234,6 +238,10 @@ export class MembersService {
       detail: dto.note ?? null,
     });
 
+    // The caller's resolved authorization context is cached by identity; drop it
+    // so the new role takes effect on their next request without a re-login.
+    this.sessionContext.invalidate(member.discordIdentityId);
+
     await this.syncMemberRoles(member);
     return this.project(member);
   }
@@ -343,18 +351,22 @@ export class MembersService {
       detail: dto.reason ?? null,
     });
 
+    // Revoke the suspended member's outstanding sessions (T-0048).
+    await this.sessionContext.invalidateSessions(member.discordIdentityId);
+
     return this.project(member);
   }
 
   /**
    * Ban a member (app-side). Marks bannedAt + sets status Inactive.
    *
-   * ⚠️ SENSITIVE — owner decision (questionnaire T-0027 Q4): an app-side ban may
-   * ALSO kick the member from the Discord guild. That is now wired as a
-   * best-effort outbox job (enqueueMemberKick), but it is GATED behind the
-   * regiment's `kickOnBan` switch, which DEFAULTS OFF — so by default a ban never
-   * touches Discord. The owner asked to re-review this flow every time it is
-   * touched before enabling it in production; the enqueue no-ops until then.
+   * ⚠️ SENSITIVE — owner decision (questionnaire T-0027 Q4 → reshaped by T-0035):
+   * an app-side ban may ALSO strip the member's managed Discord roles and apply a
+   * configured "Ban" role. That is wired as a best-effort outbox job
+   * (enqueueMemberBanRole), GATED behind the regiment's `applyBanRoleOnBan`
+   * switch (DEFAULTS OFF) and requiring a Ban role to be set — so by default a
+   * ban never touches Discord. The owner asked to re-review this flow every time
+   * it is touched before enabling it in production; the enqueue no-ops until then.
    */
   async ban(
     id: string,
@@ -380,8 +392,12 @@ export class MembersService {
       detail: dto.reason ?? null,
     });
 
-    // Flag-gated (kickOnBan, default OFF) + best-effort — never fails the ban.
-    await this.discordSync.enqueueMemberKick(
+    // Revoke the banned member's outstanding sessions (T-0048).
+    await this.sessionContext.invalidateSessions(member.discordIdentityId);
+
+    // Flag-gated (applyBanRoleOnBan, default OFF) + best-effort — never fails the
+    // ban. Strips managed Discord roles and applies the configured Ban role.
+    await this.discordSync.enqueueMemberBanRole(
       member.regimentId,
       member.discordIdentity?.discordUserId ?? null,
       dto.reason ?? null,

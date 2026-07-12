@@ -150,11 +150,11 @@ describe('MVP core loop (e2e)', () => {
       .send({
         applicantName: 'E2E Applicant',
         inGameName: 'E2E_App',
-        platform: 'steam',
-        applicantType: 'Applicant',
-        whyJoin: 'For the line battles',
-        howFound: 'discord',
-        ageConfirmed: true,
+        currentRegiment: 'None',
+        howFound: 'Discord invite',
+        preferredClasses: 'Line Infantry',
+        skillsToImprove: 'Melee duelling',
+        interestConfirmed: true,
       })
       .expect(201);
     const applicationId = created.body.id as string;

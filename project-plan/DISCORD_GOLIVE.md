@@ -13,8 +13,10 @@ all environment configuration + a Developer-Portal setup.
    - scopes used: `identify email guilds`.
 3. **Bot** → add a bot, copy the **Bot Token**. Enable the **SERVER MEMBERS INTENT**
    (privileged) — the bot needs it to see members and manage roles.
-4. Invite the bot to the guild with the `bot` scope and the **Manage Roles** +
-   **Kick Members** + **Send Messages** permissions.
+4. Invite the bot to the guild with the `bot` scope and only the **Manage Roles** +
+   **Send Messages** permissions (`permissions=268437504`). Kick Members is **not**
+   required — an app-side ban strips managed roles and applies a "Ban" role instead of
+   kicking (see §4).
 5. In the guild, **drag the bot's role ABOVE every role it will manage** (a bot can only
    assign/remove roles below its own highest role) and note the **Guild (Server) ID**.
 
@@ -38,29 +40,36 @@ redeploy of the image — just env + restart.
 ## 3. Wire the bot from the admin UI (Settings → Discord / Quartermaster)
 1. **Bind** the guild (or confirm `DISCORD_GUILD_ID`), then **Verify connection** — it
    should report `connected`, the bot's role position, and the visible member count.
-2. Set the **announcement channel** and the **Guest join-role** (from the role picker).
+2. Set the **announcement channel**, the **Guest join-role**, and (if you intend to use
+   §4) the **Ban role** — all from the pickers populated by Verify connection. Optionally
+   set the per-purpose routed channels (enlistments / audit-log / event-announcements).
 3. Turn **botEnabled = ON**. Until this is on, no sync jobs are enqueued at all.
 4. Map ranks/medals to Discord roles (Ranks/Medals admin → link-discord) so role sync
    has something to assign.
 5. **Resync** to enqueue a role reconciliation for every linked member; watch the
    **Operations** list drain (failures show up as resolvable operations).
 
-## 4. ⚠️ The sensitive one: ban → Discord kick (`kickOnBan`)
-Per the owner's decision (questionnaire T-0027 Q4), an app-side ban **may** also kick the
-member from the Discord guild — but this is **OFF by default** and must be turned on
-deliberately. The code is gated in two places (enqueue-time *and* execution-time), so:
-- With `kickOnBan = false` (default), a ban **never** touches Discord.
-- Turning it on is an audited Settings change; even after a kick is queued, the worker
-  **re-checks** `kickOnBan` + `botEnabled` at drain time and skips the kick if either was
-  turned back off.
+## 4. ⚠️ The sensitive one: ban → strip roles + apply the Ban role (`applyBanRoleOnBan`)
+Per the owner's decision (questionnaire T-0027 Q4, reshaped by T-0035), an app-side ban
+**may** also remove the member's bot-managed Discord roles (rank roles + Guest join role)
+and apply a locked-down **Ban role** you create — but this is **OFF by default** and must
+be turned on deliberately. It never kicks. The code is gated in two places (enqueue-time
+*and* execution-time), so:
+- With `applyBanRoleOnBan = false` (default), a ban **never** touches Discord.
+- It can only be enabled once a **Ban role** is selected (the id is required).
+- Turning it on is an audited Settings change; even after a ban-role job is queued, the
+  worker **re-checks** `applyBanRoleOnBan` + `botEnabled` + a set Ban role at drain time
+  and skips the job if any was turned back off/cleared.
 
-**Re-review this flow with the regiment owner before enabling it in production.** It is
-irreversible from the member's side (they get kicked from the server).
+**Re-review this flow with the regiment owner before enabling it in production.** Unlike a
+kick it is reversible (unban → resync restores roles), and the bot needs no Kick Members
+permission.
 
 ## 5. Post-go-live smoke test
 - Real Discord sign-in → `/auth/me` resolves the Owner.
 - Change a linked member's rank → a `role.sync` job drains and the Discord role changes.
 - Compose an announcement → it posts to the configured channel.
 - A test member joins the guild → welcome + Guest role fire.
-- (Only if `kickOnBan` is intentionally enabled) ban a throwaway member → they are kicked;
-  confirm the `member.kick` audit + bot-operation.
+- (Only if `applyBanRoleOnBan` is intentionally enabled) ban a throwaway member → their
+  managed roles are stripped and the Ban role is applied; confirm the
+  `discord.member.ban_role` audit + bot-operation.

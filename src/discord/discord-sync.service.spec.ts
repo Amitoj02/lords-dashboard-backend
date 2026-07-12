@@ -15,10 +15,18 @@ const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettin
   announcementChannelId: '111',
   welcomeChannelId: null,
   welcomeMessage: 'hi',
+  enlistmentChannelId: null,
+  enlistmentChannelName: null,
+  auditLogChannelId: null,
+  auditLogChannelName: null,
+  eventAnnouncementChannelId: null,
+  eventAnnouncementChannelName: null,
   joinRoleId: '222',
   joinRoleName: 'Guest',
+  banRoleId: null,
+  banRoleName: null,
   syncRolesOnChange: true,
-  kickOnBan: false,
+  applyBanRoleOnBan: false,
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,
@@ -78,19 +86,91 @@ describe('DiscordSyncService', () => {
     });
   });
 
-  describe('enqueueMemberKick (SENSITIVE)', () => {
-    it('does NOT enqueue a kick when kickOnBan is off (the default)', async () => {
-      settingsRepo.findOne.mockResolvedValue(settings({ kickOnBan: false }));
-      expect(await service.enqueueMemberKick(REGIMENT, USER_ID, 'spam')).toBeNull();
+  describe('enqueueMemberBanRole (SENSITIVE)', () => {
+    it('does NOT enqueue when applyBanRoleOnBan is off (the default)', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ applyBanRoleOnBan: false, banRoleId: '999' }),
+      );
+      expect(await service.enqueueMemberBanRole(REGIMENT, USER_ID, 'spam')).toBeNull();
       expect(jobsRepo.save).not.toHaveBeenCalled();
     });
 
-    it('enqueues a member.kick only when kickOnBan is explicitly enabled', async () => {
-      settingsRepo.findOne.mockResolvedValue(settings({ kickOnBan: true }));
-      const job = await service.enqueueMemberKick(REGIMENT, USER_ID, 'spam');
+    it('does NOT enqueue when enabled but no Ban role is configured', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ applyBanRoleOnBan: true, banRoleId: null }),
+      );
+      expect(await service.enqueueMemberBanRole(REGIMENT, USER_ID, 'spam')).toBeNull();
+      expect(jobsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('enqueues a member.ban_role only when enabled AND a Ban role is set', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ applyBanRoleOnBan: true, banRoleId: '999' }),
+      );
+      const job = await service.enqueueMemberBanRole(REGIMENT, USER_ID, 'spam');
       expect(job).not.toBeNull();
       expect(jobsRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ jobType: DiscordSyncJobType.MemberKick }),
+        expect.objectContaining({ jobType: DiscordSyncJobType.MemberBanRole }),
+      );
+    });
+  });
+
+  describe('per-purpose channel routing', () => {
+    it('routes an enlistment post to the enlistments channel (no-op without one)', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: null }));
+      const summary = {
+        applicantName: 'Jane',
+        inGameName: 'JaneG',
+        currentRegiment: 'None',
+        howFound: 'Discord',
+        preferredClasses: 'Line',
+        skillsToImprove: 'Melee',
+        representativeNote: null,
+      };
+      expect(await service.enqueueApplicationSubmitted(REGIMENT, summary)).toBeNull();
+
+      settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: 'enl-1' }));
+      await service.enqueueApplicationSubmitted(REGIMENT, summary);
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.ApplicationSubmitted,
+          payload: expect.objectContaining({ channelId: 'enl-1' }),
+        }),
+      );
+    });
+
+    it('routes an audit mirror to the audit-log channel', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ auditLogChannelId: 'aud-1' }));
+      await service.enqueueAuditLog(REGIMENT, {
+        action: 'member.ban',
+        actorLabel: 'Owner',
+        detail: 'spam',
+        severity: 'warn',
+      });
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.AuditLog,
+          payload: expect.objectContaining({ channelId: 'aud-1' }),
+        }),
+      );
+    });
+
+    it('routes an event announce to the event channel, falling back to the general one', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ eventAnnouncementChannelId: 'evt-1', announcementChannelId: 'gen-1' }),
+      );
+      await service.enqueueEventAnnounce(REGIMENT, 'New event');
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ channelId: 'evt-1' }) }),
+      );
+
+      jest.clearAllMocks();
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ eventAnnouncementChannelId: null, announcementChannelId: 'gen-1' }),
+      );
+      await service.enqueueEventAnnounce(REGIMENT, 'New event');
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ channelId: 'gen-1' }) }),
       );
     });
   });
@@ -98,7 +178,7 @@ describe('DiscordSyncService', () => {
   describe('best-effort contract', () => {
     it('never throws even when the settings lookup fails', async () => {
       settingsRepo.findOne.mockRejectedValue(new Error('db down'));
-      await expect(service.enqueueMemberKick(REGIMENT, USER_ID, null)).resolves.toBeNull();
+      await expect(service.enqueueMemberBanRole(REGIMENT, USER_ID, null)).resolves.toBeNull();
       await expect(service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).resolves.toBeNull();
     });
   });

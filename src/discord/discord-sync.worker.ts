@@ -21,6 +21,8 @@ const IDEMPOTENT_JOB_TYPES = new Set<string>([
   DiscordSyncJobType.RoleAssign,
   DiscordSyncJobType.RoleRemove,
   DiscordSyncJobType.RoleSync,
+  // Strip-roles + apply-Ban-role converges to the same end state on re-run.
+  DiscordSyncJobType.MemberBanRole,
 ]);
 
 /** How many jobs to drain per tick (keeps well under Discord's rate limits). */
@@ -140,28 +142,40 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       case DiscordSyncJobType.RoleSync:
         await this.reconcileRoles(job.regimentId, String(p.memberId), String(p.discordUserId));
         return;
-      case DiscordSyncJobType.MemberKick: {
-        // ⚠️ SENSITIVE: re-check the gate at EXECUTION time. A kick can sit in the
-        // queue (or in retry backoff) after being enqueued; if the owner turned
-        // off kickOnBan or disabled the bot in the meantime, do NOT kick. This is
-        // the last line of defence for the owner's "re-check every time" request.
+      case DiscordSyncJobType.MemberBanRole: {
+        // ⚠️ SENSITIVE: re-check the gate at EXECUTION time. A ban-role job can
+        // sit in the queue (or in retry backoff) after being enqueued; if the
+        // owner turned off applyBanRoleOnBan, cleared the Ban role, or disabled
+        // the bot in the meantime, do NOT touch Discord. This is the last line of
+        // defence for the owner's "re-check every time" request.
         const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
-        if (!settings?.botEnabled || !settings?.kickOnBan) {
+        if (!settings?.botEnabled || !settings?.applyBanRoleOnBan) {
           this.logger.warn(
-            `Skipping queued kick for ${String(p.discordUserId)}: kickOnBan/botEnabled disabled since enqueue`,
+            `Skipping queued ban-role for ${String(p.discordUserId)}: applyBanRoleOnBan/botEnabled disabled since enqueue`,
           );
           return;
         }
-        await this.gateway.kickMember(String(p.discordUserId), p.reason ?? undefined);
+        if (!settings.banRoleId) {
+          this.logger.warn(
+            `Skipping queued ban-role for ${String(p.discordUserId)}: no Ban role configured`,
+          );
+          return;
+        }
+        await this.applyBanRole(job.regimentId, String(p.discordUserId), settings.banRoleId);
         await this.audit.record({
           regimentId: job.regimentId,
-          action: 'discord.member.kick',
+          action: 'discord.member.ban_role',
           actor: { type: AuditActorType.Bot, memberId: null, label: 'Quartermaster bot' },
-          detail: `Kicked ${String(p.discordUserId)} from Discord`,
+          detail: `Stripped managed roles and applied the Ban role to ${String(p.discordUserId)}`,
         });
         return;
       }
       case DiscordSyncJobType.Announce:
+      case DiscordSyncJobType.ApplicationSubmitted:
+      case DiscordSyncJobType.AuditLog:
+        // Announcements, enlistment posts and audit mirrors are all pre-composed
+        // channel messages (content + channelId resolved at enqueue), so they
+        // drain identically.
         await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
         return;
       case DiscordSyncJobType.Welcome:
@@ -193,6 +207,41 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     if (rank?.discordRoleId) {
       await this.gateway.assignRole(discordUserId, rank.discordRoleId);
     }
+  }
+
+  /**
+   * Ban-role side effect (T-0035): remove every bot-managed role the member
+   * currently holds, then apply the configured Ban role. Idempotent — re-running
+   * converges to the same end state (managed roles gone, Ban role present).
+   */
+  private async applyBanRole(
+    regimentId: string,
+    discordUserId: string,
+    banRoleId: string,
+  ): Promise<void> {
+    const managed = await this.managedRoleIds(regimentId);
+    const ref = await this.gateway.fetchMember(discordUserId);
+    if (ref) {
+      for (const roleId of ref.roles) {
+        // Never strip the Ban role itself; only bot-managed roles.
+        if (roleId !== banRoleId && managed.has(roleId)) {
+          await this.gateway.removeRole(discordUserId, roleId);
+        }
+      }
+    }
+    await this.gateway.assignRole(discordUserId, banRoleId);
+  }
+
+  /** The set of Discord role snowflakes the bot manages (rank roles + join role). */
+  private async managedRoleIds(regimentId: string): Promise<Set<string>> {
+    const ids = new Set<string>();
+    const ranks = await this.ranks.find({ where: { regimentId } });
+    for (const rank of ranks) {
+      if (rank.discordRoleId) ids.add(rank.discordRoleId);
+    }
+    const settings = await this.settings.findOne({ where: { regimentId } });
+    if (settings?.joinRoleId) ids.add(settings.joinRoleId);
+    return ids;
   }
 
   private async handleFailure(job: DiscordSyncJob, error: Error): Promise<void> {

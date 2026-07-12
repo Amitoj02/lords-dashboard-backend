@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -8,7 +8,12 @@ import { BotConnectionStatus } from '../common/enums';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordOnboardingService } from './discord-onboarding.service';
 import { DiscordSyncService } from './discord-sync.service';
-import { BotOperationDto, DiscordConnectionDto } from './dto/discord-connection.dto';
+import {
+  BotOperationDto,
+  DiscordConnectionDto,
+  DiscordVerifyConnectionDto,
+} from './dto/discord-connection.dto';
+import { DiscordChannel, DiscordRole } from './gateway/discord-gateway';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
 import {
   AnnounceDto,
@@ -51,11 +56,16 @@ export class DiscordService {
     return DiscordConnectionDto.from(status, connection);
   }
 
-  /** Run a live connection check + persist the authority snapshot (wizard step). */
+  /**
+   * Run a live connection check + persist the authority snapshot (wizard step).
+   * Also returns the guild's roles + text channels so the Settings pickers
+   * (join/Ban roles, routed channels) populate from this one call; both are
+   * best-effort and empty when the bot is disconnected — never failing verify.
+   */
   async verifyConnection(
     user: AuthenticatedUser,
     ip: string | null,
-  ): Promise<DiscordConnectionDto> {
+  ): Promise<DiscordVerifyConnectionDto> {
     const status = await this.gateway.getStatus();
     const connection = await this.ensureConnection(user.regimentId);
     connection.connectionStatus = status.connected
@@ -68,6 +78,21 @@ export class DiscordService {
     connection.lastHeartbeatAt = new Date();
     await this.connections.save(connection);
 
+    let roles: DiscordRole[] = [];
+    let channels: DiscordChannel[] = [];
+    if (status.connected) {
+      try {
+        roles = await this.gateway.listRoles();
+      } catch {
+        roles = [];
+      }
+      try {
+        channels = await this.gateway.listChannels();
+      } catch {
+        channels = [];
+      }
+    }
+
     await this.audit.record({
       regimentId: user.regimentId,
       action: 'discord.connection.update',
@@ -75,7 +100,7 @@ export class DiscordService {
       target: { type: 'discord', label: 'connection' },
       detail: `Connection verified (${connection.connectionStatus})`,
     });
-    return DiscordConnectionDto.from(status, connection);
+    return DiscordVerifyConnectionDto.fromStatus(status, connection, roles, channels);
   }
 
   /** Read the bot settings (materialising defaults). */
@@ -84,35 +109,61 @@ export class DiscordService {
     return DiscordBotSettingsDto.from(settings);
   }
 
-  /** Update the bot settings. Toggling kickOnBan is flagged in the audit trail. */
+  /**
+   * Update the bot settings. Toggling applyBanRoleOnBan is flagged in the audit
+   * trail, and it can only be ENABLED when a Ban role is (or is being) set
+   * (T-0034 answer: the Ban role is required).
+   */
   async updateSettings(
     user: AuthenticatedUser,
     dto: UpdateDiscordSettingsDto,
     ip: string | null,
   ): Promise<DiscordBotSettingsDto> {
     const settings = await this.sync.getSettings(user.regimentId);
-    const kickWas = settings.kickOnBan;
+    const banGateWas = settings.applyBanRoleOnBan;
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
     if (dto.announcementChannelId !== undefined)
       settings.announcementChannelId = dto.announcementChannelId;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
     if (dto.welcomeMessage !== undefined) settings.welcomeMessage = dto.welcomeMessage;
+    if (dto.enlistmentChannelId !== undefined)
+      settings.enlistmentChannelId = dto.enlistmentChannelId || null;
+    if (dto.enlistmentChannelName !== undefined)
+      settings.enlistmentChannelName = dto.enlistmentChannelName || null;
+    if (dto.auditLogChannelId !== undefined)
+      settings.auditLogChannelId = dto.auditLogChannelId || null;
+    if (dto.auditLogChannelName !== undefined)
+      settings.auditLogChannelName = dto.auditLogChannelName || null;
+    if (dto.eventAnnouncementChannelId !== undefined)
+      settings.eventAnnouncementChannelId = dto.eventAnnouncementChannelId || null;
+    if (dto.eventAnnouncementChannelName !== undefined)
+      settings.eventAnnouncementChannelName = dto.eventAnnouncementChannelName || null;
     if (dto.joinRoleId !== undefined) settings.joinRoleId = dto.joinRoleId;
     if (dto.joinRoleName !== undefined) settings.joinRoleName = dto.joinRoleName;
+    if (dto.banRoleId !== undefined) settings.banRoleId = dto.banRoleId || null;
+    if (dto.banRoleName !== undefined) settings.banRoleName = dto.banRoleName || null;
     if (dto.syncRolesOnChange !== undefined) settings.syncRolesOnChange = dto.syncRolesOnChange;
-    if (dto.kickOnBan !== undefined) settings.kickOnBan = dto.kickOnBan;
+    if (dto.applyBanRoleOnBan !== undefined) settings.applyBanRoleOnBan = dto.applyBanRoleOnBan;
+
+    // The Ban role is REQUIRED before the ban-on-ban behaviour can be enabled.
+    if (settings.applyBanRoleOnBan && !settings.banRoleId) {
+      throw new BadRequestException(
+        'A Ban role must be selected before enabling “apply Ban role on ban”.',
+      );
+    }
 
     const saved = await this.settings.save(settings);
 
-    const kickChanged = dto.kickOnBan !== undefined && dto.kickOnBan !== kickWas;
+    const banGateChanged =
+      dto.applyBanRoleOnBan !== undefined && dto.applyBanRoleOnBan !== banGateWas;
     await this.audit.record({
       regimentId: user.regimentId,
       action: 'discord.connection.update',
       actor: AuditService.actorFromUser(user, ip),
       target: { type: 'discord', label: 'settings' },
-      detail: kickChanged
-        ? `Bot settings updated — kickOnBan ${saved.kickOnBan ? 'ENABLED' : 'disabled'} (sensitive)`
+      detail: banGateChanged
+        ? `Bot settings updated — applyBanRoleOnBan ${saved.applyBanRoleOnBan ? 'ENABLED' : 'disabled'} (sensitive)`
         : 'Bot settings updated',
     });
     return DiscordBotSettingsDto.from(saved);

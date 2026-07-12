@@ -71,20 +71,6 @@ export enum ApplicationStatus {
   Held = 'held',
 }
 
-export enum ApplicantType {
-  Applicant = 'Applicant',
-  Mercenary = 'Mercenary',
-}
-
-export enum HowFound {
-  Discord = 'discord',
-  Friend = 'friend',
-  YouTube = 'youtube',
-  Reddit = 'reddit',
-  InGame = 'ingame',
-  Other = 'other',
-}
-
 export enum AuditSeverity {
   Info = 'info',
   Warn = 'warn',
@@ -124,9 +110,14 @@ export enum DiscordSyncJobType {
   RoleAssign = 'role.assign',
   RoleRemove = 'role.remove',
   RoleSync = 'role.sync',
-  MemberKick = 'member.kick',
+  /** Strip managed roles + apply the configured Ban role on an app-side ban. */
+  MemberBanRole = 'member.ban_role',
   Announce = 'announce',
   Welcome = 'welcome',
+  /** Post a new enlistment application to the enlistments channel (T-0042). */
+  ApplicationSubmitted = 'application.submitted',
+  /** Mirror an audit-log entry to the audit-log channel (T-0043). */
+  AuditLog = 'audit.log',
 }
 
 export enum NotificationTone {

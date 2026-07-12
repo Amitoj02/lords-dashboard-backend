@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  DiscordChannel,
   DiscordGateway,
   DiscordGuildMemberRef,
   DiscordGatewayStatus,
@@ -13,7 +14,17 @@ const MOCK_ROLES: DiscordRole[] = [
   { id: '900000000000000002', name: 'Member', position: 2 },
   { id: '900000000000000003', name: 'Sergeant', position: 5 },
   { id: '900000000000000004', name: 'Officer', position: 8 },
+  { id: '900000000000000006', name: 'Banned', position: 3 },
   { id: '900000000000000005', name: 'Quartermaster (bot)', position: 20 },
+];
+
+/** A canned text-channel set so the channel picker looks realistic in the wizard. */
+const MOCK_CHANNELS: DiscordChannel[] = [
+  { id: '910000000000000001', name: 'announcements' },
+  { id: '910000000000000002', name: 'new-enlistments' },
+  { id: '910000000000000003', name: 'audit-logs' },
+  { id: '910000000000000004', name: 'event-announcements' },
+  { id: '910000000000000005', name: 'general' },
 ];
 
 /**
@@ -53,6 +64,10 @@ export class MockDiscordGateway extends DiscordGateway {
     return Promise.resolve([...MOCK_ROLES]);
   }
 
+  listChannels(): Promise<DiscordChannel[]> {
+    return Promise.resolve([...MOCK_CHANNELS]);
+  }
+
   assignRole(discordUserId: string, roleId: string): Promise<void> {
     const roles = this.members.get(discordUserId) ?? new Set<string>();
     roles.add(roleId);
@@ -85,12 +100,6 @@ export class MockDiscordGateway extends DiscordGateway {
       roles: [...roles],
       joinedAt: new Date(0).toISOString(),
     });
-  }
-
-  kickMember(discordUserId: string, reason?: string): Promise<void> {
-    this.members.delete(discordUserId);
-    this.logger.log(`[mock] kicked ${discordUserId}${reason ? ` (${reason})` : ''}`);
-    return Promise.resolve();
   }
 
   registerMemberJoinHandler(handler: MemberJoinHandler): void {

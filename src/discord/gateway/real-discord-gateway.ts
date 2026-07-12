@@ -6,9 +6,10 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Client, Events, GatewayIntentBits, Guild } from 'discord.js';
+import { ChannelType, Client, Events, GatewayIntentBits, Guild } from 'discord.js';
 import { AppConfig } from '../../config/configuration';
 import {
+  DiscordChannel,
   DiscordGateway,
   DiscordGuildMemberRef,
   DiscordGatewayStatus,
@@ -118,6 +119,15 @@ export class RealDiscordGateway
     return guild.roles.cache.map((r) => ({ id: r.id, name: r.name, position: r.position }));
   }
 
+  async listChannels(): Promise<DiscordChannel[]> {
+    const guild = await this.resolveGuild();
+    const channels = await guild.channels.fetch();
+    // Only text channels the bot can post announcements/embeds to.
+    return [...channels.values()]
+      .filter((c): c is NonNullable<typeof c> => c?.type === ChannelType.GuildText)
+      .map((c) => ({ id: c.id, name: c.name }));
+  }
+
   async assignRole(discordUserId: string, roleId: string): Promise<void> {
     const guild = await this.resolveGuild();
     const member = await guild.members.fetch(discordUserId);
@@ -155,12 +165,6 @@ export class RealDiscordGateway
       roles: member.roles.cache.map((r) => r.id),
       joinedAt: member.joinedAt ? member.joinedAt.toISOString() : null,
     };
-  }
-
-  async kickMember(discordUserId: string, reason?: string): Promise<void> {
-    const guild = await this.resolveGuild();
-    const member = await guild.members.fetch(discordUserId);
-    await member.kick(reason);
   }
 
   private requireClient(): Client {

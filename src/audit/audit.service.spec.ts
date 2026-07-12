@@ -1,4 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -18,6 +19,10 @@ describe('AuditService', () => {
     findOneBy: jest.fn(),
   };
   const actionsRepo = { find: jest.fn() };
+  // The Discord audit mirror resolves DiscordSyncService lazily via ModuleRef;
+  // a stub keeps record() self-contained without wiring the Discord module here.
+  const syncStub = { enqueueAuditLog: jest.fn().mockResolvedValue(null) };
+  const moduleRef = { get: jest.fn().mockReturnValue(syncStub) };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -25,6 +30,7 @@ describe('AuditService', () => {
         AuditService,
         { provide: getRepositoryToken(AuditLogEntry), useValue: entriesRepo },
         { provide: getRepositoryToken(AuditAction), useValue: actionsRepo },
+        { provide: ModuleRef, useValue: moduleRef },
       ],
     }).compile();
     service = module.get(AuditService);

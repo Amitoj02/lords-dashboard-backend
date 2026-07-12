@@ -87,8 +87,8 @@ const ACTIONS = [
     defaultSeverity: AuditSeverity.Info,
   },
   {
-    code: 'discord.member.kick',
-    label: 'Member kicked from Discord',
+    code: 'discord.member.ban_role',
+    label: 'Ban role applied on Discord (managed roles stripped)',
     defaultSeverity: AuditSeverity.Warn,
   },
   {
