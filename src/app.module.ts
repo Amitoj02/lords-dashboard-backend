@@ -9,11 +9,16 @@ import { AuthzModule } from './authz/authz.module';
 import configuration from './config/configuration';
 import { envValidationSchema } from './config/env.validation';
 import { DatabaseModule } from './database/database.module';
+import { DiscordModule } from './discord/discord.module';
+import { EventsModule } from './events/events.module';
+import { GalleryModule } from './gallery/gallery.module';
 import { HealthModule } from './health/health.module';
 import { MedalsModule } from './medals/medals.module';
 import { MembersModule } from './members/members.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { RanksModule } from './ranks/ranks.module';
 import { RegimentsModule } from './regiments/regiments.module';
+import { SettingsModule } from './settings/settings.module';
 
 @Module({
   imports: [
@@ -43,9 +48,11 @@ import { RegimentsModule } from './regiments/regiments.module';
     RanksModule,
     MedalsModule,
     RegimentsModule,
-    // EventsModule,
-    // GalleryModule,
-    // SettingsModule,
+    EventsModule,
+    GalleryModule,
+    NotificationsModule,
+    SettingsModule,
+    DiscordModule,
   ],
   providers: [
     // Throttle every route globally; individual routes can override with @Throttle/@SkipThrottle.

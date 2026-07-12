@@ -3,6 +3,7 @@ import { Seeder } from 'typeorm-extension';
 import { seedAccentTones } from './accent-tones.seed';
 import { seedAuditActions } from './audit-actions.seed';
 import { seedDevOwner } from './dev-owner.seed';
+import { seedDiscordBotSettings } from './discord-bot-settings.seed';
 import { seedMedals } from './medals.seed';
 import { seedRanks } from './ranks.seed';
 import { seedRegiment } from './regiment.seed';
@@ -21,6 +22,7 @@ export default class MainSeeder implements Seeder {
     await seedMedals(dataSource);
     await seedRolePermissions(dataSource);
     await seedAuditActions(dataSource);
+    await seedDiscordBotSettings(dataSource);
     await seedDevOwner(dataSource);
   }
 }

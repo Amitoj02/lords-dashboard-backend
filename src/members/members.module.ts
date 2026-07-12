@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
+import { DiscordModule } from '../discord/discord.module';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
 import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
@@ -34,6 +35,9 @@ import { MembersService } from './members.service';
       AccountDeletionRequest,
       Regiment,
     ]),
+    // For enqueuing Discord role syncs on rank/role/medal changes and the
+    // (flag-gated) kick on ban. DiscordModule exports DiscordSyncService.
+    DiscordModule,
   ],
   controllers: [MembersController],
   providers: [MembersService],

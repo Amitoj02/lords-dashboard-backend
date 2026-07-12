@@ -42,6 +42,10 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new AllExceptionsFilter());
 
+  // Let modules run onModuleDestroy/onApplicationShutdown on SIGTERM/SIGINT so
+  // the in-process Discord gateway logs out cleanly and the sync worker stops.
+  app.enableShutdownHooks();
+
   // OpenAPI / Swagger at /{apiPrefix}/docs
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Lords Dashboard API')

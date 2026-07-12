@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { AuditActorType, AuditSeverity } from '../../common/enums';
+import { AuditActorType, AuditSeverity, DiscordSyncStatus } from '../../common/enums';
 import { AuditLogEntry } from '../entities/audit-log-entry.entity';
 
 /** Client-facing projection of one audit ledger row. */
@@ -46,6 +46,16 @@ export class AuditLogEntryDto {
   @ApiProperty({ nullable: true, type: Object })
   after: Record<string, unknown> | null;
 
+  @ApiProperty({ nullable: true, description: 'Correlation id of the originating request' })
+  requestId: string | null;
+
+  @ApiProperty({
+    enum: DiscordSyncStatus,
+    nullable: true,
+    description: 'Whether the action was mirrored to Discord (null = not applicable)',
+  })
+  discordSyncStatus: DiscordSyncStatus | null;
+
   static from(entry: AuditLogEntry): AuditLogEntryDto {
     return {
       id: entry.id,
@@ -62,6 +72,8 @@ export class AuditLogEntryDto {
       detail: entry.detail,
       before: entry.beforeValue,
       after: entry.afterValue,
+      requestId: entry.requestId,
+      discordSyncStatus: entry.discordSyncStatus,
     };
   }
 }

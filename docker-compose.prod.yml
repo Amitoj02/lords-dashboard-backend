@@ -64,6 +64,10 @@ services:
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:?set DISCORD_CLIENT_ID or DISCORD_MOCK=true}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
       DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      # The Quartermaster bot (gateway) — mocked unless a real bot token is provided.
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
+      DISCORD_BOT_MOCK: ${DISCORD_BOT_MOCK:-true}
       WEB_ORIGIN: ${WEB_ORIGIN:?set WEB_ORIGIN e.g. https://lordsofholdfast.com}
       CORS_ORIGINS: ${WEB_ORIGIN}
       FRONTEND_URL: ${WEB_ORIGIN}

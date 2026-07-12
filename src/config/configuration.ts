@@ -59,6 +59,18 @@ export interface DiscordConfig {
   mock: boolean;
   /** Persona the mock signs in as when no `?as=` hint is given (default `owner`). */
   mockDefaultPersona: string;
+  /** The Discord bot (gateway) token. Empty until the production bot is provisioned. */
+  botToken: string;
+  /** The Discord application id the bot runs under. */
+  applicationId: string;
+  /**
+   * When true, the in-process Discord GATEWAY (the "Quartermaster" bot) is
+   * replaced by MockDiscordGateway — no discord.js Client is created and no
+   * network I/O happens, so role sync + announcements can be exercised end-to-end
+   * with no real bot. Defaults ON whenever no DISCORD_BOT_TOKEN is set; flip to
+   * false with a real token to go live (mirrors the OAuth `mock` seam).
+   */
+  botMock: boolean;
 }
 
 export interface FrontendConfig {
@@ -98,6 +110,11 @@ export default (): AppConfig => ({
     // DISCORD_MOCK always wins.
     mock: toBool(process.env.DISCORD_MOCK, !process.env.DISCORD_CLIENT_ID),
     mockDefaultPersona: process.env.DISCORD_MOCK_DEFAULT_PERSONA ?? 'owner',
+    botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+    applicationId: process.env.DISCORD_APPLICATION_ID ?? '',
+    // Default the bot mock ON when no bot token is configured, so the whole sync
+    // pipeline runs with zero Discord setup; an explicit DISCORD_BOT_MOCK wins.
+    botMock: toBool(process.env.DISCORD_BOT_MOCK, !process.env.DISCORD_BOT_TOKEN),
   },
   frontend: {
     url: process.env.FRONTEND_URL ?? 'http://localhost:4200',

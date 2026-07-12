@@ -2,6 +2,8 @@
   "moduleFileExtensions": ["js", "json", "ts"],
   "rootDir": ".",
   "testEnvironment": "node",
+  "//": "maxWorkers 1: the e2e suites share one MySQL database and mutate shared, single-tenant rows (permission matrix, bot settings), so they must run serially to be deterministic.",
+  "maxWorkers": 1,
   "testRegex": ".e2e-spec.ts$",
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
