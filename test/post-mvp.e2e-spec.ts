@@ -195,12 +195,39 @@ describe('Post-MVP feature modules (e2e)', () => {
           serverPassword: PASSWORD,
           platforms: ['steam'],
           tags: ['e2e'],
-          isDraft: false,
         })
         .expect(201);
       eventId = created.body.id as string;
       expect(created.body.serverName).toBe('HF | E2E Server'); // member view
       expect(created.body).not.toHaveProperty('serverPassword'); // never projected
+    });
+
+    it('has no save-as-draft publish route (T-0072): POST /:id/publish is 404', async () => {
+      await request(server())
+        .post(`/api/events/${eventId}/publish`)
+        .set(bearer(ownerToken))
+        .expect(404);
+    });
+
+    it('serves the member projection to an enrolled member and redacts it for a non-enrolled caller (T-0073)', async () => {
+      // Owner is an enrolled member → server binding present, password never is.
+      const memberView = await request(server())
+        .get(`/api/events/mine/${eventId}`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      expect(memberView.body.serverName).toBe('HF | E2E Server');
+      expect(memberView.body).not.toHaveProperty('serverPassword');
+
+      // An authenticated but non-enrolled caller (applicant, no memberId) gets
+      // the redacted projection — no server binding, no myRsvp.
+      const list = await request(server())
+        .get('/api/events/mine')
+        .set(bearer(applicantToken))
+        .expect(200);
+      const redacted = list.body.data.find((e: { id: string }) => e.id === eventId);
+      expect(redacted).toBeDefined();
+      expect(redacted.serverName).toBeUndefined();
+      expect(redacted.myRsvp).toBeUndefined();
     });
 
     it('redacts server binding + password on the public feed', async () => {

@@ -14,6 +14,17 @@ export class DiscordConnectionDto {
   @ApiProperty({ nullable: true }) membersVisible: number | null;
   @ApiProperty({ nullable: true }) lastHeartbeatAt: string | null;
   @ApiProperty({ nullable: true }) lastFullSyncAt: string | null;
+  // ── Live runtime metrics (T-0076) ───────────────────────────────────────────
+  @ApiProperty({ nullable: true, description: 'WebSocket heartbeat latency (ms)' })
+  wsPing: number | null;
+  @ApiProperty({ nullable: true, description: 'Gateway connection uptime (ms)' })
+  uptimeMs: number | null;
+  @ApiProperty({ nullable: true, description: 'Bot process resident memory (bytes)' })
+  memoryBytes: number | null;
+  @ApiProperty({ nullable: true, description: 'Process-average CPU utilization (%)' })
+  cpu: number | null;
+  @ApiProperty({ nullable: true, description: 'ISO timestamp the gateway became ready' })
+  readyAt: string | null;
 
   static from(
     status: DiscordGatewayStatus,
@@ -26,6 +37,57 @@ export class DiscordConnectionDto {
       totalRoles: status.totalRoles ?? connection?.totalRoles ?? null,
       botRolePosition: status.botRolePosition ?? connection?.botRolePosition ?? null,
       membersVisible: status.membersVisible ?? connection?.membersVisible ?? null,
+      lastHeartbeatAt: connection?.lastHeartbeatAt
+        ? connection.lastHeartbeatAt.toISOString()
+        : null,
+      lastFullSyncAt: connection?.lastFullSyncAt ? connection.lastFullSyncAt.toISOString() : null,
+      wsPing: status.wsPing,
+      uptimeMs: status.uptimeMs,
+      memoryBytes: status.memoryBytes,
+      cpu: status.cpu,
+      readyAt: status.readyAt,
+    };
+  }
+}
+
+/**
+ * Lean, STAFF-safe bot status for the dashboard widget (T-0077). Deliberately
+ * OMITS the sensitive authority/config fields the wizard needs (botRolePosition,
+ * permissions, ban config) — it carries only online/offline + the live runtime
+ * metrics + last-activity timestamps, so Owner/Admin/Moderator can see whether
+ * the Quartermaster is healthy without exposing settings surface.
+ */
+export class BotStatusDto {
+  @ApiProperty() connected: boolean;
+  @ApiProperty({ enum: BotConnectionStatus }) connectionStatus: BotConnectionStatus;
+  @ApiProperty({ nullable: true }) botVersion: string | null;
+  @ApiProperty({ nullable: true }) membersVisible: number | null;
+  @ApiProperty({ nullable: true }) totalRoles: number | null;
+  @ApiProperty({ nullable: true, description: 'WebSocket heartbeat latency (ms)' })
+  wsPing: number | null;
+  @ApiProperty({ nullable: true, description: 'Gateway connection uptime (ms)' })
+  uptimeMs: number | null;
+  @ApiProperty({ nullable: true, description: 'Bot process resident memory (bytes)' })
+  memoryBytes: number | null;
+  @ApiProperty({ nullable: true, description: 'Process-average CPU utilization (%)' })
+  cpu: number | null;
+  @ApiProperty({ nullable: true, description: 'ISO timestamp the gateway became ready' })
+  readyAt: string | null;
+  @ApiProperty({ nullable: true }) lastHeartbeatAt: string | null;
+  @ApiProperty({ nullable: true }) lastFullSyncAt: string | null;
+
+  static from(status: DiscordGatewayStatus, connection: DiscordConnection | null): BotStatusDto {
+    return {
+      connected: status.connected,
+      connectionStatus: connection?.connectionStatus ?? BotConnectionStatus.Idle,
+      botVersion: status.botVersion ?? connection?.botVersion ?? null,
+      membersVisible: status.membersVisible ?? connection?.membersVisible ?? null,
+      totalRoles: status.totalRoles ?? connection?.totalRoles ?? null,
+      wsPing: status.wsPing,
+      uptimeMs: status.uptimeMs,
+      memoryBytes: status.memoryBytes,
+      cpu: status.cpu,
+      readyAt: status.readyAt,
       lastHeartbeatAt: connection?.lastHeartbeatAt
         ? connection.lastHeartbeatAt.toISOString()
         : null,

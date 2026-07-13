@@ -60,6 +60,28 @@ export class EventsController {
     return this.eventsService.listPublic(query);
   }
 
+  @Get('mine')
+  @ApiOperation({
+    summary: 'List events for the authenticated member (member projection + myRsvp)',
+  })
+  @ApiOkResponse({ description: 'A page of events with the member projection.' })
+  listMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: EventQueryDto,
+  ): Promise<PaginatedResponseDto<EventDto>> {
+    return this.eventsService.listForMember(user, query);
+  }
+
+  @Get('mine/:id')
+  @ApiOperation({ summary: 'Get a single event for the authenticated member (member projection)' })
+  @ApiOkResponse({ type: EventDto, description: 'The event with the member projection.' })
+  getMine(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<EventDto> {
+    return this.eventsService.getForMember(user, id);
+  }
+
   @Public()
   @Get(':id')
   @ApiOperation({ summary: 'Get a single published event (public view)' })
@@ -70,7 +92,7 @@ export class EventsController {
 
   @Post()
   @RequireCapability(Capability.ManageEvents)
-  @ApiOperation({ summary: 'Create an event (optionally as a draft)' })
+  @ApiOperation({ summary: 'Create and publish an event' })
   @ApiCreatedResponse({ type: EventDto, description: 'The created event.' })
   create(
     @CurrentUser() user: AuthenticatedUser,
@@ -91,19 +113,6 @@ export class EventsController {
     @Req() req: Request,
   ): Promise<EventDto> {
     return this.eventsService.update(user, id, dto, req.ip ?? null);
-  }
-
-  @Post(':id/publish')
-  @HttpCode(HttpStatus.OK)
-  @RequireCapability(Capability.ManageEvents)
-  @ApiOperation({ summary: 'Publish a draft event' })
-  @ApiOkResponse({ type: EventDto, description: 'The published event.' })
-  publish(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Req() req: Request,
-  ): Promise<EventDto> {
-    return this.eventsService.publish(user, id, req.ip ?? null);
   }
 
   @Post(':id/archive')

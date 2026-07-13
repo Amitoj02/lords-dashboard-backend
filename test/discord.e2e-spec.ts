@@ -176,6 +176,24 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     expect(verify.body.connected).toBe(true);
   });
 
+  it('exposes STAFF bot status + live metrics, omitting sensitive fields (T-0076/T-0077)', async () => {
+    const res = await request(server())
+      .get('/api/discord/status')
+      .set(bearer(ownerToken))
+      .expect(200);
+    // Live metrics present (mock gateway canned values).
+    expect(res.body.connected).toBe(true);
+    expect(typeof res.body.wsPing).toBe('number');
+    expect(typeof res.body.uptimeMs).toBe('number');
+    expect(typeof res.body.memoryBytes).toBe('number');
+    expect(typeof res.body.cpu).toBe('number');
+    expect(res.body.readyAt).toEqual(expect.any(String));
+    // Sensitive authority/config fields are omitted from the STAFF widget.
+    expect(res.body).not.toHaveProperty('botRolePosition');
+    expect(res.body).not.toHaveProperty('requiredPermissions');
+    expect(res.body).not.toHaveProperty('applyBanRoleOnBan');
+  });
+
   it('does NOT enqueue a ban-role job on ban while applyBanRoleOnBan is off (the default)', async () => {
     await request(server())
       .post(`/api/members/${memberId}/ban`)

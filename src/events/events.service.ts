@@ -123,6 +123,58 @@ export class EventsService {
     return this.serializeOne(event, { includeServer: false });
   }
 
+  // ── Authenticated member reads (JWT; member projection with myRsvp) ──────────
+
+  /**
+   * The member-facing calendar: every published (non-draft, non-archived) event
+   * in the caller's regiment, ordered by start time. Enrolled members get the
+   * member projection (server binding + their own RSVP); an authenticated but
+   * non-enrolled caller (no memberId) gets the same redacted projection a public
+   * caller would. The server password is never included (only the reveal
+   * endpoint returns it). Unlike the public calendar this ignores `publicEvents`
+   * — members always see their own regiment's events.
+   */
+  async listForMember(
+    user: AuthenticatedUser,
+    query: EventQueryDto,
+  ): Promise<PaginatedResponseDto<EventDto>> {
+    const qb = this.events
+      .createQueryBuilder('event')
+      .where('event.regimentId = :regimentId', { regimentId: user.regimentId })
+      .andWhere('event.isDraft = :isDraft', { isDraft: false })
+      .andWhere('event.isArchived = :isArchived', { isArchived: false });
+
+    if (query.status) {
+      qb.andWhere('event.status = :status', { status: query.status });
+    }
+
+    const [rows, total] = await qb
+      .orderBy('event.startsAt', 'ASC')
+      .skip(query.skip)
+      .take(query.limit)
+      .getManyAndCount();
+
+    const includeServer = !!user.memberId;
+    const data = await this.serialize(rows, { includeServer, memberId: user.memberId });
+    return new PaginatedResponseDto(data, total, query.page, query.limit);
+  }
+
+  /**
+   * A single event in the caller's regiment, member projection (404 when hidden
+   * or missing). Enrolled members get the server binding + their own RSVP; a
+   * non-enrolled authenticated caller gets the redacted projection.
+   */
+  async getForMember(user: AuthenticatedUser, id: string): Promise<EventDto> {
+    const event = await this.events.findOne({
+      where: { id, regimentId: user.regimentId, isDraft: false, isArchived: false },
+    });
+    if (!event) {
+      throw new NotFoundException('Event not found');
+    }
+    const includeServer = !!user.memberId;
+    return this.serializeOne(event, { includeServer, memberId: user.memberId });
+  }
+
   // ── Authoring + lifecycle (ManageEvents) ─────────────────────────────────────
 
   /**
@@ -134,6 +186,10 @@ export class EventsService {
     const settings = await this.settings.findOne({ where: { regimentId: user.regimentId } });
     const timezone = dto.timezone ?? settings?.eventDefaultTimezone ?? 'UTC';
     const notifyOffsets = dto.notifyOffsets ?? settings?.eventDefaultNotifyBefore ?? [];
+    // A cadence turns this event into an active recurring template whose
+    // occurrences the scheduler materializes (T-0074/T-0075). One-off events
+    // carry no cadence and are never active.
+    const cadence = dto.recurrenceCadence ?? null;
 
     const saved = await this.dataSource.transaction(async (manager) => {
       const eventRepo = manager.getRepository(RegimentEvent);
@@ -146,8 +202,11 @@ export class EventsService {
         startsAt: new Date(dto.startsAt),
         endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
         timezone,
-        isRecurring: dto.isRecurring ?? false,
+        isRecurring: cadence !== null ? true : (dto.isRecurring ?? false),
         recurrenceRule: dto.recurrenceRule ?? null,
+        recurrenceCadence: cadence,
+        recurrenceActive: cadence !== null,
+        recurrenceTemplateId: null,
         serverName: dto.serverName ?? null,
         serverPassword: dto.serverPassword ?? null,
         serverRegion: dto.serverRegion ?? null,
@@ -155,7 +214,8 @@ export class EventsService {
         expectedAttendance: dto.expectedAttendance ?? null,
         attendanceGoal: dto.attendanceGoal ?? null,
         twitchUrl: dto.twitchUrl ?? null,
-        isDraft: dto.isDraft ?? false,
+        // Creation always publishes directly — there is no draft state (T-0072).
+        isDraft: false,
         isArchived: false,
       });
       const saved = await eventRepo.save(event);
@@ -175,15 +235,13 @@ export class EventsService {
       after: this.snapshot(saved),
     });
 
-    // Best-effort: announce a published (non-draft) event to the dedicated
-    // event-announcements channel (T-0044). Drafts are never announced.
-    if (!saved.isDraft) {
-      const desc = saved.description ? `\n${saved.description}` : '';
-      await this.discordSync.enqueueEventAnnounce(
-        user.regimentId,
-        `📅 **New event: ${saved.title}**${desc}\nStarts: ${saved.startsAt.toISOString()}`,
-      );
-    }
+    // Best-effort: announce the newly published event to the dedicated
+    // event-announcements channel (T-0044). No-ops when the bot is disabled.
+    const desc = saved.description ? `\n${saved.description}` : '';
+    await this.discordSync.enqueueEventAnnounce(
+      user.regimentId,
+      `📅 **New event: ${saved.title}**${desc}\nStarts: ${saved.startsAt.toISOString()}`,
+    );
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
   }
@@ -214,6 +272,13 @@ export class EventsService {
       if (dto.timezone !== undefined) event.timezone = dto.timezone;
       if (dto.isRecurring !== undefined) event.isRecurring = dto.isRecurring;
       if (dto.recurrenceRule !== undefined) event.recurrenceRule = dto.recurrenceRule ?? null;
+      // Changing the cadence keeps the row a live template (isRecurring true);
+      // clearing it drops recurrence. recurrenceActive is the explicit stop flag.
+      if (dto.recurrenceCadence !== undefined) {
+        event.recurrenceCadence = dto.recurrenceCadence ?? null;
+        event.isRecurring = dto.recurrenceCadence != null ? true : event.isRecurring;
+      }
+      if (dto.recurrenceActive !== undefined) event.recurrenceActive = dto.recurrenceActive;
       if (dto.serverName !== undefined) event.serverName = dto.serverName ?? null;
       // Written as plaintext; the column transformer encrypts it at rest.
       if (dto.serverPassword !== undefined) event.serverPassword = dto.serverPassword ?? null;
@@ -222,7 +287,6 @@ export class EventsService {
         event.expectedAttendance = dto.expectedAttendance ?? null;
       if (dto.attendanceGoal !== undefined) event.attendanceGoal = dto.attendanceGoal ?? null;
       if (dto.twitchUrl !== undefined) event.twitchUrl = dto.twitchUrl ?? null;
-      if (dto.isDraft !== undefined) event.isDraft = dto.isDraft;
 
       const saved = await eventRepo.save(event);
       await this.replaceChildren(manager, saved.id, {
@@ -240,22 +304,6 @@ export class EventsService {
       target: { type: 'event', id: saved.id, label: saved.title },
       before,
       after: this.snapshot(saved),
-    });
-
-    return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
-  }
-
-  /** Publish a draft (isDraft=false). */
-  async publish(user: AuthenticatedUser, id: string, ip: string | null): Promise<EventDto> {
-    const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
-    event.isDraft = false;
-    const saved = await this.events.save(event);
-
-    await this.audit.record({
-      regimentId: user.regimentId,
-      action: 'event.publish',
-      actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'event', id: saved.id, label: saved.title },
     });
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
@@ -678,6 +726,8 @@ export class EventsService {
       endsAt: event.endsAt ? event.endsAt.toISOString() : null,
       timezone: event.timezone,
       status: event.status,
+      recurrenceCadence: event.recurrenceCadence,
+      recurrenceActive: event.recurrenceActive,
       serverName: event.serverName,
       serverRegion: event.serverRegion,
       expectedAttendance: event.expectedAttendance,

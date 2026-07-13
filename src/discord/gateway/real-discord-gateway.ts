@@ -92,6 +92,11 @@ export class RealDiscordGateway
       totalRoles: null,
       botRolePosition: null,
       membersVisible: null,
+      wsPing: null,
+      uptimeMs: null,
+      memoryBytes: null,
+      cpu: null,
+      readyAt: null,
     };
     if (!this.ready || !this.client) {
       return disconnected;
@@ -105,6 +110,7 @@ export class RealDiscordGateway
         totalRoles: guild.roles.cache.size,
         botRolePosition: botPosition,
         membersVisible: guild.memberCount,
+        ...this.runtimeMetrics(),
       };
     } catch (error) {
       // getStatus is a health probe — it must never throw (e.g. no guild id or a
@@ -112,6 +118,34 @@ export class RealDiscordGateway
       this.logger.error(`getStatus failed: ${(error as Error).message}`);
       return disconnected;
     }
+  }
+
+  /**
+   * Live runtime metrics for the bot-status widget (T-0076). `cpu` is the
+   * process-average CPU utilization since start (user+system time over wall
+   * uptime) — a stable, sampling-free estimate. `wsPing` is clamped to null
+   * before the first heartbeat (discord.js reports -1). Memory/CPU are
+   * process-wide, since the gateway runs in the API process.
+   */
+  private runtimeMetrics(): Pick<
+    DiscordGatewayStatus,
+    'wsPing' | 'uptimeMs' | 'memoryBytes' | 'cpu' | 'readyAt'
+  > {
+    const client = this.client;
+    const ping = client?.ws.ping ?? null;
+    const cpuUsage = process.cpuUsage();
+    const procUptimeSec = process.uptime();
+    const cpuPercent =
+      procUptimeSec > 0
+        ? ((cpuUsage.user + cpuUsage.system) / 1e6 / procUptimeSec) * 100
+        : null;
+    return {
+      wsPing: ping !== null && ping >= 0 ? Math.round(ping) : null,
+      uptimeMs: client?.uptime ?? null,
+      memoryBytes: process.memoryUsage().rss,
+      cpu: cpuPercent !== null ? Math.round(cpuPercent * 10) / 10 : null,
+      readyAt: client?.readyAt ? client.readyAt.toISOString() : null,
+    };
   }
 
   async listRoles(): Promise<DiscordRole[]> {

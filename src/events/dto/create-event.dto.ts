@@ -10,15 +10,18 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
-import { Platform } from '../../common/enums';
+import { Platform, RecurrenceCadence } from '../../common/enums';
 
 /**
  * Body for POST /api/events. The regiment and creator are taken from the JWT,
  * not the body. `timezone` and `notifyOffsets` fall back to the regiment's
- * settings when omitted, and `isDraft` defaults to false — those defaults are
- * applied server-side, so no property initializers are used here (that would
- * leak defaults through PartialType into the PATCH DTO). `serverPassword` is
- * accepted as plaintext and encrypted at rest; it is never echoed back.
+ * settings when omitted — those defaults are applied server-side, so no property
+ * initializers are used here (that would leak defaults through PartialType into
+ * the PATCH DTO). Creation always publishes directly (there is no draft state).
+ * Supplying `recurrenceCadence` makes the event an active recurring template
+ * whose future occurrences are materialized by the recurrence scheduler.
+ * `serverPassword` is accepted as plaintext and encrypted at rest; it is never
+ * echoed back.
  */
 export class CreateEventDto {
   @ApiProperty({ maxLength: 160, example: 'Friday Night Line Battle' })
@@ -65,6 +68,15 @@ export class CreateEventDto {
   @IsString()
   @MaxLength(120)
   recurrenceRule?: string;
+
+  @ApiPropertyOptional({
+    enum: RecurrenceCadence,
+    description:
+      'When set, creates an active recurring template; the scheduler materializes future occurrences at this cadence.',
+  })
+  @IsOptional()
+  @IsEnum(RecurrenceCadence)
+  recurrenceCadence?: RecurrenceCadence;
 
   @ApiPropertyOptional({ maxLength: 120 })
   @IsOptional()
@@ -126,9 +138,4 @@ export class CreateEventDto {
   @IsInt({ each: true })
   @Min(0, { each: true })
   notifyOffsets?: number[];
-
-  @ApiPropertyOptional({ default: false, description: 'Create as an unpublished draft' })
-  @IsOptional()
-  @IsBoolean()
-  isDraft?: boolean;
 }

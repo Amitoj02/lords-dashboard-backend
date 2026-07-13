@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DiscordModule } from '../discord/discord.module';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
+import { EventRecurrenceScheduler } from './event-recurrence.scheduler';
 import { EventStatusScheduler } from './event-status.scheduler';
 import { EventAttendee } from './entities/event-attendee.entity';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
@@ -36,7 +37,7 @@ import { EventsService } from './events.service';
     DiscordModule,
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStatusScheduler],
+  providers: [EventsService, EventStatusScheduler, EventRecurrenceScheduler],
   exports: [EventsService],
 })
 export class EventsModule {}

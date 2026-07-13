@@ -14,13 +14,15 @@ import {
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireRole } from '../auth/decorators/require-role.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { RequireCapability } from '../authz/decorators/require-capability.decorator';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { Capability } from '../common/enums';
+import { Capability, MemberRole } from '../common/enums';
 import { DiscordService } from './discord.service';
 import {
   BotOperationDto,
+  BotStatusDto,
   DiscordConnectionDto,
   DiscordRoleDto,
   DiscordVerifyConnectionDto,
@@ -51,6 +53,16 @@ export class DiscordController {
   @ApiOkResponse({ type: DiscordConnectionDto })
   getConnection(@CurrentUser() user: AuthenticatedUser): Promise<DiscordConnectionDto> {
     return this.discordService.getConnection(user);
+  }
+
+  @Get('status')
+  @RequireRole(MemberRole.Owner, MemberRole.Admin, MemberRole.Moderator)
+  @ApiOperation({
+    summary: 'STAFF bot status + live metrics for the dashboard widget (no settings surface)',
+  })
+  @ApiOkResponse({ type: BotStatusDto })
+  getStatus(@CurrentUser() user: AuthenticatedUser): Promise<BotStatusDto> {
+    return this.discordService.getBotStatus(user);
   }
 
   @Post('verify-connection')

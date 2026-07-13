@@ -16,6 +16,19 @@ describe('MockDiscordGateway', () => {
     expect(channels.length).toBeGreaterThan(0);
   });
 
+  it('returns canned live runtime metrics for type parity (T-0076)', async () => {
+    const status = await gateway.getStatus();
+    // Every metric field is present and non-null in mock mode (never throws).
+    expect(typeof status.wsPing).toBe('number');
+    expect(typeof status.uptimeMs).toBe('number');
+    expect(typeof status.memoryBytes).toBe('number');
+    expect(typeof status.cpu).toBe('number');
+    expect(status.readyAt).toEqual(expect.any(String));
+    // User/role counts still come from the in-memory guild (no new query).
+    expect(status.membersVisible).toBeGreaterThanOrEqual(1);
+    expect(status.totalRoles).toBeGreaterThan(0);
+  });
+
   it('treats the seeded owner persona as already in the guild (T-0052)', async () => {
     // The dev-owner snowflake is pre-joined so mock sign-in resolves
     // guildMember=true without a prior assignRole/simulateMemberJoin.

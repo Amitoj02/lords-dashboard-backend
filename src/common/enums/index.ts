@@ -40,6 +40,17 @@ export enum EventStatus {
   Previous = 'previous',
 }
 
+/**
+ * Cadence of a recurring event template. A template with a cadence and
+ * `recurrenceActive` set has its future occurrences materialized as real event
+ * rows by the recurrence scheduler (T-0074/T-0075).
+ */
+export enum RecurrenceCadence {
+  Daily = 'daily',
+  Weekly = 'weekly',
+  Monthly = 'monthly',
+}
+
 export enum RsvpStatus {
   Interested = 'interested',
   Tentative = 'tentative',
