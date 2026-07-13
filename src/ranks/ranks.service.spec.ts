@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { MemberRole } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
@@ -25,6 +26,7 @@ const buildRank = (overrides: Partial<Rank> = {}): Rank => ({
   regimentId: REGIMENT,
   name: 'Sergeant',
   chevrons: 3,
+  imageUrl: null,
   precedence: 2,
   discordRoleName: '@Sergeant',
   discordRoleId: null,
@@ -68,6 +70,9 @@ describe('RanksService', () => {
 
   const dataSource = { transaction: jest.fn() };
   const audit = { record: jest.fn() };
+  const storage = {
+    resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -104,6 +109,7 @@ describe('RanksService', () => {
         { provide: getRepositoryToken(Member), useValue: memberRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
 

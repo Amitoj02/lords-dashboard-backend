@@ -8,7 +8,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
+import { StorageTarget } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
+import { StorageService } from '../storage/storage.service';
 import { CreateRankDto } from './dto/create-rank.dto';
 import { LinkDiscordDto } from './dto/link-discord.dto';
 import { RankDto } from './dto/rank.dto';
@@ -41,6 +43,7 @@ export class RanksService {
     private readonly dataSource: DataSource,
     // AuditService is global; used by every mutation below.
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -75,6 +78,9 @@ export class RanksService {
       regimentId: user.regimentId,
       name: dto.name,
       chevrons: dto.chevrons ?? 0,
+      imageUrl: dto.imageKey
+        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.RankImage)
+        : null,
       precedence,
       discordRoleName: dto.discordRoleName ?? null,
       discordRoleId: null,
@@ -117,6 +123,11 @@ export class RanksService {
       rank.precedence = dto.precedence;
     }
     if (dto.chevrons !== undefined) rank.chevrons = dto.chevrons;
+    if (dto.imageKey !== undefined) {
+      rank.imageUrl = dto.imageKey
+        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.RankImage)
+        : null;
+    }
     if (dto.discordRoleName !== undefined) rank.discordRoleName = dto.discordRoleName;
 
     const saved = await this.ranks.save(rank);
@@ -332,6 +343,7 @@ export class RanksService {
     return {
       name: rank.name,
       chevrons: rank.chevrons,
+      imageUrl: rank.imageUrl,
       precedence: rank.precedence,
       discordRoleName: rank.discordRoleName,
       discordRoleId: rank.discordRoleId,

@@ -25,6 +25,7 @@ export interface AppConfig {
   jwt: JwtConfig;
   discord: DiscordConfig;
   frontend: FrontendConfig;
+  storage: StorageConfig;
 }
 
 export interface DatabaseConfig {
@@ -79,6 +80,31 @@ export interface FrontendConfig {
   authFailureRedirect: string;
 }
 
+export interface StorageConfig {
+  /**
+   * The S3/MinIO endpoint used both to sign presigned upload URLs and to build
+   * public object URLs. It MUST be reachable by the browser (which performs the
+   * PUT), so in a Docker dev stack this is the host-mapped MinIO port, not the
+   * internal `minio:9000` hostname.
+   */
+  endpoint: string;
+  region: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  bucket: string;
+  /**
+   * Base URL public objects are served from. Defaults to `{endpoint}/{bucket}`
+   * (path-style) but can be overridden for a CDN / virtual-host layout.
+   */
+  publicBaseUrl: string;
+  /** Path-style addressing (required by MinIO); virtual-host for real S3/CDN. */
+  forcePathStyle: boolean;
+  /** How long a presigned upload URL is valid, in seconds. */
+  presignExpirySeconds: number;
+  /** Upstream cap on any single upload, in MB (per-target caps may be lower). */
+  maxUploadMb: number;
+}
+
 export default (): AppConfig => ({
   env: (process.env.NODE_ENV as AppConfig['env']) ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -123,4 +149,21 @@ export default (): AppConfig => ({
     authFailureRedirect:
       process.env.FRONTEND_AUTH_FAILURE_REDIRECT ?? 'http://localhost:4200/login',
   },
+  storage: (() => {
+    // Host-mapped MinIO by default (the browser PUTs here). capybara-rustfs holds
+    // 9000/9001 locally, so the dev compose maps MinIO to 9100/9101.
+    const endpoint = process.env.S3_ENDPOINT ?? 'http://localhost:9100';
+    const bucket = process.env.S3_BUCKET ?? 'lords-media';
+    return {
+      endpoint,
+      region: process.env.S3_REGION ?? 'us-east-1',
+      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
+      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
+      bucket,
+      publicBaseUrl: process.env.S3_PUBLIC_BASE_URL ?? `${endpoint}/${bucket}`,
+      forcePathStyle: toBool(process.env.S3_FORCE_PATH_STYLE, true),
+      presignExpirySeconds: parseInt(process.env.S3_PRESIGN_EXPIRY_SECONDS ?? '900', 10),
+      maxUploadMb: parseInt(process.env.S3_MAX_UPLOAD_MB ?? '100', 10),
+    };
+  })(),
 });

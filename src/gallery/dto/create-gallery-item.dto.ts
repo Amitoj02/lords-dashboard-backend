@@ -27,7 +27,20 @@ export class GalleryFileInputDto {
   @MaxLength(255)
   fileName: string;
 
-  @ApiPropertyOptional({ maxLength: 512, description: 'Public URL of the stored asset' })
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description:
+      'Storage key of the uploaded file (from POST /storage/uploads); preferred over url',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  key?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description: 'Public URL of the stored asset (legacy; ignored when `key` is provided)',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(512)

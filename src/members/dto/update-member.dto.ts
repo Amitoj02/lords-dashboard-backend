@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { Platform } from '../../common/enums';
 
 /**
@@ -46,14 +46,21 @@ export class UpdateMemberDto {
   @MaxLength(120)
   inGameName?: string;
 
-  // TODO(storage): this is a plain URL today. When real avatar uploads land,
-  // accept an upload and replace this with the resulting CDN URL server-side.
   @ApiPropertyOptional({
     maxLength: 512,
-    description: 'Absolute URL to the member avatar image',
+    description: 'Storage key of an uploaded avatar image (from POST /storage/uploads)',
   })
   @IsOptional()
-  @IsUrl()
+  @IsString()
   @MaxLength(512)
-  avatarUrl?: string;
+  avatarKey?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description: 'Storage key of an uploaded banner image (from POST /storage/uploads)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  bannerKey?: string;
 }

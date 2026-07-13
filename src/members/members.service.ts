@@ -13,7 +13,14 @@ import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { DiscordSyncService } from '../discord/discord-sync.service';
-import { AccountDeletionStatus, EventStatus, MemberRole, MemberStatus } from '../common/enums';
+import {
+  AccountDeletionStatus,
+  EventStatus,
+  MemberRole,
+  MemberStatus,
+  StorageTarget,
+} from '../common/enums';
+import { StorageService } from '../storage/storage.service';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
 import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
@@ -73,6 +80,8 @@ export class MembersService {
     // Drops/rotates the caller-resolution cache so role/ban changes take effect
     // on the member's next request without a re-login (T-0046/48).
     private readonly sessionContext: SessionContextService,
+    // Resolves uploaded avatar/banner keys to public URLs (namespace-validated).
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -145,9 +154,9 @@ export class MembersService {
   /**
    * Self-service profile update. A member may only edit their own profile — any
    * mismatch with the authenticated member id is forbidden. Only the restricted
-   * set of fields (name/platform/timezone/inGameName/avatarUrl) is mutable here.
-   * Changing role/status/rank belongs to the admin actions below and is not
-   * permitted through this handler.
+   * set of fields (name/platform/timezone/inGameName + avatar/banner via an
+   * uploaded storage key) is mutable here. Changing role/status/rank belongs to
+   * the admin actions below and is not permitted through this handler.
    */
   async updateSelf(id: string, dto: UpdateMemberDto, user: AuthenticatedUser): Promise<MemberDto> {
     if (user.memberId !== id) {
@@ -162,8 +171,19 @@ export class MembersService {
     if (dto.platform !== undefined) member.platform = dto.platform;
     if (dto.timezone !== undefined) member.timezone = dto.timezone;
     if (dto.inGameName !== undefined) member.inGameName = dto.inGameName;
-    // TODO(storage): avatarUrl is a plain URL today; swap for an uploaded asset later.
-    if (dto.avatarUrl !== undefined) member.avatarUrl = dto.avatarUrl;
+    // Avatar/banner are set from an uploaded storage key; the key's namespace is
+    // re-validated (it must live under THIS member's prefix) before it is
+    // resolved to the public URL persisted on the row (T-0067).
+    if (dto.avatarKey !== undefined) {
+      member.avatarUrl = dto.avatarKey
+        ? this.storage.resolveKeyToPublicUrl(user, dto.avatarKey, StorageTarget.MemberAvatar)
+        : null;
+    }
+    if (dto.bannerKey !== undefined) {
+      member.bannerUrl = dto.bannerKey
+        ? this.storage.resolveKeyToPublicUrl(user, dto.bannerKey, StorageTarget.MemberBanner)
+        : null;
+    }
 
     const saved = await this.members.save(member);
     // No audit row: a self profile edit never touches role/status/rank, so there

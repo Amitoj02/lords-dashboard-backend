@@ -8,9 +8,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
 import { SessionContextService } from '../auth/session-context.service';
+import { StorageService } from '../storage/storage.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MemberRole, MemberStatus, Platform } from '../common/enums';
+import { MemberRole, MemberStatus, Platform, StorageTarget } from '../common/enums';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
 import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
@@ -117,6 +118,9 @@ describe('MembersService', () => {
     invalidate: jest.fn(),
     invalidateSessions: jest.fn().mockResolvedValue(undefined),
   };
+  const storage = {
+    resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -162,6 +166,7 @@ describe('MembersService', () => {
         { provide: AuditService, useValue: audit },
         { provide: DiscordSyncService, useValue: discordSync },
         { provide: SessionContextService, useValue: sessionContext },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
 
@@ -299,6 +304,37 @@ describe('MembersService', () => {
       expect(audit.record).not.toHaveBeenCalled();
       expect(dto.inGameName).toBe('NewIGN');
       expect(dto.eventsAttended).toBe(3);
+    });
+
+    it('resolves uploaded avatar + banner keys to public URLs (T-0067)', async () => {
+      const member = buildMember();
+      memberRepo.findOne.mockResolvedValue(member);
+      memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
+      eventRepo.count.mockResolvedValue(0);
+      attendeeRepo.count.mockResolvedValue(0);
+
+      await service.updateSelf(
+        'member-1',
+        {
+          avatarKey: 'members/reg/member-1/avatar/a1.png',
+          bannerKey: 'members/reg/member-1/banner/b1.png',
+        },
+        user({ memberId: 'member-1' }),
+      );
+
+      expect(storage.resolveKeyToPublicUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ memberId: 'member-1' }),
+        'members/reg/member-1/avatar/a1.png',
+        StorageTarget.MemberAvatar,
+      );
+      expect(storage.resolveKeyToPublicUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ memberId: 'member-1' }),
+        'members/reg/member-1/banner/b1.png',
+        StorageTarget.MemberBanner,
+      );
+      const saved = memberRepo.save.mock.calls[0][0] as Member;
+      expect(saved.avatarUrl).toBe('https://cdn.example/members/reg/member-1/avatar/a1.png');
+      expect(saved.bannerUrl).toBe('https://cdn.example/members/reg/member-1/banner/b1.png');
     });
 
     it('throws NotFound when the authenticated member no longer exists', async () => {

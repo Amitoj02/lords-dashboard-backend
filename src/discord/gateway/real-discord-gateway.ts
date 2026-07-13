@@ -136,9 +136,7 @@ export class RealDiscordGateway
     const cpuUsage = process.cpuUsage();
     const procUptimeSec = process.uptime();
     const cpuPercent =
-      procUptimeSec > 0
-        ? ((cpuUsage.user + cpuUsage.system) / 1e6 / procUptimeSec) * 100
-        : null;
+      procUptimeSec > 0 ? ((cpuUsage.user + cpuUsage.system) / 1e6 / procUptimeSec) * 100 : null;
     return {
       wsPing: ping !== null && ping >= 0 ? Math.round(ping) : null,
       uptimeMs: client?.uptime ?? null,

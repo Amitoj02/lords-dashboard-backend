@@ -3,8 +3,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MedalRibbon, MemberRole } from '../common/enums';
+import { MedalRibbon, MemberRole, StorageTarget } from '../common/enums';
 import { Medal } from './entities/medal.entity';
 import { MemberMedal } from './entities/member-medal.entity';
 import { MedalsService } from './medals.service';
@@ -27,6 +28,7 @@ const buildMedal = (overrides: Partial<Medal> = {}): Medal => ({
   glyph: 'DSC',
   ribbon: MedalRibbon.Gold,
   description: 'Gallantry in the line.',
+  imageUrl: null,
   precedence: 1,
   discordRoleName: null,
   discordRoleId: null,
@@ -69,6 +71,9 @@ describe('MedalsService', () => {
 
   const dataSource = { transaction: jest.fn() };
   const audit = { record: jest.fn() };
+  const storage = {
+    resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -100,6 +105,7 @@ describe('MedalsService', () => {
         { provide: getRepositoryToken(MemberMedal), useValue: memberMedalRepo },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
 
@@ -179,6 +185,31 @@ describe('MedalsService', () => {
         ),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(medalRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('resolves an uploaded image key to a public URL and serializes it (T-0069)', async () => {
+      medalRepo.findOne.mockResolvedValue(null);
+      medalQb.getRawOne.mockResolvedValue({ max: '0' });
+
+      const dto = await service.create(
+        user(),
+        {
+          title: 'Medal of Storage',
+          glyph: 'MoS',
+          ribbon: MedalRibbon.Blue,
+          imageKey: `medals/${REGIMENT}/img-1.png`,
+        },
+        null,
+      );
+
+      expect(storage.resolveKeyToPublicUrl).toHaveBeenCalledWith(
+        expect.objectContaining({ regimentId: REGIMENT }),
+        `medals/${REGIMENT}/img-1.png`,
+        StorageTarget.MedalImage,
+      );
+      const saved = medalRepo.save.mock.calls[0][0] as Medal;
+      expect(saved.imageUrl).toBe(`https://cdn.example/medals/${REGIMENT}/img-1.png`);
+      expect(dto.imageUrl).toBe(`https://cdn.example/medals/${REGIMENT}/img-1.png`);
     });
   });
 

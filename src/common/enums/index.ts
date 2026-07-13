@@ -146,6 +146,19 @@ export enum AccountDeletionStatus {
   Cancelled = 'cancelled',
 }
 
+/**
+ * Upload targets for the presigned-upload API (T-0066). Each target maps to a
+ * key namespace, a required capability, and a content-type/size policy.
+ */
+export enum StorageTarget {
+  MemberAvatar = 'member-avatar',
+  MemberBanner = 'member-banner',
+  EventBanner = 'event-banner',
+  MedalImage = 'medal-image',
+  RankImage = 'rank-image',
+  Gallery = 'gallery',
+}
+
 /** Capability keys for the role/permission matrix (role_permissions.capability). */
 export enum Capability {
   ManageSettings = 'manage_settings',

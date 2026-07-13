@@ -9,10 +9,11 @@ import { DataSource, EntityManager, FindOptionsWhere, In, Repository } from 'typ
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { EventStatus, Platform, RsvpStatus } from '../common/enums';
+import { EventStatus, Platform, RsvpStatus, StorageTarget } from '../common/enums';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
+import { StorageService } from '../storage/storage.service';
 import { AttendeeDto } from './dto/attendee.dto';
 import { CompleteEventDto } from './dto/complete-event.dto';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -77,6 +78,8 @@ export class EventsService {
     // Best-effort: announce a newly published event to the event-announcements
     // channel (T-0044). No-ops when the bot is off or no channel is set.
     private readonly discordSync: DiscordSyncService,
+    // Resolves an uploaded banner key to a public URL (namespace-validated).
+    private readonly storage: StorageService,
   ) {}
 
   // ── Public reads (no authenticated caller) ───────────────────────────────────
@@ -198,7 +201,9 @@ export class EventsService {
         createdByMemberId: user.memberId,
         title: dto.title,
         description: dto.description ?? null,
-        bannerUrl: dto.bannerUrl ?? null,
+        bannerUrl: dto.bannerKey
+          ? this.storage.resolveKeyToPublicUrl(user, dto.bannerKey, StorageTarget.EventBanner)
+          : null,
         startsAt: new Date(dto.startsAt),
         endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
         timezone,
@@ -266,7 +271,11 @@ export class EventsService {
 
       if (dto.title !== undefined) event.title = dto.title;
       if (dto.description !== undefined) event.description = dto.description ?? null;
-      if (dto.bannerUrl !== undefined) event.bannerUrl = dto.bannerUrl ?? null;
+      if (dto.bannerKey !== undefined) {
+        event.bannerUrl = dto.bannerKey
+          ? this.storage.resolveKeyToPublicUrl(user, dto.bannerKey, StorageTarget.EventBanner)
+          : null;
+      }
       if (dto.startsAt !== undefined) event.startsAt = new Date(dto.startsAt);
       if (dto.endsAt !== undefined) event.endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
       if (dto.timezone !== undefined) event.timezone = dto.timezone;

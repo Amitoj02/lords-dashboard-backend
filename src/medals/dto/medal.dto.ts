@@ -25,6 +25,9 @@ export class MedalDto {
   @ApiProperty({ nullable: true })
   description: string | null;
 
+  @ApiProperty({ nullable: true, description: 'Public URL of the uploaded medal image' })
+  imageUrl: string | null;
+
   @ApiProperty({ description: 'Display order (lower sorts first)' })
   precedence: number;
 
@@ -61,6 +64,7 @@ export class MedalDto {
     dto.glyph = medal.glyph;
     dto.ribbon = medal.ribbon;
     dto.description = medal.description;
+    dto.imageUrl = medal.imageUrl;
     dto.precedence = medal.precedence;
     dto.discordRoleName = medal.discordRoleName;
     dto.discordRoleId = medal.discordRoleId;

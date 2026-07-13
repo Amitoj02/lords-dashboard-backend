@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { EventStatus, MemberRole, RsvpStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
@@ -119,6 +120,9 @@ describe('EventsService', () => {
   const settings = { find: jest.fn(), findOne: jest.fn() };
   const audit = { record: jest.fn() };
   const discordSync = { enqueueEventAnnounce: jest.fn().mockResolvedValue(null) };
+  const storage = {
+    resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+  };
 
   // Transaction manager repositories (rebuilt each test).
   let eventTxRepo: { create: jest.Mock; save: jest.Mock };
@@ -198,6 +202,7 @@ describe('EventsService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
 
@@ -318,7 +323,12 @@ describe('EventsService', () => {
     it('includes the server binding + myRsvp for an enrolled member', async () => {
       eventsQb.getManyAndCount.mockResolvedValue([[buildEvent()], 1]);
       rsvps.find.mockResolvedValue([
-        { eventId: 'event-1', memberId: MEMBER, status: RsvpStatus.Interested, reminderOffsetMinutes: 30 },
+        {
+          eventId: 'event-1',
+          memberId: MEMBER,
+          status: RsvpStatus.Interested,
+          reminderOffsetMinutes: 30,
+        },
       ]);
 
       const result = await service.listForMember(user(), { page: 1, limit: 20, skip: 0 });
@@ -369,7 +379,11 @@ describe('EventsService', () => {
   describe('update recurrence (T-0074)', () => {
     it('permanently stops a recurring template via recurrenceActive=false', async () => {
       events.findOne.mockResolvedValue(
-        buildEvent({ isRecurring: true, recurrenceActive: true, recurrenceCadence: 'weekly' as never }),
+        buildEvent({
+          isRecurring: true,
+          recurrenceActive: true,
+          recurrenceCadence: 'weekly' as never,
+        }),
       );
 
       const result = await service.update(user(), 'event-1', { recurrenceActive: false }, null);

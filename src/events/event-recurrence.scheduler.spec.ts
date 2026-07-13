@@ -3,15 +3,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DateTime } from 'luxon';
 import { DataSource } from 'typeorm';
 import { RecurrenceCadence } from '../common/enums';
-import { EventNotifyOffset } from './entities/event-notify-offset.entity';
-import { EventPlatform } from './entities/event-platform.entity';
-import { EventTag } from './entities/event-tag.entity';
 import { RegimentEvent } from './entities/event.entity';
 import { computeOccurrenceStarts, EventRecurrenceScheduler } from './event-recurrence.scheduler';
 
 /** The local wall-clock hour of a UTC instant, viewed in the given IANA zone. */
-const localHour = (d: Date, zone: string): number =>
-  DateTime.fromJSDate(d, { zone }).hour;
+const localHour = (d: Date, zone: string): number => DateTime.fromJSDate(d, { zone }).hour;
 
 describe('computeOccurrenceStarts (DST correctness)', () => {
   it('keeps 20:00 local across the US spring-forward for a weekly America/New_York template', () => {
@@ -21,7 +17,10 @@ describe('computeOccurrenceStarts (DST correctness)', () => {
       { year: 2025, month: 3, day: 1, hour: 20 },
       { zone },
     ).toJSDate();
-    const now = DateTime.fromObject({ year: 2025, month: 3, day: 1, hour: 21 }, { zone }).toJSDate();
+    const now = DateTime.fromObject(
+      { year: 2025, month: 3, day: 1, hour: 21 },
+      { zone },
+    ).toJSDate();
     const horizonEnd = DateTime.fromObject({ year: 2025, month: 4, day: 15 }, { zone }).toJSDate();
 
     const starts = computeOccurrenceStarts({
@@ -117,11 +116,17 @@ describe('EventRecurrenceScheduler.generate', () => {
 
   const events = { find: jest.fn() };
   const eventTxRepo = {
-    create: jest.fn((d: Partial<RegimentEvent>) => ({ id: `occ-${Math.round(d.startsAt!.getTime())}`, ...d })),
+    create: jest.fn((d: Partial<RegimentEvent>) => ({
+      id: `occ-${Math.round(d.startsAt!.getTime())}`,
+      ...d,
+    })),
     save: jest.fn((e: RegimentEvent) => Promise.resolve(e)),
     insert: jest.fn().mockResolvedValue({}),
   };
-  const childRepo = { find: jest.fn().mockResolvedValue([]), insert: jest.fn().mockResolvedValue({}) };
+  const childRepo = {
+    find: jest.fn().mockResolvedValue([]),
+    insert: jest.fn().mockResolvedValue({}),
+  };
   const dataSource = {
     getRepository: jest.fn(() => childRepo),
     transaction: jest.fn(),
@@ -193,7 +198,7 @@ describe('EventRecurrenceScheduler.generate', () => {
     // 60-day horizon / 7-day cadence ≈ 8 occurrences.
     expect(created).toBeGreaterThanOrEqual(7);
     expect(created).toBeLessThanOrEqual(9);
-    const firstOccurrence = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
+    const firstOccurrence = eventTxRepo.create.mock.calls[0][0];
     expect(firstOccurrence.recurrenceTemplateId).toBe('tmpl-1');
     expect(firstOccurrence.isRecurring).toBe(false);
     expect(firstOccurrence.recurrenceActive).toBe(false);

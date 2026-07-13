@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { GalleryMediaType, GalleryStatus, GalleryType, MemberRole } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
@@ -199,6 +200,14 @@ describe('GalleryService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        {
+          provide: StorageService,
+          useValue: {
+            resolveKeyToPublicUrl: jest.fn(
+              (_u: unknown, key: string) => `https://cdn.example/${key}`,
+            ),
+          },
+        },
       ],
     }).compile();
 
@@ -298,6 +307,43 @@ describe('GalleryService', () => {
         ),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects a file whose type is not in the settings allow-list (T-0071)', async () => {
+      settings.findOne!.mockResolvedValue(
+        buildSettings({ galleryAllowedImageTypes: ['png', 'webp'] }),
+      );
+
+      await expect(
+        service.submit(
+          MEMBER_USER,
+          {
+            title: 't',
+            type: GalleryType.Image,
+            files: [file({ fileName: 'sneaky.gif', mediaType: GalleryMediaType.Image })],
+          },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('resolves an uploaded file key to a public URL (T-0071)', async () => {
+      settings.findOne!.mockResolvedValue(buildSettings({ galleryAllowedImageTypes: ['png'] }));
+      items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
+
+      await service.submit(
+        MEMBER_USER,
+        {
+          title: 't',
+          type: GalleryType.Image,
+          files: [file({ fileName: 'shot.png', key: `gallery/${REGIMENT}/member-1/shot.png` })],
+        },
+        null,
+      );
+
+      const createdFiles = txFiles.create!.mock.calls[0][0] as Partial<GalleryFile>;
+      expect(createdFiles.url).toBe(`https://cdn.example/gallery/${REGIMENT}/member-1/shot.png`);
     });
 
     it('only tags members that belong to the regiment', async () => {

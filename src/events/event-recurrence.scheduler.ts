@@ -200,7 +200,11 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
       this.dataSource.getRepository(EventTag).find({ where: { eventId: templateId } }),
       this.dataSource.getRepository(EventNotifyOffset).find({ where: { eventId: templateId } }),
     ]);
-    return [platforms.map((p) => p.platform), tags.map((t) => t.tag), offsets.map((o) => o.minutes)];
+    return [
+      platforms.map((p) => p.platform),
+      tags.map((t) => t.tag),
+      offsets.map((o) => o.minutes),
+    ];
   }
 
   /** Insert one occurrence row + its cloned child collections. */

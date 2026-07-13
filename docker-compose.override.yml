@@ -10,6 +10,13 @@ services:
     ports:
       - '${DB_HOST_PORT:-3307}:3306' # host tools can reach MySQL at 127.0.0.1:3307
 
+  minio:
+    # 9000/9001 are commonly taken (e.g. another local S3); map MinIO's API to
+    # :9100 and its console to :9101 — this MUST match S3_ENDPOINT (browser PUTs).
+    ports:
+      - '${MINIO_HOST_PORT:-9100}:9000'
+      - '${MINIO_CONSOLE_HOST_PORT:-9101}:9001'
+
   api:
     build:
       target: dev

@@ -34,11 +34,14 @@ export class CreateEventDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ maxLength: 512 })
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description: 'Storage key of an uploaded banner image (from POST /storage/uploads)',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(512)
-  bannerUrl?: string;
+  bannerKey?: string;
 
   @ApiProperty({ description: 'ISO 8601 start timestamp' })
   @IsDateString()

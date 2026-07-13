@@ -31,6 +31,44 @@ services:
       start_period: 15s
     networks: [lords]
 
+  # S3-compatible object storage for user uploads (avatars, banners, medal/rank
+  # images, gallery media). The browser PUTs directly to a presigned URL, so the
+  # host-mapped port (dev override maps 9100/9101 — 9000/9001 are often taken)
+  # must match S3_ENDPOINT below.
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio-data:/data
+    networks: [lords]
+
+  # One-shot bucket bootstrap: create the bucket + make it anonymously readable
+  # (public-read), idempotently — re-running is a no-op. Retries `mc alias set`
+  # until MinIO answers (no dependency on a healthcheck inside the server image),
+  # and talks to MinIO over the internal network hostname, not the host port.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-lords-media}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD";
+        do echo 'waiting for minio...'; sleep 2; done &&
+        mc mb --ignore-existing "local/$$S3_BUCKET" &&
+        mc anonymous set download "local/$$S3_BUCKET" &&
+        echo "minio bucket $$S3_BUCKET ready (public-read)"
+    restart: 'no'
+    networks: [lords]
+
   api:
     build:
       context: .
@@ -67,6 +105,15 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
       DISCORD_BOT_MOCK: ${DISCORD_BOT_MOCK:-true}
+      # Object storage (MinIO). S3_ENDPOINT is the browser-reachable endpoint used
+      # to sign presigned upload URLs — the dev override maps MinIO to :9100.
+      # PROD overrides these (real endpoint + credentials) via docker-compose.prod.yml.
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://localhost:9100}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-lords-media}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-http://localhost:9100/lords-media}
     healthcheck:
       test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/api/health']
       interval: 10s
@@ -85,6 +132,7 @@ services:
 
 volumes:
   db-data:
+  minio-data:
 
 networks:
   lords:

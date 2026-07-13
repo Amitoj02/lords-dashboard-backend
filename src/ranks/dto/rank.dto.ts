@@ -17,6 +17,9 @@ export class RankDto {
   @ApiProperty({ description: 'Chevron count (0..5) shown on the rank insignia' })
   chevrons: number;
 
+  @ApiProperty({ nullable: true, description: 'Public URL of the uploaded rank image' })
+  imageUrl: string | null;
+
   @ApiProperty({ description: 'Ladder position (lower sorts higher; 1 = top)' })
   precedence: number;
 
@@ -47,6 +50,7 @@ export class RankDto {
     dto.id = rank.id;
     dto.name = rank.name;
     dto.chevrons = rank.chevrons;
+    dto.imageUrl = rank.imageUrl;
     dto.precedence = rank.precedence;
     dto.discordRoleName = rank.discordRoleName;
     dto.discordRoleId = rank.discordRoleId;
