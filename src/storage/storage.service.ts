@@ -131,9 +131,17 @@ export class StorageService {
     const ext = kind === 'image' ? IMAGE_TYPES[contentType] : VIDEO_TYPES[contentType];
     const key = `${this.namespacePrefix(user, dto.target)}${randomUUID()}.${ext}`;
 
+    // Sign the exact Content-Length as well as the Content-Type: because both are
+    // signed headers, the client must PUT exactly `sizeBytes` bytes of this type —
+    // it cannot swap in a larger body to bypass the (already validated) size cap.
     const uploadUrl = await getSignedUrl(
       this.s3,
-      new PutObjectCommand({ Bucket: this.cfg.bucket, Key: key, ContentType: contentType }),
+      new PutObjectCommand({
+        Bucket: this.cfg.bucket,
+        Key: key,
+        ContentType: contentType,
+        ContentLength: dto.sizeBytes,
+      }),
       { expiresIn: this.cfg.presignExpirySeconds },
     );
 
@@ -158,9 +166,16 @@ export class StorageService {
       throw new BadRequestException('Uploaded key is outside the expected namespace');
     }
     const remainder = key.slice(prefix.length);
-    // The generated tail is always `<uuid>.<ext>` — reject anything with a path
-    // separator or traversal, so a crafted key can't escape its namespace.
-    if (!/^[a-z0-9-]+\.[a-z0-9]+$/i.test(remainder)) {
+    // The generated tail is ALWAYS `<uuid>.<ext>` (see createUploadTicket). Match
+    // exactly that shape: rejects path traversal AND structurally bounds the key
+    // length, so the resolved public URL can never overflow the varchar(512)
+    // columns it is persisted into (a MaxLength(512)-valid but long filler key
+    // would otherwise yield a >512-char URL → ER_DATA_TOO_LONG / truncation).
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]{2,5}$/i.test(
+        remainder,
+      )
+    ) {
       throw new BadRequestException('Malformed object key');
     }
     return this.publicUrlForKey(key);

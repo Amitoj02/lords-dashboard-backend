@@ -155,22 +155,24 @@ describe('StorageService', () => {
   });
 
   describe('resolveKeyToPublicUrl', () => {
+    const UUID = '550e8400-e29b-41d4-a716-446655440000';
+
     it('accepts a key in the caller-owned namespace and returns the public URL', () => {
-      const key = `members/${REGIMENT}/${MEMBER}/avatar/abc-123.png`;
+      const key = `members/${REGIMENT}/${MEMBER}/avatar/${UUID}.png`;
       expect(service.resolveKeyToPublicUrl(user(), key, StorageTarget.MemberAvatar)).toBe(
         `http://localhost:9100/lords-media/${key}`,
       );
     });
 
     it("rejects a key from another member's namespace", () => {
-      const key = `members/${REGIMENT}/someone-else/avatar/abc-123.png`;
+      const key = `members/${REGIMENT}/someone-else/avatar/${UUID}.png`;
       expect(() => service.resolveKeyToPublicUrl(user(), key, StorageTarget.MemberAvatar)).toThrow(
         BadRequestException,
       );
     });
 
     it('rejects a key from a different target namespace', () => {
-      const key = `gallery/${REGIMENT}/${MEMBER}/abc-123.png`;
+      const key = `gallery/${REGIMENT}/${MEMBER}/${UUID}.png`;
       expect(() => service.resolveKeyToPublicUrl(user(), key, StorageTarget.MemberAvatar)).toThrow(
         BadRequestException,
       );
@@ -179,6 +181,13 @@ describe('StorageService', () => {
     it('rejects a path-traversal key inside the namespace', () => {
       const key = `events/${REGIMENT}/../../etc/passwd`;
       expect(() => service.resolveKeyToPublicUrl(user(), key, StorageTarget.EventBanner)).toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('rejects a long filler tail that is not the generated uuid.ext shape (URL overflow guard)', () => {
+      const key = `members/${REGIMENT}/${MEMBER}/avatar/${'a'.repeat(430)}.png`;
+      expect(() => service.resolveKeyToPublicUrl(user(), key, StorageTarget.MemberAvatar)).toThrow(
         BadRequestException,
       );
     });

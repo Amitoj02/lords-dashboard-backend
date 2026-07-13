@@ -179,11 +179,12 @@ export class GalleryService {
               galleryItemId: item.id,
               fileName: file.fileName,
               // Uploaded files reference a storage key; its namespace is
-              // re-validated and resolved to the public URL persisted here.
-              // `url` remains as a legacy fallback when no key is supplied.
+              // re-validated and resolved to the public URL persisted here. A file
+              // with no key stores no URL — arbitrary client URLs are NOT accepted
+              // (they would bypass the namespace check).
               url: file.key
                 ? this.storage.resolveKeyToPublicUrl(user, file.key, StorageTarget.Gallery)
-                : (file.url ?? null),
+                : null,
               mediaType: file.mediaType,
               sizeBytes: file.sizeBytes ?? null,
               width: file.width ?? null,
@@ -503,7 +504,7 @@ export class GalleryService {
     const allowedVideo = this.normalizeExtensions(settings?.galleryAllowedVideoTypes);
 
     for (const file of list) {
-      const ext = this.extensionOf(file.key ?? file.url ?? file.fileName);
+      const ext = this.extensionOf(file.key ?? file.fileName);
       if (file.mediaType === GalleryMediaType.Image) {
         if (allowedImage.length > 0 && (ext === null || !allowedImage.includes(ext))) {
           throw new BadRequestException(

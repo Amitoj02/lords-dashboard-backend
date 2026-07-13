@@ -281,11 +281,18 @@ export class EventsService {
       if (dto.timezone !== undefined) event.timezone = dto.timezone;
       if (dto.isRecurring !== undefined) event.isRecurring = dto.isRecurring;
       if (dto.recurrenceRule !== undefined) event.recurrenceRule = dto.recurrenceRule ?? null;
-      // Changing the cadence keeps the row a live template (isRecurring true);
-      // clearing it drops recurrence. recurrenceActive is the explicit stop flag.
+      // Setting a cadence turns the row into an ACTIVE template (mirrors create,
+      // so converting a one-off → recurring via PATCH actually generates);
+      // clearing it drops recurrence and stops generation. An explicit
+      // recurrenceActive in the same request still wins (applied just below).
       if (dto.recurrenceCadence !== undefined) {
         event.recurrenceCadence = dto.recurrenceCadence ?? null;
-        event.isRecurring = dto.recurrenceCadence != null ? true : event.isRecurring;
+        if (dto.recurrenceCadence != null) {
+          event.isRecurring = true;
+          event.recurrenceActive = true;
+        } else {
+          event.recurrenceActive = false;
+        }
       }
       if (dto.recurrenceActive !== undefined) event.recurrenceActive = dto.recurrenceActive;
       if (dto.serverName !== undefined) event.serverName = dto.serverName ?? null;

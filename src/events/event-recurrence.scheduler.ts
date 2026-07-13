@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DateTime } from 'luxon';
+import { DateTime, DurationLikeObject } from 'luxon';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { EventStatus, RecurrenceCadence } from '../common/enums';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
@@ -14,61 +14,85 @@ const TICK_INTERVAL_MS = 5 * 60_000; // 5 min
 /** How far ahead occurrences are materialized. */
 const HORIZON_DAYS = 60;
 
-/**
- * Safety cap on how many cadence steps we walk per template in a single sweep —
- * a backstop against a pathological far-past template. In normal operation we
- * seed from the latest existing occurrence, so only a handful of steps are ever
- * taken to reach the horizon.
- */
-const MAX_STEPS = 1000;
+/** Upper bound on occurrences emitted per template per sweep (a safety cap). */
+const MAX_EMIT = 500;
 
-/** Add exactly one cadence step, preserving wall-clock time in the given zone. */
-function advance(cursor: DateTime<boolean>, cadence: RecurrenceCadence): DateTime<boolean> {
+/** The Nth occurrence's start, anchored to the template's original start. */
+function occurrenceAt(
+  anchor: DateTime<boolean>,
+  cadence: RecurrenceCadence,
+  n: number,
+): DateTime<boolean> {
   switch (cadence) {
     case RecurrenceCadence.Daily:
-      return cursor.plus({ days: 1 });
+      return anchor.plus({ days: n });
     case RecurrenceCadence.Weekly:
-      return cursor.plus({ weeks: 1 });
+      return anchor.plus({ weeks: n });
     case RecurrenceCadence.Monthly:
-      return cursor.plus({ months: 1 });
+      return anchor.plus({ months: n });
+  }
+}
+
+/** A coarse arithmetic estimate of the occurrence index at/near `now` (corrected below). */
+function estimateIndex(anchor: DateTime<boolean>, now: Date, cadence: RecurrenceCadence): number {
+  const deltaMs = now.getTime() - anchor.toMillis();
+  switch (cadence) {
+    case RecurrenceCadence.Daily:
+      return Math.floor(deltaMs / 86_400_000);
+    case RecurrenceCadence.Weekly:
+      return Math.floor(deltaMs / (7 * 86_400_000));
+    case RecurrenceCadence.Monthly: {
+      const nowDt = DateTime.fromJSDate(now, { zone: anchor.zoneName ?? 'UTC' });
+      return (nowDt.year - anchor.year) * 12 + (nowDt.month - anchor.month);
+    }
   }
 }
 
 /**
  * Compute the occurrence start instants to materialize for a recurring template,
- * DST-accurately. `seedStart` is the instant the last-known occurrence (or the
- * template itself) starts; we step from there in `timezone`, keeping the local
- * wall-clock time constant across DST transitions (this is why we use Luxon in
- * the zone rather than adding fixed millisecond deltas). We emit every step that
- * is strictly after `now`, at or before `horizonEnd`, and not already present in
- * `existingStartMs`. Pure + deterministic for unit testing. Invalid IANA zones
- * fall back to UTC (never throw — this runs headless on a timer).
+ * DST-accurately. Each occurrence N is anchored to the template's ORIGINAL start
+ * (`anchorStart`) as `anchor.plus({unit: N})` in `timezone` — NOT stepped from the
+ * previous instant — so:
+ *   - monthly keeps the original day-of-month (no permanent clamp to the 28th),
+ *   - a one-off DST gap/overlap never compounds into later occurrences,
+ *   - the local wall-clock time is preserved across DST transitions.
+ * We arithmetically fast-forward to the first occurrence strictly after `now`
+ * (so a far-past template never exhausts a step budget in the past), then emit up
+ * to the horizon, skipping any start already present in `existingStartMs`
+ * (idempotent). Pure + deterministic. Invalid IANA zones fall back to UTC.
  */
 export function computeOccurrenceStarts(params: {
-  seedStart: Date;
+  anchorStart: Date;
   cadence: RecurrenceCadence;
   timezone: string;
   now: Date;
   horizonEnd: Date;
   existingStartMs?: ReadonlySet<number>;
 }): Date[] {
-  const { seedStart, cadence, timezone, now, horizonEnd, existingStartMs } = params;
+  const { anchorStart, cadence, timezone, now, horizonEnd, existingStartMs } = params;
   const zone = DateTime.now().setZone(timezone).isValid ? timezone : 'UTC';
 
-  let cursor: DateTime<boolean> = DateTime.fromJSDate(seedStart, { zone });
-  if (!cursor.isValid) cursor = DateTime.fromJSDate(seedStart, { zone: 'UTC' });
+  let anchor: DateTime<boolean> = DateTime.fromJSDate(anchorStart, { zone });
+  if (!anchor.isValid) anchor = DateTime.fromJSDate(anchorStart, { zone: 'UTC' });
+
+  const nowMs = now.getTime();
+  const horizonMs = horizonEnd.getTime();
+
+  // Fast-forward arithmetically, then correct to the FIRST occurrence strictly
+  // after now. The correction loops are tightly bounded — they absorb only the
+  // off-by-one from DST / the coarse estimate, never a walk through the past.
+  let n = Math.max(1, estimateIndex(anchor, now, cadence));
+  let guard = 0;
+  while (occurrenceAt(anchor, cadence, n).toMillis() <= nowMs && guard++ < 32) n++;
+  while (n > 1 && occurrenceAt(anchor, cadence, n - 1).toMillis() > nowMs && guard++ < 64) n--;
 
   const out: Date[] = [];
-  const horizonMs = horizonEnd.getTime();
-  const nowMs = now.getTime();
-
-  for (let steps = 0; steps < MAX_STEPS; steps++) {
-    cursor = advance(cursor, cadence);
-    const ms = cursor.toMillis();
+  for (let emitted = 0; emitted < MAX_EMIT; n++, emitted++) {
+    const dt = occurrenceAt(anchor, cadence, n);
+    const ms = dt.toMillis();
     if (ms > horizonMs) break;
-    if (ms <= nowMs) continue; // already in the past — skip but keep walking
     if (existingStartMs?.has(ms)) continue; // idempotent: never double-create
-    out.push(cursor.toJSDate());
+    out.push(dt.toJSDate());
   }
   return out;
 }
@@ -80,10 +104,12 @@ export function computeOccurrenceStarts(params: {
  * `setInterval` that never keeps the process alive, and a fully guarded tick —
  * any failure is logged and swallowed so a bad sweep can never crash the API.
  *
- * Idempotency: each template is seeded from its latest existing occurrence (or
- * itself), so repeated ticks never re-create rows. Timezone accuracy: stepping
- * is done in the template's IANA zone via Luxon, keeping the local start time
- * fixed across DST boundaries.
+ * Idempotency: occurrences are anchored to the template's original start and
+ * deduped against every existing occurrence (including soft-deleted ones), and a
+ * UNIQUE(recurrence_template_id, starts_at) index backstops concurrent sweeps, so
+ * rows are never re-created. Timezone accuracy: occurrence N is computed as
+ * anchor.plus({unit: N}) in the template's IANA zone via Luxon, keeping the local
+ * start time fixed across DST boundaries without compounding drift.
  */
 @Injectable()
 export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
@@ -150,20 +176,18 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
     now: Date,
     horizonEnd: Date,
   ): Promise<number> {
-    // Existing occurrences of this template (plus the template itself) — used
-    // both to seed the walk from the latest start and to dedupe candidates.
+    // Include soft-deleted occurrences (withDeleted) so a manually-cancelled
+    // occurrence is NOT resurrected on the next sweep — its startsAt still blocks
+    // regeneration. Occurrences are anchored to the template's original start.
     const existing = await this.events.find({
       where: { recurrenceTemplateId: template.id },
       select: { id: true, startsAt: true },
+      withDeleted: true,
     });
     const existingStartMs = new Set<number>(existing.map((e) => e.startsAt.getTime()));
-    const latestStart = existing.reduce<Date>(
-      (max, e) => (e.startsAt.getTime() > max.getTime() ? e.startsAt : max),
-      template.startsAt,
-    );
 
     const starts = computeOccurrenceStarts({
-      seedStart: latestStart,
+      anchorStart: template.startsAt,
       cadence: template.recurrenceCadence!,
       timezone: template.timezone,
       now,
@@ -172,23 +196,61 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
     });
     if (starts.length === 0) return 0;
 
-    // Duration is preserved as a fixed delta from the template (open-ended stays
-    // open-ended). The child collections are cloned onto every occurrence.
-    const durationMs =
-      template.endsAt !== null ? template.endsAt.getTime() - template.startsAt.getTime() : null;
+    // Duration is preserved in the template's wall-clock (open-ended stays open),
+    // and the child collections are cloned onto every occurrence.
+    const durationUnits = this.templateDurationUnits(template);
     const [platforms, tags, notifyOffsets] = await this.loadTemplateChildren(template.id);
 
-    await this.dataSource.transaction(async (manager) => {
-      for (const startsAt of starts) {
-        await this.createOccurrence(manager, template, startsAt, durationMs, {
-          platforms,
-          tags,
-          notifyOffsets,
-        });
-      }
-    });
+    // Insert each occurrence in its own transaction so a unique-constraint
+    // collision (a concurrent sweep / second app instance) skips just that one,
+    // never the whole batch.
+    let created = 0;
+    for (const startsAt of starts) {
+      const made = await this.tryCreateOccurrence(template, startsAt, durationUnits, {
+        platforms,
+        tags,
+        notifyOffsets,
+      });
+      if (made) created++;
+    }
+    return created;
+  }
 
-    return starts.length;
+  /**
+   * The template's duration as calendar units in its own zone, so an occurrence's
+   * end preserves the wall-clock end time across DST (not a fixed ms delta). Null
+   * for open-ended templates.
+   */
+  private templateDurationUnits(template: RegimentEvent): DurationLikeObject | null {
+    if (template.endsAt === null) return null;
+    const zone = DateTime.now().setZone(template.timezone).isValid ? template.timezone : 'UTC';
+    const start = DateTime.fromJSDate(template.startsAt, { zone });
+    const end = DateTime.fromJSDate(template.endsAt, { zone });
+    return end.diff(start, ['days', 'hours', 'minutes', 'seconds']).toObject();
+  }
+
+  /** Create one occurrence in its own transaction; a duplicate-key collision is a no-op. */
+  private async tryCreateOccurrence(
+    template: RegimentEvent,
+    startsAt: Date,
+    durationUnits: DurationLikeObject | null,
+    children: { platforms: EventPlatform['platform'][]; tags: string[]; notifyOffsets: number[] },
+  ): Promise<boolean> {
+    try {
+      await this.dataSource.transaction((manager) =>
+        this.createOccurrence(manager, template, startsAt, durationUnits, children),
+      );
+      return true;
+    } catch (error) {
+      if (this.isDuplicateKey(error)) return false; // a concurrent sweep won the race
+      throw error;
+    }
+  }
+
+  /** True when the error is a MySQL duplicate-key (ER_DUP_ENTRY / errno 1062). */
+  private isDuplicateKey(error: unknown): boolean {
+    const e = error as { code?: string; errno?: number; driverError?: { errno?: number } };
+    return e?.code === 'ER_DUP_ENTRY' || e?.errno === 1062 || e?.driverError?.errno === 1062;
   }
 
   /** The template's platform/tag/notify-offset child rows, as plain value arrays. */
@@ -212,9 +274,10 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
     manager: EntityManager,
     template: RegimentEvent,
     startsAt: Date,
-    durationMs: number | null,
+    durationUnits: DurationLikeObject | null,
     children: { platforms: EventPlatform['platform'][]; tags: string[]; notifyOffsets: number[] },
   ): Promise<void> {
+    const zone = DateTime.now().setZone(template.timezone).isValid ? template.timezone : 'UTC';
     const eventRepo = manager.getRepository(RegimentEvent);
     const occurrence = eventRepo.create({
       regimentId: template.regimentId,
@@ -223,7 +286,10 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
       description: template.description,
       bannerUrl: template.bannerUrl,
       startsAt,
-      endsAt: durationMs !== null ? new Date(startsAt.getTime() + durationMs) : null,
+      // Preserve the wall-clock end time (DST-correct), not a fixed ms delta.
+      endsAt: durationUnits
+        ? DateTime.fromJSDate(startsAt, { zone }).plus(durationUnits).toJSDate()
+        : null,
       timezone: template.timezone,
       // An occurrence is a concrete instance, never itself a template.
       isRecurring: false,

@@ -24,7 +24,7 @@ describe('computeOccurrenceStarts (DST correctness)', () => {
     const horizonEnd = DateTime.fromObject({ year: 2025, month: 4, day: 15 }, { zone }).toJSDate();
 
     const starts = computeOccurrenceStarts({
-      seedStart,
+      anchorStart: seedStart,
       cadence: RecurrenceCadence.Weekly,
       timezone: zone,
       now,
@@ -56,7 +56,7 @@ describe('computeOccurrenceStarts (DST correctness)', () => {
     const horizonEnd = DateTime.fromObject({ year: 2025, month: 6, day: 1 }, { zone }).toJSDate();
 
     const starts = computeOccurrenceStarts({
-      seedStart,
+      anchorStart: seedStart,
       cadence: RecurrenceCadence.Monthly,
       timezone: zone,
       now,
@@ -78,7 +78,7 @@ describe('computeOccurrenceStarts (DST correctness)', () => {
     const horizonEnd = new Date('2026-01-10T12:00:00Z');
 
     const first = computeOccurrenceStarts({
-      seedStart,
+      anchorStart: seedStart,
       cadence: RecurrenceCadence.Daily,
       timezone: zone,
       now,
@@ -89,7 +89,7 @@ describe('computeOccurrenceStarts (DST correctness)', () => {
     // Feeding the produced starts back as "existing" yields nothing new.
     const existingStartMs = new Set(first.map((d) => d.getTime()));
     const second = computeOccurrenceStarts({
-      seedStart,
+      anchorStart: seedStart,
       cadence: RecurrenceCadence.Daily,
       timezone: zone,
       now,
@@ -99,9 +99,44 @@ describe('computeOccurrenceStarts (DST correctness)', () => {
     expect(second).toHaveLength(0);
   });
 
+  it('anchors monthly to the original day-of-month, not the clamped previous step', () => {
+    // A Jan-31 template: Feb clamps to the 28th, but March must return to the 31st
+    // (anchor-based), NOT stay stuck at the 28th.
+    const zone = 'UTC';
+    const anchorStart = new Date('2026-01-31T12:00:00Z');
+    const starts = computeOccurrenceStarts({
+      anchorStart,
+      cadence: RecurrenceCadence.Monthly,
+      timezone: zone,
+      now: new Date('2026-01-31T13:00:00Z'),
+      horizonEnd: new Date('2026-05-01T00:00:00Z'),
+      existingStartMs: undefined,
+    });
+    const days = starts.map((s) => DateTime.fromJSDate(s, { zone }).day);
+    expect(days).toContain(28); // Feb clamps
+    expect(days).toContain(31); // Mar returns to the 31st (no permanent drift)
+  });
+
+  it('still emits FUTURE occurrences for a far-past template (no past-walk exhaustion)', () => {
+    // Daily template backdated ~3 years — anchor-based fast-forward must jump to now.
+    const anchorStart = new Date('2023-01-01T12:00:00Z');
+    const starts = computeOccurrenceStarts({
+      anchorStart,
+      cadence: RecurrenceCadence.Daily,
+      timezone: 'UTC',
+      now: new Date('2026-07-01T00:00:00Z'),
+      horizonEnd: new Date('2026-07-10T00:00:00Z'),
+    });
+    expect(starts.length).toBeGreaterThan(0);
+    // Every emitted start is in the future window, not the far past.
+    for (const s of starts) {
+      expect(s.getTime()).toBeGreaterThan(new Date('2026-07-01T00:00:00Z').getTime());
+    }
+  });
+
   it('emits nothing past the horizon', () => {
     const starts = computeOccurrenceStarts({
-      seedStart: new Date('2026-01-01T00:00:00Z'),
+      anchorStart: new Date('2026-01-01T00:00:00Z'),
       cadence: RecurrenceCadence.Weekly,
       timezone: 'UTC',
       now: new Date('2026-01-01T00:00:00Z'),
