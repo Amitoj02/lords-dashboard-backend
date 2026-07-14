@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "1f94370142c929190d0fbca4b1b8634821ea0183",
-  "lastSyncedAt": "2026-07-13T05:15:00Z",
+  "lastSyncedCommit": "25796440e97fb02e11f5da408a64f1822e9b2d5d",
+  "lastSyncedAt": "2026-07-14T01:01:15Z",
   "notesForNextSession": "SYNC 2026-07-13T05:15:00Z: Backend epic T-0065..T-0078 IMPLEMENTED + deploy_ready on branch feat/storage-events-discord-epic (3 commits: 3f6d9b6 events/discord, 2715aa2 storage, 1f94370 review-fixes). 267 unit tests + eslint + tsc green. New migrations (recurrence, medal/rank image_url, UNIQUE event-occurrence) APPLIED idempotently to the dev MySQL. An adversarial multi-agent review found 11 confirmed issues — ALL FIXED (recurrence anchored to template start: monthly day-of-month, DST no-compound, far-past fast-forward, soft-delete no-resurrect, per-occurrence txn + UNIQUE index; storage: uuid.ext key regex bounds URL<512, signed ContentLength bounds real upload, gallery raw-url fallback dropped; events update() activates template on cadence add). STORAGE DESIGN: presigned-PUT (aws-sdk v3), S3_ENDPOINT must be browser-reachable (dev maps minio to :9100 — 9000/9001 taken by capybara-rustfs). Consumers submit a namespaced KEY, service resolves to a clean public URL. NOT YET DONE (needs human/live): live `docker compose up` of minio to confirm bucket bootstrap; e2e-in-container run; T-0025/T-0032 prod deploy. FRONTEND: 25 tasks (T-0073..T-0097) planned in lords-regiment-dashboard — starting now on branch feat/dashboard-events-storage-ux. Open the backend PR (feat/storage-events-discord-epic -> main).",
-  "nextIdCounter": 79,
+  "nextIdCounter": 95,
   "connections": [],
   "tasks": [
     {
@@ -4751,6 +4751,813 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        }
+      ]
+    },
+    {
+      "id": "T-0079",
+      "title": "Delete-whole-recurrence-series endpoint",
+      "summary": "Add DELETE /events/:id/series (ManageEvents): resolve the template id (if :id is a generated occurrence use its recurrenceTemplateId; if a template use its own id; 400/404 for a non-recurring one-off) and soft-delete the template plus every occurrence sharing that recurrenceTemplateId in one transaction, then audit it. Soft-removing the template halts future generation automatically.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "events",
+      "repo": "",
+      "paths": [
+        "src/events/events.controller.ts",
+        "src/events/events.service.ts",
+        "src/events/entities/event.entity.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "DELETE /events/:templateId/series soft-deletes the template + all its occurrences; a subsequent scheduler generate() creates zero new rows and GET /events/mine returns none of them",
+          "status": "pending"
+        },
+        {
+          "desc": "DELETE /events/:occurrenceId/series (id of a generated occurrence) resolves to its template and deletes the whole series, not just that occurrence",
+          "status": "pending"
+        },
+        {
+          "desc": "Calling it on a one-off (non-recurring) event returns 400/404 and deletes nothing",
+          "status": "pending"
+        },
+        {
+          "desc": "A caller without ManageEvents gets 403; a success writes an event.delete-series audit record",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0080",
+      "title": "Enforce event tags hard limit of 10 in DTO",
+      "summary": "Add @ArrayMaxSize(10) to CreateEventDto.tags so create and update (via PartialType inheritance) reject >10 tags with 400. The event_tags table/column already exist (InitialSchema); MySQL cannot cap per-event row count without a trigger, so the limit lives at the DTO + FE layers — no migration.",
+      "status": "planned",
+      "type": "chore",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "events",
+      "repo": "",
+      "paths": [
+        "src/events/dto/create-event.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST /events with 11 tags returns 400 (array-size message); 10 tags succeeds",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH /events/:id with 11 tags returns 400 (confirms UpdateEventDto inherits the constraint through PartialType)",
+          "status": "pending"
+        },
+        {
+          "desc": "Existing per-tag rule still holds: a tag longer than 40 chars is still rejected",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0081",
+      "title": "Spike: short-id scheme + generation strategy + uuid-retention list",
+      "summary": "Decide the replacement for uuid v4 primary keys: id length + alphabet (e.g. 12-char base62 via nanoid), a collision-checked custom TypeORM id generator vs library, and the definitive list of columns that MUST stay uuid/opaque for security (MinIO object keys, auth/refresh tokens, session ids, discord-sync outbox + idempotency keys, self-deletion tokens). Output a short decision doc that T-0082/T-0083 implement against.",
+      "status": "planned",
+      "type": "spike",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        "src/common/crypto",
+        "src/database/migrations/1782177187006-InitialSchema.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Short-id scheme: exact length + alphabet (e.g. 12-char base62 nanoid gives ~71 bits), and do we need a collision-checked generator or is birthday-bound risk acceptable at regiment scale?",
+          "answer": null,
+          "askedAt": "2026-07-14T23:55:03.452Z"
+        },
+        {
+          "q": "Confirm the uuid/opaque retention set: MinIO object keys, auth + refresh tokens, session ids, discord outbox/idempotency keys, GDPR self-deletion tokens — anything else that must stay long/unguessable?",
+          "answer": null,
+          "askedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "A written decision lists the chosen id length/alphabet, generation approach, and the exact table+column retention set for uuid",
+          "status": "pending"
+        },
+        {
+          "desc": "The decision is reflected as acceptance criteria consumed by T-0082 and T-0083",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0082",
+      "title": "Add short-id generator and switch all entity PKs/FKs off uuid",
+      "summary": "Introduce the chosen short-id generator and change every @PrimaryGeneratedColumn('uuid') (and its char(36) FK columns) to the short-id column type across all entities, EXCEPT the security-retained set from T-0081. Update relation join columns and any code that assumes 36-char ids. Security-sensitive tokens/keys keep their existing length.",
+      "status": "planned",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        "src/common/crypto/",
+        "src/members/entities/member.entity.ts",
+        "src/events/entities/event.entity.ts",
+        "src/gallery/entities/",
+        "src/applications/entities/",
+        "src/medals/entities/",
+        "src/ranks/entities/",
+        "src/regiments/entities/",
+        "src/auth/entities/",
+        "src/audit/entities/",
+        "src/discord/entities/",
+        "src/notifications/entities/",
+        "src/settings/entities/"
+      ],
+      "dependsOn": [
+        "T-0081"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "A freshly generated entity persists with a short id of the agreed length/alphabet, and all relations (member↔regiment, event↔occurrence, gallery↔member, etc.) resolve",
+          "status": "pending"
+        },
+        {
+          "desc": "Security-retained columns (tokens, session ids, outbox/idempotency keys, MinIO keys) remain their original opaque length",
+          "status": "pending"
+        },
+        {
+          "desc": "tsc + the full unit suite are green after the id-type change",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Every entity primary key and foreign key is retouched; the blast radius spans all modules, all DTO id fields, and all relation joins. Any missed FK column-length mismatch breaks a join at runtime.",
+          "status": "open",
+          "notedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0083",
+      "title": "Rewrite migrations to short-id column lengths (DB rebuild)",
+      "summary": "Rewrite InitialSchema (and reconcile follow-on migrations) so a clean db:setup builds the short-id schema directly — permitted because there is no production data. Ensure column lengths for retained-uuid columns are unchanged and the migration set still runs idempotently end to end.",
+      "status": "planned",
+      "type": "infra",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        "src/database/migrations/1782177187006-InitialSchema.ts",
+        "src/database/migrations/",
+        "src/database/scripts/"
+      ],
+      "dependsOn": [
+        "T-0082"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "npm run db:setup (create → migrate → seed) runs cleanly against a fresh MySQL 8 and produces short-id primary keys",
+          "status": "pending"
+        },
+        {
+          "desc": "Re-running the migrations is idempotent (no error, no duplicate DDL)",
+          "status": "pending"
+        },
+        {
+          "desc": "Retained-uuid columns keep their original length in the built schema",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "InitialSchema + follow-on migrations are rewritten; the change requires a clean DB rebuild — any existing dev/local data is dropped. Migration ordering and idempotency must be re-verified.",
+          "status": "open",
+          "notedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0084",
+      "title": "Relax id DTO validators from IsUUID to short-id validator",
+      "summary": "Replace @IsUUID() on path/body id fields across DTOs and controllers with a validator matching the short-id format (length + alphabet), so requests carrying the new ids are accepted. Leave validators on retained-uuid fields (tokens, keys) untouched.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        "src/events/dto/",
+        "src/gallery/dto/",
+        "src/members/dto/",
+        "src/applications/dto/",
+        "src/medals/dto/",
+        "src/ranks/dto/"
+      ],
+      "dependsOn": [
+        "T-0082"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "A request with a valid short id passes validation; a malformed id is rejected with 400",
+          "status": "pending"
+        },
+        {
+          "desc": "Endpoints that legitimately take a token/opaque key still validate against the retained format",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0085",
+      "title": "Convert seed constants and fixtures to short ids",
+      "summary": "Update seed data and any hardcoded id constants/fixtures to the short-id format so seeding and tests work against the new scheme.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "database",
+      "repo": "",
+      "paths": [
+        "src/database/seeds/"
+      ],
+      "dependsOn": [
+        "T-0082"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Seeding a fresh DB succeeds with short-id records and referential integrity intact",
+          "status": "pending"
+        },
+        {
+          "desc": "Unit/integration fixtures referencing seeded ids still resolve",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0086",
+      "title": "Authenticated member gallery-archive list endpoint",
+      "summary": "Add an authenticated gallery list read that returns approved items to any enrolled member/mercenary regardless of the regiment publicGallery flag, so the relocated /app/gallery list is populated for signed-in roster members even when the public archive is off. Keep the existing public list endpoint for the public /gallery surface.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "gallery",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "A signed-in member gets the approved archive from the authenticated endpoint even when regiment_settings.publicGallery is false",
+          "status": "pending"
+        },
+        {
+          "desc": "The public (unauthenticated) list still honors the publicGallery flag",
+          "status": "pending"
+        },
+        {
+          "desc": "Only approved (not pending/declined) items are returned to non-moderators",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0087",
+      "title": "DB migration: drop gallery↔event + member-tag, add gallery_tags",
+      "summary": "Migration to remove the gallery→event association and the gallery member-tag junction/columns (never used going forward), and add a gallery tag store (mirroring event_tags) to back free-form + quick-chip tags. Clean rebuild acceptable (no production data).",
+      "status": "planned",
+      "type": "infra",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "repo": "",
+      "paths": [
+        "src/database/migrations/",
+        "src/gallery/entities/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Migration drops the event-link and member-tag structures and creates the gallery_tags store; db:setup runs cleanly and idempotently",
+          "status": "pending"
+        },
+        {
+          "desc": "A gallery item persists with tags via the new store",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Drops gallery↔event and gallery member-tag associations from the schema; any code/DTO still referencing them must be updated in lockstep (T-0088), and the FE gallery consumers in lockstep (lords-regiment-dashboard).",
+          "status": "open",
+          "notedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0088",
+      "title": "Gallery DTO/service/controller: tags (max 10), drop event + member-tag",
+      "summary": "Rework the gallery submit/read contract: add tags with @ArrayMaxSize(10) validation, remove the linked-event field and the tagged-members field from DTOs/service/serialization, and stop persisting/returning them. Keep uploads (storage key) and moderation flow intact.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "repo": "",
+      "paths": [
+        "src/gallery/dto/",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.controller.ts"
+      ],
+      "dependsOn": [
+        "T-0087"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST gallery with 11 tags → 400; ≤10 succeeds and tags round-trip on the read",
+          "status": "pending"
+        },
+        {
+          "desc": "Submitting with a linked-event or tagged-members field is ignored/rejected and never persisted",
+          "status": "pending"
+        },
+        {
+          "desc": "Existing moderation (approve/decline) and public/authenticated list flows still pass their specs",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Changes the shared gallery submit + read DTO/service contract (tags in; event-link + tagged-members out); the FE gallery model/services (lords-regiment-dashboard:T-0111) must change in lockstep or submission/list break.",
+          "status": "open",
+          "notedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0089",
+      "title": "Fix gallery moderation queue status filter (declined not listed)",
+      "summary": "The moderation queue currently returns only pending items, so declined submissions never appear in the FE \"Declined\" section. Add a status filter (pending | approved | declined) to the moderation read so the FE can fetch each tab; ensure declined items (with their decline reason) are returned.",
+      "status": "planned",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "gallery",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/dto/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET moderation queue with status=declined returns declined items including their decline reason",
+          "status": "pending"
+        },
+        {
+          "desc": "status=pending and status=approved each return only their bucket",
+          "status": "pending"
+        },
+        {
+          "desc": "A non-moderator still cannot read the moderation queue (403)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0090",
+      "title": "DM the submitter on gallery decline (no DM on approve)",
+      "summary": "On decline, enqueue a best-effort Discord DM to the submitter containing the decline reason via the shared discord-sync outbox (reuse the applications decision-DM pattern). Approve enqueues nothing. A DM-side error must never fail or roll back the moderation decision.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.service.ts",
+        "src/discord/",
+        "src/notifications/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Declining a submission with a reason enqueues exactly one outbox DM addressed to the submitter containing that reason",
+          "status": "pending"
+        },
+        {
+          "desc": "Approving a submission enqueues no DM",
+          "status": "pending"
+        },
+        {
+          "desc": "A failure while enqueuing/sending the DM does not roll back or fail the decline",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Threads a best-effort DM into the gallery decline path via the shared discord-sync outbox worker; a DM-side error must never fail or roll back the decline (enqueue after the decision commits, guarded).",
+          "status": "open",
+          "notedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0091",
+      "title": "Reconcile Capability enum + seed defaults with the epic permission decisions",
+      "summary": "Update the capability catalog + role→permission seed defaults to match the epic: gallery archive view = members + mercenaries; gallery submit = members only (revoke from Mercenary); moderation queue = moderators + admins; dashboard \"Gallery submissions\" panel read = ManageEvents (see T-0094). This is the single source of truth the admin Permission Matrix renders.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "authz",
+      "repo": "",
+      "paths": [
+        "src/authz/",
+        "src/settings/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Seed defaults grant gallery view to members + mercenaries, submit to members only, moderation to moderators + admins",
+          "status": "pending"
+        },
+        {
+          "desc": "A mercenary is denied gallery submit (403) but can read the archive",
+          "status": "pending"
+        },
+        {
+          "desc": "The Permission Matrix source reflects the new defaults so the admin settings table shows them",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The Capability enum + role-permission seed defaults are shared by every guarded endpoint and by the admin Permission Matrix; a wrong default silently over- or under-grants access across the app.",
+          "status": "open",
+          "notedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0092",
+      "title": "Data migration to align existing regiments' role_permissions with new defaults",
+      "summary": "Migration to reconcile already-seeded regiments' role_permissions rows with the updated matrix defaults from T-0091 (grant/revoke the changed gallery + dashboard capabilities) so existing environments match new installs. Idempotent.",
+      "status": "planned",
+      "type": "infra",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "authz",
+      "repo": "",
+      "paths": [
+        "src/database/migrations/",
+        "src/authz/"
+      ],
+      "dependsOn": [
+        "T-0091"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Running the migration on an existing regiment revokes Mercenary gallery-submit and grants member/mercenary gallery-view without touching unrelated grants",
+          "status": "pending"
+        },
+        {
+          "desc": "Re-running the migration is a no-op (idempotent)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0093",
+      "title": "Fall back to Discord avatar in me + member projections",
+      "summary": "When a member has no custom avatarUrl, project the linked Discord identity's avatarUrl instead. Load the discordIdentity relation in AuthService.getCurrentUser (member branch) and apply the fallback in AuthService.toMemberProjection and MemberDto.from, so every avatarUrl the API returns is populated. No new column/endpoint (all already exist).",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "auth",
+      "repo": "",
+      "paths": [
+        "src/auth/auth.service.ts",
+        "src/members/dto/member.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "A member with no custom avatar gets their Discord avatarUrl from GET /api/auth/me and from the member projection",
+          "status": "pending"
+        },
+        {
+          "desc": "A member with a custom avatar still gets the custom avatarUrl (custom wins)",
+          "status": "pending"
+        },
+        {
+          "desc": "A member with neither returns null (FE falls back to initials)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
+        }
+      ]
+    },
+    {
+      "id": "T-0094",
+      "title": "Expose pending gallery submissions read to the dashboard \"Gallery submissions\" panel",
+      "summary": "Provide a read the dashboard \"Gallery submissions\" panel can call to list pending submissions (title + submitter username) for users with ManageEvents. Either widen the existing moderation-queue read's capability or add a lightweight pending-list endpoint — resolve the ManageEvents vs ModerateGallery gate question first.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "gallery",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.ts",
+        "src/authz/"
+      ],
+      "dependsOn": [
+        "T-0091"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "The dashboard \"Gallery submissions\" panel is gated by ManageEvents but its items open the moderation screen (ModerateGallery). Should ManageEvents holders be granted read access to the pending queue, or should the panel/endpoint gate be ModerateGallery instead (keeping \"Manage events\" as the visibility label)?",
+          "answer": null,
+          "askedAt": "2026-07-14T23:55:03.452Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "A user with the intended capability can read pending submissions as {title, submitterUsername, id}",
+          "status": "pending"
+        },
+        {
+          "desc": "A user without it is denied (403)",
+          "status": "pending"
+        },
+        {
+          "desc": "The read returns only pending (not approved/declined) items",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-14T23:55:03.452Z",
+      "updatedAt": "2026-07-14T23:55:03.452Z",
+      "history": [
+        {
+          "at": "2026-07-14T23:55:03.452Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: /app routing + short-id + gallery/profile/legals epic"
         }
       ]
     }
