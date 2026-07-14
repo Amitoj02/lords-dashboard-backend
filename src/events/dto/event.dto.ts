@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { EventStatus, Platform, RsvpStatus } from '../../common/enums';
+import { EventStatus, Platform, RecurrenceCadence, RsvpStatus } from '../../common/enums';
 import { RegimentEvent } from '../entities/event.entity';
 
 /** RSVP tallies for an event, broken down by intent. */
@@ -113,6 +113,24 @@ export class EventDto {
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   recurrenceRule?: string | null;
 
+  @ApiPropertyOptional({
+    enum: RecurrenceCadence,
+    nullable: true,
+    description: 'Recurring cadence of a template (member view only)',
+  })
+  recurrenceCadence?: RecurrenceCadence | null;
+
+  @ApiPropertyOptional({
+    description: 'Whether a recurring template is still generating occurrences (member view only)',
+  })
+  recurrenceActive?: boolean;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description: 'On a generated occurrence, its template id (member view only)',
+  })
+  recurrenceTemplateId?: string | null;
+
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   createdByMemberId?: string | null;
 
@@ -180,6 +198,9 @@ export class EventDto {
       dto.serverName = event.serverName;
       dto.serverRegion = event.serverRegion;
       dto.recurrenceRule = event.recurrenceRule;
+      dto.recurrenceCadence = event.recurrenceCadence;
+      dto.recurrenceActive = event.recurrenceActive;
+      dto.recurrenceTemplateId = event.recurrenceTemplateId;
       dto.createdByMemberId = event.createdByMemberId;
       dto.notifyOffsets = opts.notifyOffsets ?? [];
       dto.startedAt = event.startedAt ? event.startedAt.toISOString() : null;

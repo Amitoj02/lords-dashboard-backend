@@ -25,6 +25,17 @@ export interface DiscordGatewayStatus {
   totalRoles: number | null;
   botRolePosition: number | null;
   membersVisible: number | null;
+  // ── Live runtime metrics (T-0076) — all null when disconnected ──────────────
+  /** WebSocket heartbeat latency in ms (discord.js `client.ws.ping`). */
+  wsPing: number | null;
+  /** How long the gateway has been connected, in ms. */
+  uptimeMs: number | null;
+  /** Resident set size of the bot process, in bytes. */
+  memoryBytes: number | null;
+  /** Average CPU utilization of the process since start, as a percentage. */
+  cpu: number | null;
+  /** ISO timestamp the gateway became ready. */
+  readyAt: string | null;
 }
 
 /** Handler invoked when a member joins the guild (drives onboarding). */

@@ -31,6 +31,10 @@ export class Rank {
   @Column({ type: 'tinyint', unsigned: true, default: 0 })
   chevrons: number;
 
+  /** Public URL of an uploaded rank insignia image (via the storage presign flow, T-0070). */
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  imageUrl: string | null;
+
   @Column({ type: 'int' })
   precedence: number;
 

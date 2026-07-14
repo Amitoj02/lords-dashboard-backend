@@ -61,4 +61,18 @@ export const envValidationSchema = Joi.object({
   FRONTEND_URL: Joi.string().uri().default('http://localhost:4200'),
   FRONTEND_AUTH_SUCCESS_REDIRECT: Joi.string().uri().default('http://localhost:4200/auth/callback'),
   FRONTEND_AUTH_FAILURE_REDIRECT: Joi.string().uri().default('http://localhost:4200/login'),
+
+  // S3-compatible object storage (MinIO in dev). Defaults target the compose
+  // MinIO service so a fresh `docker compose up` works with no editing; the URI
+  // + numeric formats are validated so a malformed value fails fast at boot.
+  S3_ENDPOINT: Joi.string().uri().default('http://localhost:9100'),
+  S3_REGION: Joi.string().default('us-east-1'),
+  S3_ACCESS_KEY_ID: Joi.string().default('minioadmin'),
+  S3_SECRET_ACCESS_KEY: Joi.string().default('minioadmin'),
+  S3_BUCKET: Joi.string().default('lords-media'),
+  // Optional explicit public base; when omitted it is derived as {endpoint}/{bucket}.
+  S3_PUBLIC_BASE_URL: Joi.string().uri().optional(),
+  S3_FORCE_PATH_STYLE: Joi.boolean().default(true),
+  S3_PRESIGN_EXPIRY_SECONDS: Joi.number().integer().min(60).max(3600).default(900),
+  S3_MAX_UPLOAD_MB: Joi.number().integer().min(1).max(2048).default(100),
 });

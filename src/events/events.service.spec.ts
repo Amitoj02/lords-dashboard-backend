@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
+import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { EventStatus, MemberRole, RsvpStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
@@ -42,6 +43,9 @@ const buildEvent = (overrides: Partial<RegimentEvent> = {}): RegimentEvent => ({
   timezone: 'UTC',
   isRecurring: false,
   recurrenceRule: null,
+  recurrenceCadence: null,
+  recurrenceActive: false,
+  recurrenceTemplateId: null,
   serverName: 'LORDS-1',
   serverPassword: 'hunter2',
   serverRegion: 'EU',
@@ -116,6 +120,9 @@ describe('EventsService', () => {
   const settings = { find: jest.fn(), findOne: jest.fn() };
   const audit = { record: jest.fn() };
   const discordSync = { enqueueEventAnnounce: jest.fn().mockResolvedValue(null) };
+  const storage = {
+    resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+  };
 
   // Transaction manager repositories (rebuilt each test).
   let eventTxRepo: { create: jest.Mock; save: jest.Mock };
@@ -195,6 +202,7 @@ describe('EventsService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: StorageService, useValue: storage },
       ],
     }).compile();
 
@@ -248,6 +256,28 @@ describe('EventsService', () => {
       const created = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
       expect(created.timezone).toBe('America/Toronto');
     });
+
+    it('publishes directly and enqueues exactly one Discord announce (T-0072)', async () => {
+      await service.create(user(), baseDto(), null);
+
+      const created = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
+      expect(created.isDraft).toBe(false);
+      expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledTimes(1);
+      expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledWith(
+        REGIMENT,
+        expect.stringContaining('New event: Muster'),
+      );
+    });
+
+    it('stores a cadence as an active recurring template (T-0074)', async () => {
+      await service.create(user(), { ...baseDto(), recurrenceCadence: 'weekly' as never }, null);
+
+      const created = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
+      expect(created.recurrenceCadence).toBe('weekly');
+      expect(created.recurrenceActive).toBe(true);
+      expect(created.isRecurring).toBe(true);
+      expect(created.recurrenceTemplateId).toBeNull();
+    });
   });
 
   describe('listPublic', () => {
@@ -286,6 +316,81 @@ describe('EventsService', () => {
         declined: 0,
         neutral: 0,
       });
+    });
+  });
+
+  describe('listForMember (T-0073)', () => {
+    it('includes the server binding + myRsvp for an enrolled member', async () => {
+      eventsQb.getManyAndCount.mockResolvedValue([[buildEvent()], 1]);
+      rsvps.find.mockResolvedValue([
+        {
+          eventId: 'event-1',
+          memberId: MEMBER,
+          status: RsvpStatus.Interested,
+          reminderOffsetMinutes: 30,
+        },
+      ]);
+
+      const result = await service.listForMember(user(), { page: 1, limit: 20, skip: 0 });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].serverName).toBe('LORDS-1');
+      expect(result.data[0].serverRegion).toBe('EU');
+      expect(result.data[0].myRsvp).toEqual({
+        status: RsvpStatus.Interested,
+        reminderOffsetMinutes: 30,
+      });
+      // The password is never projected, even in the member view.
+      expect(result.data[0]).not.toHaveProperty('serverPassword');
+    });
+
+    it('redacts the server binding for a non-enrolled caller (no memberId)', async () => {
+      eventsQb.getManyAndCount.mockResolvedValue([[buildEvent()], 1]);
+
+      const result = await service.listForMember(user({ memberId: null }), {
+        page: 1,
+        limit: 20,
+        skip: 0,
+      });
+
+      expect(result.data[0].serverName).toBeUndefined();
+      expect(result.data[0].serverRegion).toBeUndefined();
+      expect(result.data[0].myRsvp).toBeUndefined();
+      expect(result.data[0]).not.toHaveProperty('serverPassword');
+    });
+  });
+
+  describe('getForMember (T-0073)', () => {
+    it('404s a hidden or missing event', async () => {
+      events.findOne.mockResolvedValue(null);
+      await expect(service.getForMember(user(), 'event-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+
+    it('returns the member projection for an enrolled member', async () => {
+      events.findOne.mockResolvedValue(buildEvent());
+      const result = await service.getForMember(user(), 'event-1');
+      expect(result.serverName).toBe('LORDS-1');
+      expect(result).not.toHaveProperty('serverPassword');
+    });
+  });
+
+  describe('update recurrence (T-0074)', () => {
+    it('permanently stops a recurring template via recurrenceActive=false', async () => {
+      events.findOne.mockResolvedValue(
+        buildEvent({
+          isRecurring: true,
+          recurrenceActive: true,
+          recurrenceCadence: 'weekly' as never,
+        }),
+      );
+
+      const result = await service.update(user(), 'event-1', { recurrenceActive: false }, null);
+
+      expect(result.recurrenceActive).toBe(false);
+      // The cadence is retained; only generation stops.
+      expect(result.recurrenceCadence).toBe('weekly');
     });
   });
 

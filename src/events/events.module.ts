@@ -3,6 +3,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { DiscordModule } from '../discord/discord.module';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
+import { StorageModule } from '../storage/storage.module';
+import { EventRecurrenceScheduler } from './event-recurrence.scheduler';
 import { EventStatusScheduler } from './event-status.scheduler';
 import { EventAttendee } from './entities/event-attendee.entity';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
@@ -34,9 +36,11 @@ import { EventsService } from './events.service';
     ]),
     // For best-effort event announcements to the event-announcements channel.
     DiscordModule,
+    // Resolves an uploaded banner key to a public URL (StorageService).
+    StorageModule,
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStatusScheduler],
+  providers: [EventsService, EventStatusScheduler, EventRecurrenceScheduler],
   exports: [EventsService],
 })
 export class EventsModule {}

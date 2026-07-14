@@ -8,6 +8,7 @@ import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
+import { StorageModule } from '../storage/storage.module';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { Member } from './entities/member.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
@@ -38,6 +39,8 @@ import { MembersService } from './members.service';
     // For enqueuing Discord role syncs on rank/role/medal changes and the
     // (flag-gated) kick on ban. DiscordModule exports DiscordSyncService.
     DiscordModule,
+    // Resolves uploaded avatar/banner keys to public URLs (StorageService).
+    StorageModule,
   ],
   controllers: [MembersController],
   providers: [MembersService],

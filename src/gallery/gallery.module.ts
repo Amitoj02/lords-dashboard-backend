@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
+import { StorageModule } from '../storage/storage.module';
 import { GalleryController } from './gallery.controller';
 import { GalleryService } from './gallery.service';
 import { GalleryFile } from './entities/gallery-file.entity';
@@ -26,6 +27,8 @@ import { GalleryTaggedMember } from './entities/gallery-tagged-member.entity';
       Member,
       RegimentSettings,
     ]),
+    // Resolves uploaded file keys to public URLs (StorageService).
+    StorageModule,
   ],
   controllers: [GalleryController],
   providers: [GalleryService],

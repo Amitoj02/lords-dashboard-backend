@@ -35,6 +35,8 @@
     "db:setup:prod": "npm run migration:run:prod && npm run seed:prod"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1085.0",
+    "@aws-sdk/s3-request-presigner": "^3.1085.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.0",
     "@nestjs/core": "^11.0.1",
@@ -44,6 +46,7 @@
     "@nestjs/swagger": "^11.0.0",
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/typeorm": "^11.0.0",
+    "@types/luxon": "^3.7.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "cookie-parser": "^1.4.7",
@@ -51,6 +54,7 @@
     "dotenv": "^16.4.7",
     "helmet": "^8.0.0",
     "joi": "^17.13.3",
+    "luxon": "^3.7.2",
     "mysql2": "^3.11.5",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",

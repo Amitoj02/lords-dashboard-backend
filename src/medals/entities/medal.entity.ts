@@ -37,6 +37,10 @@ export class Medal {
   @Column({ type: 'varchar', length: 400, nullable: true })
   description: string | null;
 
+  /** Public URL of an uploaded medal image (via the storage presign flow, T-0069). */
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  imageUrl: string | null;
+
   @Column({ type: 'int', default: 0 })
   precedence: number;
 

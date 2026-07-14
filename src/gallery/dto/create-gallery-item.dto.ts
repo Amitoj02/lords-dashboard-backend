@@ -27,11 +27,14 @@ export class GalleryFileInputDto {
   @MaxLength(255)
   fileName: string;
 
-  @ApiPropertyOptional({ maxLength: 512, description: 'Public URL of the stored asset' })
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description: 'Storage key of the uploaded file (from POST /storage/uploads)',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(512)
-  url?: string;
+  key?: string;
 
   @ApiProperty({ enum: GalleryMediaType })
   @IsEnum(GalleryMediaType)

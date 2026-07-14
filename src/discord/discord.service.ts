@@ -10,6 +10,7 @@ import { DiscordOnboardingService } from './discord-onboarding.service';
 import { DiscordSyncService } from './discord-sync.service';
 import {
   BotOperationDto,
+  BotStatusDto,
   DiscordConnectionDto,
   DiscordRoleDto,
   DiscordVerifyConnectionDto,
@@ -55,6 +56,17 @@ export class DiscordService {
     const status = await this.gateway.getStatus();
     const connection = await this.connections.findOne({ where: { regimentId: user.regimentId } });
     return DiscordConnectionDto.from(status, connection);
+  }
+
+  /**
+   * Lean bot status for the STAFF dashboard widget (T-0077): online/offline +
+   * live runtime metrics, with the sensitive authority/config fields omitted (see
+   * {@link BotStatusDto}). Same data source as getConnection, projected safely.
+   */
+  async getBotStatus(user: AuthenticatedUser): Promise<BotStatusDto> {
+    const status = await this.gateway.getStatus();
+    const connection = await this.connections.findOne({ where: { regimentId: user.regimentId } });
+    return BotStatusDto.from(status, connection);
   }
 
   /**

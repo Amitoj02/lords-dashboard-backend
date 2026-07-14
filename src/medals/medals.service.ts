@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
+import { StorageTarget } from '../common/enums';
+import { StorageService } from '../storage/storage.service';
 import { CreateMedalDto } from './dto/create-medal.dto';
 import { LinkDiscordDto } from './dto/link-discord.dto';
 import { MedalDto } from './dto/medal.dto';
@@ -49,6 +51,7 @@ export class MedalsService {
     private readonly memberMedals: Repository<MemberMedal>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
 
   /**
@@ -86,6 +89,9 @@ export class MedalsService {
       glyph: dto.glyph,
       ribbon: dto.ribbon,
       description: dto.description ?? null,
+      imageUrl: dto.imageKey
+        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.MedalImage)
+        : null,
       precedence,
       discordRoleName: dto.discordRoleName ?? null,
       linked: false,
@@ -125,6 +131,11 @@ export class MedalsService {
     if (dto.glyph !== undefined) medal.glyph = dto.glyph;
     if (dto.ribbon !== undefined) medal.ribbon = dto.ribbon;
     if (dto.description !== undefined) medal.description = dto.description ?? null;
+    if (dto.imageKey !== undefined) {
+      medal.imageUrl = dto.imageKey
+        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.MedalImage)
+        : null;
+    }
     if (dto.precedence !== undefined) medal.precedence = dto.precedence;
     if (dto.discordRoleName !== undefined) medal.discordRoleName = dto.discordRoleName ?? null;
 
@@ -334,6 +345,7 @@ export class MedalsService {
       glyph: medal.glyph,
       ribbon: medal.ribbon,
       description: medal.description,
+      imageUrl: medal.imageUrl,
       precedence: medal.precedence,
       discordRoleName: medal.discordRoleName,
       discordRoleId: medal.discordRoleId,

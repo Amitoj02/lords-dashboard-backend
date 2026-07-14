@@ -10,7 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { encryptionTransformer } from '../../common/crypto/encryption.transformer';
-import { EventStatus } from '../../common/enums';
+import { EventStatus, RecurrenceCadence } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
@@ -59,6 +59,31 @@ export class RegimentEvent {
 
   @Column({ type: 'varchar', length: 120, nullable: true })
   recurrenceRule: string | null;
+
+  /**
+   * Structured cadence of a recurring template (T-0074). When set together with
+   * `recurrenceActive`, the recurrence scheduler materializes this event's future
+   * occurrences. Null on one-off events and on generated occurrences.
+   */
+  @Column({ type: 'enum', enum: RecurrenceCadence, nullable: true })
+  recurrenceCadence: RecurrenceCadence | null;
+
+  /**
+   * The stop flag: while true (and this row is a template — `recurrenceTemplateId`
+   * is null — with a cadence), the scheduler keeps generating occurrences. Setting
+   * it false permanently stops generation. Generated occurrences carry false.
+   */
+  @Column({ default: false })
+  recurrenceActive: boolean;
+
+  /**
+   * Template linkage: on a generated occurrence, the id of the template event it
+   * was materialized from; null on templates and one-off events. Indexed so the
+   * scheduler can cheaply find existing occurrences per template (idempotency).
+   */
+  @Index()
+  @Column({ type: 'char', length: 36, nullable: true })
+  recurrenceTemplateId: string | null;
 
   @Column({ type: 'varchar', length: 120, nullable: true })
   serverName: string | null;

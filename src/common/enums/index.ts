@@ -40,6 +40,17 @@ export enum EventStatus {
   Previous = 'previous',
 }
 
+/**
+ * Cadence of a recurring event template. A template with a cadence and
+ * `recurrenceActive` set has its future occurrences materialized as real event
+ * rows by the recurrence scheduler (T-0074/T-0075).
+ */
+export enum RecurrenceCadence {
+  Daily = 'daily',
+  Weekly = 'weekly',
+  Monthly = 'monthly',
+}
+
 export enum RsvpStatus {
   Interested = 'interested',
   Tentative = 'tentative',
@@ -133,6 +144,19 @@ export enum AccountDeletionStatus {
   Confirmed = 'confirmed',
   Executed = 'executed',
   Cancelled = 'cancelled',
+}
+
+/**
+ * Upload targets for the presigned-upload API (T-0066). Each target maps to a
+ * key namespace, a required capability, and a content-type/size policy.
+ */
+export enum StorageTarget {
+  MemberAvatar = 'member-avatar',
+  MemberBanner = 'member-banner',
+  EventBanner = 'event-banner',
+  MedalImage = 'medal-image',
+  RankImage = 'rank-image',
+  Gallery = 'gallery',
 }
 
 /** Capability keys for the role/permission matrix (role_permissions.capability). */

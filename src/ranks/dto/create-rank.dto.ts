@@ -31,6 +31,15 @@ export class CreateRankDto {
   @Min(1)
   precedence?: number;
 
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description: 'Storage key of an uploaded rank image (from POST /storage/uploads)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  imageKey?: string;
+
   @ApiPropertyOptional({ maxLength: 80, example: '@Sergeant' })
   @IsOptional()
   @IsString()

@@ -19,6 +19,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { RanksModule } from './ranks/ranks.module';
 import { RegimentsModule } from './regiments/regiments.module';
 import { SettingsModule } from './settings/settings.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { SettingsModule } from './settings/settings.module';
     NotificationsModule,
     SettingsModule,
     DiscordModule,
+    StorageModule,
   ],
   providers: [
     // Throttle every route globally; individual routes can override with @Throttle/@SkipThrottle.

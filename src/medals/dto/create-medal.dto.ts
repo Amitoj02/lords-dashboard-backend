@@ -32,6 +32,15 @@ export class CreateMedalDto {
   @MaxLength(400)
   description?: string;
 
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description: 'Storage key of an uploaded medal image (from POST /storage/uploads)',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  imageKey?: string;
+
   @ApiPropertyOptional({ description: 'Display order; defaults to end of the ladder', minimum: 0 })
   @IsOptional()
   @Type(() => Number)

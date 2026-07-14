@@ -72,6 +72,13 @@ export class MockDiscordGateway extends DiscordGateway {
       totalRoles: MOCK_ROLES.length,
       botRolePosition: 20,
       membersVisible: this.members.size,
+      // Canned runtime metrics (T-0076) so mock-mode keeps type parity and the
+      // bot-status widget renders realistic values with no real gateway.
+      wsPing: 42,
+      uptimeMs: 3_600_000,
+      memoryBytes: 128 * 1024 * 1024,
+      cpu: 2.5,
+      readyAt: '2026-01-01T00:00:00.000Z',
     });
   }
 

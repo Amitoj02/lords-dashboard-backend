@@ -9,9 +9,10 @@ import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { GalleryMediaType, GalleryStatus, MemberRole } from '../common/enums';
+import { GalleryMediaType, GalleryStatus, MemberRole, StorageTarget } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
+import { StorageService } from '../storage/storage.service';
 import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
 import { DeclineGalleryDto } from './dto/decline-gallery.dto';
 import { GalleryFileDto, GalleryItemDto, GalleryMemberRefDto } from './dto/gallery-item.dto';
@@ -62,6 +63,8 @@ export class GalleryService {
     private readonly settings: Repository<RegimentSettings>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    // Resolves uploaded file keys to public URLs (namespace-validated).
+    private readonly storage: StorageService,
   ) {}
 
   // ── Public feed (unauthenticated — no caller to scope by) ────────────────────
@@ -175,7 +178,13 @@ export class GalleryService {
             fileRepo.create({
               galleryItemId: item.id,
               fileName: file.fileName,
-              url: file.url ?? null,
+              // Uploaded files reference a storage key; its namespace is
+              // re-validated and resolved to the public URL persisted here. A file
+              // with no key stores no URL — arbitrary client URLs are NOT accepted
+              // (they would bypass the namespace check).
+              url: file.key
+                ? this.storage.resolveKeyToPublicUrl(user, file.key, StorageTarget.Gallery)
+                : null,
               mediaType: file.mediaType,
               sizeBytes: file.sizeBytes ?? null,
               width: file.width ?? null,
@@ -487,7 +496,29 @@ export class GalleryService {
     const maxImageBytes = maxImageMb * 1024 * 1024;
     const maxVideoBytes = maxVideoMb * 1024 * 1024;
 
+    // Allowed extension lists from settings (bare extensions, e.g. ['jpg','png']);
+    // when a list is configured, every file of that kind must match it. Null/empty
+    // lists mean "no restriction". This finally enforces the settings the wizard
+    // exposes (previously stored + editable but never checked).
+    const allowedImage = this.normalizeExtensions(settings?.galleryAllowedImageTypes);
+    const allowedVideo = this.normalizeExtensions(settings?.galleryAllowedVideoTypes);
+
     for (const file of list) {
+      const ext = this.extensionOf(file.key ?? file.fileName);
+      if (file.mediaType === GalleryMediaType.Image) {
+        if (allowedImage.length > 0 && (ext === null || !allowedImage.includes(ext))) {
+          throw new BadRequestException(
+            `Image "${file.fileName}" has a disallowed type (allowed: ${allowedImage.join(', ')})`,
+          );
+        }
+      } else if (file.mediaType === GalleryMediaType.Video) {
+        if (allowedVideo.length > 0 && (ext === null || !allowedVideo.includes(ext))) {
+          throw new BadRequestException(
+            `Video "${file.fileName}" has a disallowed type (allowed: ${allowedVideo.join(', ')})`,
+          );
+        }
+      }
+
       if (file.sizeBytes == null) {
         continue;
       }
@@ -499,6 +530,19 @@ export class GalleryService {
         throw new BadRequestException(`Video "${file.fileName}" exceeds the ${maxVideoMb}MB limit`);
       }
     }
+  }
+
+  /** Lower-cased, dot-stripped allowed-extension list (tolerates '.jpg' or 'JPG'). */
+  private normalizeExtensions(list: string[] | null | undefined): string[] {
+    return (list ?? []).map((e) => e.trim().toLowerCase().replace(/^\./, '')).filter(Boolean);
+  }
+
+  /** The lower-cased extension of a path/filename, or null when it has none. */
+  private extensionOf(nameOrPath: string): string | null {
+    const base = nameOrPath.split('/').pop() ?? nameOrPath;
+    const dot = base.lastIndexOf('.');
+    if (dot < 0 || dot === base.length - 1) return null;
+    return base.slice(dot + 1).toLowerCase();
   }
 
   /** Guard: the caller must be an enrolled member (has a memberId). */
