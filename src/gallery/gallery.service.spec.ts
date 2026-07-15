@@ -548,7 +548,7 @@ describe('GalleryService', () => {
       members.findOne!.mockResolvedValue({
         id: 'member-1',
         discordIdentity: { discordUserId: 'discord-author' },
-      } as unknown as Member);
+      });
 
       await service.decline(ADMIN_USER, 'gallery-1', { reason: 'Off-topic' }, null);
 
@@ -561,7 +561,7 @@ describe('GalleryService', () => {
 
     it('does not DM when the submitter has no linked Discord identity (T-0090)', async () => {
       items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
-      members.findOne!.mockResolvedValue({ id: 'member-1', discordIdentity: null } as Member);
+      members.findOne!.mockResolvedValue({ id: 'member-1', discordIdentity: null });
 
       await service.decline(ADMIN_USER, 'gallery-1', { reason: 'x' }, null);
 

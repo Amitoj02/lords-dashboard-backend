@@ -619,8 +619,7 @@ export class GalleryService {
       }
       const trimmed = reason?.trim();
       const content =
-        `Your gallery submission "${title}" was declined.` +
-        (trimmed ? ` Reason: ${trimmed}` : '');
+        `Your gallery submission "${title}" was declined.` + (trimmed ? ` Reason: ${trimmed}` : '');
       await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
     } catch (error) {
       this.logger.error(`Failed to enqueue gallery decline DM: ${(error as Error).message}`);

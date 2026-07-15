@@ -1,13 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { DiscordConnection } from './discord-connection.entity';
 
 /** A recent bot operation row; `resolvable` flips when an admin resolves it. */
 @Entity('bot_operations')
-export class BotOperation {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class BotOperation extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   discordConnectionId: string;
 
   @ManyToOne(() => DiscordConnection, { onDelete: 'CASCADE' })

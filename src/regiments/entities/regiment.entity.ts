@@ -6,18 +6,15 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { Member } from '../../members/entities/member.entity';
 import { AccentTone } from './accent-tone.entity';
 
 /** Tenant root. One row in v1; every domain table carries a regiment_id FK. */
 @Entity('regiments')
-export class Regiment {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
+export class Regiment extends ShortIdEntity {
   @Column({ type: 'varchar', length: 120 })
   name: string;
 
@@ -60,7 +57,7 @@ export class Regiment {
   @Column({ default: false })
   setupComplete: boolean;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   ownerMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })

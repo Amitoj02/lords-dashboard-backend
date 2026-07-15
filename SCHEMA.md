@@ -38,13 +38,34 @@ TypeORM entities and the initial migration.
 
 | Aspect | Rule |
 | --- | --- |
-| Primary keys | `char(36)` UUID (`uuid` generated) for entities; `bigint` auto-increment for `audit_log_entries` (UI shows numeric ids); composite PKs for pure join tables. |
+| Primary keys | `char(12)` **short-id** (base62, app-generated) for user-facing entities (T-0082, see § Identifier scheme); `varchar(36)` uuid for the retained-opaque set (`discord_identities`, `discord_sync_jobs`); `bigint` auto-increment for `audit_log_entries` (UI shows numeric ids); composite PKs for pure join tables. |
 | Timestamps | `created_at`, `updated_at` on every entity; `deleted_at` where soft-deleted. **All date columns are `datetime(6)`, not `timestamp`** — avoids the MySQL `timestamp` 2038 cap (future event dates) and implicit tz conversion. Values are stored UTC by application convention. |
 | Indexes | Every FK column is indexed. For composite-PK junctions the **trailing** column gets its own explicit index (the PK only covers the leading column) so reverse lookups ("my RSVPs", "my likes") stay fast. |
 | ON DELETE | Junction/child rows `CASCADE` with their parent. References into the append-only `audit_log_entries` and `regiments.owner_member_id` use `SET NULL` so history/ownership survive a member purge. See each table. |
 | Money/secret | encrypted `text` via transformer. |
 | Strings | snowflakes `varchar(20)`; tags `varchar(40)`; URLs `varchar(512)`; IANA tz `varchar(40)`. |
 | FK naming | `<entity>_id`. Junctions named `<owner>_<related>` (e.g. `event_attendees`). |
+
+### Identifier scheme (short-id) — T-0081 decision
+
+Entity primary keys and their foreign keys are **12-character base62** short ids
+(`[0-9A-Za-z]`, ~71 bits of entropy), generated in-app by `generateShortId()`
+(Node `crypto.randomInt`, no external dependency) and minted on insert by a global
+TypeORM subscriber (`ShortIdSubscriber`) keyed on the `char(12)` `id` column. Column
+type is `char(12)`. Birthday-collision risk at regiment scale is negligible; the
+DB PRIMARY KEY constraint is the backstop (no inline collision check). Validation
+uses `@IsShortId()` / `ParseShortIdPipe` in place of `@IsUUID()` / `ParseUUIDPipe`.
+
+**Retained-opaque set (kept `varchar(36)` uuid / long random — NOT short-id):**
+
+| Value | Where | Why |
+| --- | --- | --- |
+| `discord_identities.id` (+ inbound FKs `members.discord_identity_id`, `applications.discord_identity_id`) | auth | The JWT `sub` / stateless-session anchor; never appears in a URL. |
+| `discord_sync_jobs.id` | discord outbox | Opaque idempotency/outbox key. |
+| `account_deletion_requests.confirm_token` (`varchar(64)`) | members | GDPR self-deletion token — must stay unguessable. |
+| Storage object keys (`uuid.ext`) | storage | Namespace-validated by a uuid-tail regex; guessability matters. |
+| OAuth `state`, session tokens, AES-GCM ciphertext | auth/crypto | Not entity ids; unchanged. |
+| Discord snowflakes (`varchar(20)`) | discord | External ids, not ours. |
 
 ---
 

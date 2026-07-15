@@ -1,14 +1,12 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { GalleryMediaType } from '../../common/enums';
 import { GalleryItem } from './gallery-item.entity';
 
 /** An individual file within a multi-file gallery submission. */
 @Entity('gallery_files')
-export class GalleryFile {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class GalleryFile extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   galleryItemId: string;
 
   @ManyToOne(() => GalleryItem, { onDelete: 'CASCADE' })

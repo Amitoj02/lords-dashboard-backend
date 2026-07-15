@@ -1,19 +1,12 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsDateString,
-  IsEnum,
-  IsOptional,
-  IsString,
-  IsUUID,
-  MaxLength,
-} from 'class-validator';
+import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsShortId } from '../../common/ids/short-id';
 import { MemberRole } from '../../common/enums';
 
 /** Change a member's rank (admin). */
 export class ChangeRankDto {
-  @ApiProperty({ format: 'uuid', description: 'The target rank id (must belong to the regiment)' })
-  @IsUUID()
+  @ApiProperty({ description: 'The target rank id (must belong to the regiment)' })
+  @IsShortId()
   rankId: string;
 
   @ApiPropertyOptional({
@@ -41,8 +34,8 @@ export class ChangeRoleDto {
 
 /** Award a medal to a member (repeatable). */
 export class AwardMedalDto {
-  @ApiProperty({ format: 'uuid', description: 'The medal id from the catalogue' })
-  @IsUUID()
+  @ApiProperty({ description: 'The medal id from the catalogue' })
+  @IsShortId()
   medalId: string;
 
   @ApiPropertyOptional({ maxLength: 255, description: 'Optional citation for this specific award' })

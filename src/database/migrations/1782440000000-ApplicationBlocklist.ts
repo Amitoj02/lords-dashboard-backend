@@ -25,7 +25,7 @@ export class ApplicationBlocklist1782440000000 implements MigrationInterface {
       ))
     ) {
       await queryRunner.query(
-        `ALTER TABLE \`discord_identities\` ADD \`applications_blocked_by_member_id\` char(36) NULL`,
+        `ALTER TABLE \`discord_identities\` ADD \`applications_blocked_by_member_id\` char(12) NULL`,
       );
     }
     if (

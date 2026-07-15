@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsDateString, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsShortId } from '../../common/ids/short-id';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { AuditSeverity } from '../../common/enums';
 
@@ -17,7 +18,7 @@ export class AuditQueryDto extends PaginationQueryDto {
 
   @ApiPropertyOptional({ description: 'Filter by actor member id' })
   @IsOptional()
-  @IsUUID()
+  @IsShortId()
   actorMemberId?: string;
 
   @ApiPropertyOptional({ description: 'Inclusive lower bound (ISO 8601) on occurredAt' })

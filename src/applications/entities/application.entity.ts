@@ -5,9 +5,9 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
 import { ApplicationStatus } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
@@ -23,17 +23,15 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
  */
 @Entity('applications')
 @Index(['regimentId', 'status'])
-export class Application {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class Application extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'regiment_id' })
   regiment?: Regiment;
 
+  // References the retained-uuid discord_identities.id (the JWT sub) → stays char(36).
   @Index()
   @Column({ type: 'char', length: 36, nullable: true })
   discordIdentityId: string | null;
@@ -42,14 +40,14 @@ export class Application {
   @JoinColumn({ name: 'discord_identity_id' })
   discordIdentity?: DiscordIdentity | null;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   promotedMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'promoted_member_id' })
   promotedMember?: Member | null;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   decidedByMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })

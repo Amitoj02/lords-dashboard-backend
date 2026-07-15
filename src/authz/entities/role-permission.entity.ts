@@ -1,4 +1,5 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { MemberRole } from '../../common/enums';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
@@ -8,11 +9,8 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
  */
 @Entity('role_permissions')
 @Index(['regimentId', 'role', 'capability'], { unique: true })
-export class RolePermission {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class RolePermission extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })

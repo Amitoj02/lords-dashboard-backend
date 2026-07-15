@@ -6,11 +6,11 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -80,7 +80,7 @@ export class MedalsController {
   @ApiOperation({ summary: 'Update a medal (partial)' })
   @ApiOkResponse({ type: MedalDto, description: 'The updated medal.' })
   update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: UpdateMedalDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -94,7 +94,7 @@ export class MedalsController {
   @ApiOperation({ summary: 'Delete a medal (blocked when it has been awarded)' })
   @ApiNoContentResponse({ description: 'The medal was deleted.' })
   remove(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<void> {
@@ -107,7 +107,7 @@ export class MedalsController {
   @ApiOperation({ summary: 'Link a medal to a Discord role' })
   @ApiOkResponse({ type: MedalDto, description: 'The linked medal.' })
   linkDiscord(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: LinkDiscordDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -121,7 +121,7 @@ export class MedalsController {
   @ApiOperation({ summary: 'Unlink a medal from its Discord role' })
   @ApiOkResponse({ type: MedalDto, description: 'The unlinked medal.' })
   unlinkDiscord(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<MedalDto> {

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ArrayNotEmpty, IsArray, IsUUID } from 'class-validator';
+import { ArrayNotEmpty, IsArray } from 'class-validator';
+import { IsShortId } from '../../common/ids/short-id';
 
 /**
  * Body for POST /api/ranks/reorder. `order` is the full list of the regiment's
@@ -14,6 +15,6 @@ export class ReorderRanksDto {
   })
   @IsArray()
   @ArrayNotEmpty()
-  @IsUUID('all', { each: true })
+  @IsShortId({ each: true })
   order: string[];
 }

@@ -7,12 +7,7 @@ const ALL = MemberRole;
 const ADMINS = [MemberRole.Owner, MemberRole.Admin];
 const STAFF = [MemberRole.Owner, MemberRole.Admin, MemberRole.Moderator];
 // Enrolled roster members excluding Mercenary (e.g. gallery submission).
-const MEMBERS = [
-  MemberRole.Owner,
-  MemberRole.Admin,
-  MemberRole.Moderator,
-  MemberRole.Member,
-];
+const MEMBERS = [MemberRole.Owner, MemberRole.Admin, MemberRole.Moderator, MemberRole.Member];
 const ENROLLED = [
   MemberRole.Owner,
   MemberRole.Admin,

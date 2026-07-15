@@ -6,11 +6,11 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -68,7 +68,9 @@ export class GalleryController {
 
   @Get('moderation/queue')
   @RequireCapability(Capability.ModerateGallery)
-  @ApiOperation({ summary: 'List items awaiting moderation (status filter: pending/approved/declined)' })
+  @ApiOperation({
+    summary: 'List items awaiting moderation (status filter: pending/approved/declined)',
+  })
   @ApiOkResponse({ description: 'Paginated gallery items in the requested moderation bucket.' })
   moderationQueue(
     @CurrentUser() user: AuthenticatedUser,
@@ -79,11 +81,14 @@ export class GalleryController {
 
   @Get('pending-summary')
   @RequireCapability(Capability.ManageEvents)
-  @ApiOperation({ summary: 'Pending submissions summary for the dashboard panel (events managers)' })
-  @ApiOkResponse({ type: [GallerySubmissionSummaryDto], description: 'Pending submissions { id, title, submitterUsername }.' })
-  pendingSummary(
-    @CurrentUser() user: AuthenticatedUser,
-  ): Promise<GallerySubmissionSummaryDto[]> {
+  @ApiOperation({
+    summary: 'Pending submissions summary for the dashboard panel (events managers)',
+  })
+  @ApiOkResponse({
+    type: [GallerySubmissionSummaryDto],
+    description: 'Pending submissions { id, title, submitterUsername }.',
+  })
+  pendingSummary(@CurrentUser() user: AuthenticatedUser): Promise<GallerySubmissionSummaryDto[]> {
     return this.galleryService.pendingSummary(user);
   }
 
@@ -91,7 +96,7 @@ export class GalleryController {
   @Get(':id')
   @ApiOperation({ summary: 'Public view of a single approved gallery item' })
   @ApiOkResponse({ type: GalleryItemDto, description: 'The requested gallery item.' })
-  findOne(@Param('id', ParseUUIDPipe) id: string): Promise<GalleryItemDto> {
+  findOne(@Param('id', ParseShortIdPipe) id: string): Promise<GalleryItemDto> {
     return this.galleryService.findOnePublic(id);
   }
 
@@ -113,7 +118,7 @@ export class GalleryController {
   @ApiOperation({ summary: 'Approve a gallery item' })
   @ApiOkResponse({ type: GalleryItemDto, description: 'The approved gallery item.' })
   approve(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<GalleryItemDto> {
@@ -126,7 +131,7 @@ export class GalleryController {
   @ApiOperation({ summary: 'Decline a gallery item' })
   @ApiOkResponse({ type: GalleryItemDto, description: 'The declined gallery item.' })
   decline(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: DeclineGalleryDto,
     @Req() req: Request,
@@ -139,7 +144,7 @@ export class GalleryController {
   @ApiOperation({ summary: 'Like a gallery item (idempotent)' })
   @ApiOkResponse({ description: 'The fresh like state { likesCount, liked }.' })
   like(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GalleryLikeState> {
     return this.galleryService.like(user, id);
@@ -149,7 +154,7 @@ export class GalleryController {
   @ApiOperation({ summary: 'Remove your like from a gallery item (idempotent)' })
   @ApiOkResponse({ description: 'The fresh like state { likesCount, liked }.' })
   unlike(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GalleryLikeState> {
     return this.galleryService.unlike(user, id);
@@ -161,7 +166,7 @@ export class GalleryController {
   @ApiOperation({ summary: 'Soft-delete a gallery item' })
   @ApiNoContentResponse({ description: 'The gallery item was deleted.' })
   remove(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<void> {

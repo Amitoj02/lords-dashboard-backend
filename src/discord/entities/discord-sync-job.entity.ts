@@ -24,7 +24,7 @@ export class DiscordSyncJob {
   id: string;
 
   @Index()
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })

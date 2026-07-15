@@ -6,12 +6,12 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -89,7 +89,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Get a single roster member by id' })
   @ApiOkResponse({ description: 'The member projection', type: MemberDto })
   findOne(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MemberDto> {
     return this.membersService.findOne(id, user);
@@ -99,7 +99,7 @@ export class MembersController {
   @ApiOperation({ summary: "A member's service timeline (most recent first)" })
   @ApiOkResponse({ type: [ServiceRecordEntryDto] })
   serviceRecord(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ServiceRecordEntryDto[]> {
     return this.membersService.getServiceRecord(id, user);
@@ -110,7 +110,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Sensitive command info (last sign-in, moderation state)' })
   @ApiOkResponse({ type: CommandInfoDto })
   commandInfo(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<CommandInfoDto> {
     return this.membersService.getCommandInfo(id, user);
@@ -125,7 +125,7 @@ export class MembersController {
   })
   @ApiOkResponse({ description: 'The updated member projection', type: MemberDto })
   update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: UpdateMemberDto,
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<MemberDto> {
@@ -139,7 +139,7 @@ export class MembersController {
   @ApiOperation({ summary: "Change a member's rank" })
   @ApiOkResponse({ type: MemberDto })
   changeRank(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: ChangeRankDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -152,7 +152,7 @@ export class MembersController {
   @ApiOperation({ summary: "Change a member's role" })
   @ApiOkResponse({ type: MemberDto })
   changeRole(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: ChangeRoleDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -165,7 +165,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Award a medal to a member (repeatable)' })
   @ApiOkResponse({ type: MemberDto })
   awardMedal(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: AwardMedalDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -180,8 +180,8 @@ export class MembersController {
   })
   @ApiOkResponse({ type: MemberDto })
   removeMedal(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('medalId', ParseUUIDPipe) medalId: string,
+    @Param('id', ParseShortIdPipe) id: string,
+    @Param('medalId', ParseShortIdPipe) medalId: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<MemberDto> {
@@ -193,7 +193,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Suspend a member until a future date' })
   @ApiOkResponse({ type: MemberDto })
   suspend(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: SuspendMemberDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -206,7 +206,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Ban a member (app-side)' })
   @ApiOkResponse({ type: MemberDto })
   ban(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: BanMemberDto,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
@@ -219,7 +219,7 @@ export class MembersController {
   @ApiOperation({ summary: 'Lift a member ban' })
   @ApiOkResponse({ type: MemberDto })
   unban(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<MemberDto> {

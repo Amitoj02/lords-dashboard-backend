@@ -5,7 +5,7 @@ import { GalleryItem } from './gallery-item.entity';
 /** Junction: per-member likes (the source for the likes count). */
 @Entity('gallery_likes')
 export class GalleryLike {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   galleryItemId: string;
 
   @ManyToOne(() => GalleryItem, { onDelete: 'CASCADE' })
@@ -13,7 +13,7 @@ export class GalleryLike {
   galleryItem?: GalleryItem;
 
   @Index()
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })

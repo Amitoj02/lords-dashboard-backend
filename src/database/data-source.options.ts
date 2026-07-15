@@ -1,6 +1,7 @@
 import { join } from 'path';
 import { MysqlConnectionOptions } from 'typeorm/driver/mysql/MysqlConnectionOptions';
 import { SnakeNamingStrategy } from 'typeorm-naming-strategies';
+import { ShortIdSubscriber } from '../common/ids/short-id.subscriber';
 
 const bool = (v: string | undefined): boolean =>
   ['true', '1', 'yes', 'on'].includes((v ?? '').toLowerCase());
@@ -30,6 +31,8 @@ export function buildDataSourceOptions(
     namingStrategy: new SnakeNamingStrategy(),
     entities: [join(__dirname, '..', '**', '*.entity.{ts,js}')],
     migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
+    // Mints short-id primary keys on insert (T-0082).
+    subscribers: [ShortIdSubscriber],
     migrationsTableName: 'typeorm_migrations',
   };
 }

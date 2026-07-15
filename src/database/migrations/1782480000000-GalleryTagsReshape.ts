@@ -46,7 +46,7 @@ export class GalleryTagsReshape1782480000000 implements MigrationInterface {
     if (!(await this.tableExists(queryRunner, 'gallery_tags'))) {
       await queryRunner.query(
         `CREATE TABLE \`gallery_tags\` (` +
-          `\`gallery_item_id\` char(36) NOT NULL, ` +
+          `\`gallery_item_id\` char(12) NOT NULL, ` +
           `\`tag\` varchar(40) NOT NULL, ` +
           `PRIMARY KEY (\`gallery_item_id\`, \`tag\`)` +
           `) ENGINE=InnoDB`,
@@ -67,8 +67,8 @@ export class GalleryTagsReshape1782480000000 implements MigrationInterface {
     if (!(await this.tableExists(queryRunner, 'gallery_tagged_members'))) {
       await queryRunner.query(
         `CREATE TABLE \`gallery_tagged_members\` (` +
-          `\`gallery_item_id\` varchar(36) NOT NULL, ` +
-          `\`member_id\` varchar(36) NOT NULL, ` +
+          `\`gallery_item_id\` char(12) NOT NULL, ` +
+          `\`member_id\` char(12) NOT NULL, ` +
           `INDEX \`IDX_d47e98c3f94f6471564389b8db\` (\`member_id\`), ` +
           `PRIMARY KEY (\`gallery_item_id\`, \`member_id\`)` +
           `) ENGINE=InnoDB`,
@@ -84,7 +84,7 @@ export class GalleryTagsReshape1782480000000 implements MigrationInterface {
     }
 
     if (!(await this.columnExists(queryRunner, 'gallery_items', 'event_id'))) {
-      await queryRunner.query(`ALTER TABLE \`gallery_items\` ADD \`event_id\` varchar(36) NULL`);
+      await queryRunner.query(`ALTER TABLE \`gallery_items\` ADD \`event_id\` char(12) NULL`);
       await queryRunner.query(
         `ALTER TABLE \`gallery_items\` ADD CONSTRAINT \`FK_ec38fd08b3f1bde8837007116c1\` ` +
           `FOREIGN KEY (\`event_id\`) REFERENCES \`events\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,

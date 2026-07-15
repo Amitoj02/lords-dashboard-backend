@@ -6,12 +6,12 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -77,7 +77,7 @@ export class EventsController {
   @ApiOkResponse({ type: EventDto, description: 'The event with the member projection.' })
   getMine(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
   ): Promise<EventDto> {
     return this.eventsService.getForMember(user, id);
   }
@@ -86,7 +86,7 @@ export class EventsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get a single published event (public view)' })
   @ApiOkResponse({ type: EventDto, description: 'The published event.' })
-  get(@Param('id', ParseUUIDPipe) id: string): Promise<EventDto> {
+  get(@Param('id', ParseShortIdPipe) id: string): Promise<EventDto> {
     return this.eventsService.getPublic(id);
   }
 
@@ -108,7 +108,7 @@ export class EventsController {
   @ApiOkResponse({ type: EventDto, description: 'The updated event.' })
   update(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: UpdateEventDto,
     @Req() req: Request,
   ): Promise<EventDto> {
@@ -122,7 +122,7 @@ export class EventsController {
   @ApiOkResponse({ type: EventDto, description: 'The archived event.' })
   archive(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Req() req: Request,
   ): Promise<EventDto> {
     return this.eventsService.archive(user, id, req.ip ?? null);
@@ -135,7 +135,7 @@ export class EventsController {
   @ApiOkResponse({ type: EventDto, description: 'The completed event.' })
   complete(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: CompleteEventDto,
     @Req() req: Request,
   ): Promise<EventDto> {
@@ -149,7 +149,7 @@ export class EventsController {
   @ApiNoContentResponse({ description: 'The event was deleted.' })
   remove(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Req() req: Request,
   ): Promise<void> {
     return this.eventsService.remove(user, id, req.ip ?? null);
@@ -162,7 +162,7 @@ export class EventsController {
   @ApiNoContentResponse({ description: 'The series was deleted.' })
   removeSeries(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Req() req: Request,
   ): Promise<void> {
     return this.eventsService.removeSeries(user, id, req.ip ?? null);
@@ -175,7 +175,7 @@ export class EventsController {
   @ApiOkResponse({ type: EventDto, description: 'The event with the caller RSVP reflected.' })
   rsvp(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: RsvpDto,
   ): Promise<EventDto> {
     return this.eventsService.rsvp(user, id, dto);
@@ -188,7 +188,7 @@ export class EventsController {
   @ApiNoContentResponse({ description: 'The RSVP was removed.' })
   removeRsvp(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
   ): Promise<void> {
     return this.eventsService.removeRsvp(user, id);
   }
@@ -199,7 +199,7 @@ export class EventsController {
   @ApiOkResponse({ type: [AttendeeDto], description: 'The attendee list.' })
   listAttendees(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
   ): Promise<AttendeeDto[]> {
     return this.eventsService.listAttendees(user, id);
   }
@@ -211,7 +211,7 @@ export class EventsController {
   @ApiOkResponse({ type: [AttendeeDto], description: 'The updated attendee list.' })
   addAttendees(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: MarkAttendanceDto,
   ): Promise<AttendeeDto[]> {
     return this.eventsService.addAttendees(user, id, dto);
@@ -224,8 +224,8 @@ export class EventsController {
   @ApiNoContentResponse({ description: 'The attendee was removed.' })
   removeAttendee(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Param('memberId', ParseUUIDPipe) memberId: string,
+    @Param('id', ParseShortIdPipe) id: string,
+    @Param('memberId', ParseShortIdPipe) memberId: string,
   ): Promise<void> {
     return this.eventsService.removeAttendee(user, id, memberId);
   }
@@ -237,7 +237,7 @@ export class EventsController {
   @ApiOkResponse({ type: RevealedPasswordDto, description: 'The decrypted server credentials.' })
   revealPassword(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @Req() req: Request,
   ): Promise<RevealedPasswordDto> {
     return this.eventsService.revealPassword(user, id, req.ip ?? null);

@@ -5,12 +5,12 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -151,7 +151,7 @@ export class DiscordController {
   @ApiOperation({ summary: 'Mark a failed bot operation resolved' })
   @ApiOkResponse({ type: BotOperationDto })
   resolveOperation(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<BotOperationDto> {

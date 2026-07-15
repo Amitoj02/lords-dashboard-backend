@@ -4,7 +4,7 @@ import { GalleryItem } from './gallery-item.entity';
 /** Junction: free-form tags on a gallery item (mirrors event_tags). */
 @Entity('gallery_tags')
 export class GalleryTag {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   galleryItemId: string;
 
   @ManyToOne(() => GalleryItem, { onDelete: 'CASCADE' })
