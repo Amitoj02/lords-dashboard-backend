@@ -1,13 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsArray,
   IsEnum,
   IsInt,
   IsNumberString,
   IsOptional,
   IsString,
-  IsUUID,
   MaxLength,
   Min,
   MinLength,
@@ -110,11 +110,6 @@ export class CreateGalleryItemDto {
   @MaxLength(512)
   thumbnailUrl?: string;
 
-  @ApiPropertyOptional({ format: 'uuid', description: 'Associate the item with an event' })
-  @IsOptional()
-  @IsUUID()
-  eventId?: string;
-
   @ApiPropertyOptional({ type: [GalleryFileInputDto] })
   @IsOptional()
   @IsArray()
@@ -122,9 +117,11 @@ export class CreateGalleryItemDto {
   @Type(() => GalleryFileInputDto)
   files?: GalleryFileInputDto[];
 
-  @ApiPropertyOptional({ type: [String], format: 'uuid', description: 'Member ids to tag' })
+  @ApiPropertyOptional({ type: [String], maxItems: 10, description: 'Free-form tags (max 10)' })
   @IsOptional()
   @IsArray()
-  @IsUUID('all', { each: true })
-  taggedMemberIds?: string[];
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  @MaxLength(40, { each: true })
+  tags?: string[];
 }

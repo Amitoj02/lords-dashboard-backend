@@ -168,6 +168,7 @@ export enum Capability {
   EditRanksMedals = 'edit_ranks_medals',
   ManageApplications = 'manage_applications',
   ManageEvents = 'manage_events',
+  ViewGallery = 'view_gallery',
   ModerateGallery = 'moderate_gallery',
   RevealEventPasswords = 'reveal_event_passwords',
   SubmitToGallery = 'submit_to_gallery',

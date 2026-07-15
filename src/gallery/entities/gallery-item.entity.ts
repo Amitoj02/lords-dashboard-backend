@@ -10,7 +10,6 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { GalleryStatus, GalleryType } from '../../common/enums';
-import { RegimentEvent } from '../../events/entities/event.entity';
 import { Member } from '../../members/entities/member.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
@@ -35,13 +34,6 @@ export class GalleryItem {
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'author_member_id' })
   author?: Member;
-
-  @Column({ type: 'char', length: 36, nullable: true })
-  eventId: string | null;
-
-  @ManyToOne(() => RegimentEvent, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'event_id' })
-  event?: RegimentEvent | null;
 
   @Column({ type: 'char', length: 36, nullable: true })
   moderatedByMemberId: string | null;

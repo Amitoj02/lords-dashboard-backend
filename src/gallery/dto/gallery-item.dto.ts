@@ -65,7 +65,7 @@ export class GalleryFileDto {
 export interface GalleryItemProjection {
   files: GalleryFileDto[];
   likesCount: number;
-  taggedMembers: GalleryMemberRefDto[];
+  tags: string[];
   author: GalleryMemberRefDto | null;
   /** Whether the current caller has liked the item; omitted for public (no user). */
   liked?: boolean;
@@ -99,9 +99,6 @@ export class GalleryItemDto {
   @ApiProperty({ enum: GalleryStatus })
   status: GalleryStatus;
 
-  @ApiProperty({ nullable: true, format: 'uuid', description: 'Associated event id' })
-  eventId: string | null;
-
   @ApiProperty({ nullable: true, description: 'Reason recorded when the item was declined' })
   declineReason: string | null;
 
@@ -111,8 +108,8 @@ export class GalleryItemDto {
   @ApiProperty({ type: [GalleryFileDto] })
   files: GalleryFileDto[];
 
-  @ApiProperty({ type: [GalleryMemberRefDto] })
-  taggedMembers: GalleryMemberRefDto[];
+  @ApiProperty({ type: [String], description: 'Free-form tags' })
+  tags: string[];
 
   @ApiProperty({ description: 'Number of members who have liked this item' })
   likesCount: number;
@@ -148,11 +145,10 @@ export class GalleryItemDto {
     dto.linkUrl = item.linkUrl;
     dto.thumbnailUrl = item.thumbnailUrl;
     dto.status = item.status;
-    dto.eventId = item.eventId;
     dto.declineReason = item.declineReason;
     dto.author = projection.author;
     dto.files = projection.files;
-    dto.taggedMembers = projection.taggedMembers;
+    dto.tags = projection.tags;
     dto.likesCount = projection.likesCount;
     dto.liked = projection.liked;
     dto.submittedAt = item.submittedAt.toISOString();
@@ -161,4 +157,20 @@ export class GalleryItemDto {
     dto.updatedAt = item.updatedAt.toISOString();
     return dto;
   }
+}
+
+/**
+ * Lean projection of a pending submission for the dashboard "Gallery
+ * submissions" panel (T-0094). Deliberately minimal: no files/likes/tags batch,
+ * just what the panel list item needs.
+ */
+export class GallerySubmissionSummaryDto {
+  @ApiProperty()
+  id: string;
+
+  @ApiProperty({ example: 'The charge at dawn' })
+  title: string;
+
+  @ApiProperty({ nullable: true, example: 'Jane Doe' })
+  submitterUsername: string | null;
 }

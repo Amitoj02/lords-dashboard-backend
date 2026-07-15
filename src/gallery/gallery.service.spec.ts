@@ -4,6 +4,7 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { StorageService } from '../storage/storage.service';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { GalleryMediaType, GalleryStatus, GalleryType, MemberRole } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
@@ -13,7 +14,7 @@ import { GalleryService } from './gallery.service';
 import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
-import { GalleryTaggedMember } from './entities/gallery-tagged-member.entity';
+import { GalleryTag } from './entities/gallery-tag.entity';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -48,7 +49,6 @@ const buildItem = (overrides: Partial<GalleryItem> = {}): GalleryItem => ({
   regimentId: REGIMENT,
   authorMemberId: 'member-1',
   author: { id: 'member-1', name: 'Jane Doe' } as unknown as Member,
-  eventId: null,
   moderatedByMemberId: null,
   title: 'The charge at dawn',
   caption: null,
@@ -101,6 +101,7 @@ const makeSelectQb = (rawMany: unknown[] = []) => ({
   select: jest.fn().mockReturnThis(),
   addSelect: jest.fn().mockReturnThis(),
   innerJoin: jest.fn().mockReturnThis(),
+  leftJoin: jest.fn().mockReturnThis(),
   where: jest.fn().mockReturnThis(),
   andWhere: jest.fn().mockReturnThis(),
   groupBy: jest.fn().mockReturnThis(),
@@ -124,16 +125,16 @@ describe('GalleryService', () => {
   let items: MockRepo<GalleryItem>;
   let files: MockRepo<GalleryFile>;
   let likes: MockRepo<GalleryLike>;
-  let taggedMembers: MockRepo<GalleryTaggedMember>;
+  let tags: MockRepo<GalleryTag>;
   let members: MockRepo<Member>;
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
+  let discordSync: { enqueueApplicationDecision: jest.Mock };
 
   // Per-test transaction manager repositories.
   let txItems: MockRepo<GalleryItem>;
   let txFiles: MockRepo<GalleryFile>;
-  let txTags: MockRepo<GalleryTaggedMember>;
-  let txMembers: MockRepo<Member>;
+  let txTags: MockRepo<GalleryTag>;
   let dataSource: { transaction: jest.Mock };
 
   const query = { page: 1, limit: 20, skip: 0 };
@@ -157,10 +158,11 @@ describe('GalleryService', () => {
       count: jest.fn().mockResolvedValue(0),
       createQueryBuilder: jest.fn().mockReturnValue(makeSelectQb()),
     };
-    taggedMembers = { createQueryBuilder: jest.fn().mockReturnValue(makeSelectQb()) };
-    members = { find: jest.fn().mockResolvedValue([]) };
+    tags = { find: jest.fn().mockResolvedValue([]) };
+    members = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
     settings = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn() };
     audit = { record: jest.fn() };
+    discordSync = { enqueueApplicationDecision: jest.fn().mockResolvedValue(null) };
 
     txItems = {
       create: jest.fn((x: unknown) => x),
@@ -171,17 +173,14 @@ describe('GalleryService', () => {
       save: jest.fn((x: unknown) => Promise.resolve(x)),
     };
     txTags = {
-      create: jest.fn((x: unknown) => x),
-      save: jest.fn((x: unknown) => Promise.resolve(x)),
+      insert: jest.fn((x: unknown) => Promise.resolve(x)),
     };
-    txMembers = { find: jest.fn().mockResolvedValue([]) };
 
     const manager = {
       getRepository: jest.fn((entity: unknown) => {
         if (entity === GalleryItem) return txItems;
         if (entity === GalleryFile) return txFiles;
-        if (entity === GalleryTaggedMember) return txTags;
-        if (entity === Member) return txMembers;
+        if (entity === GalleryTag) return txTags;
         throw new Error('unexpected repository');
       }),
     };
@@ -195,7 +194,7 @@ describe('GalleryService', () => {
         { provide: getRepositoryToken(GalleryItem), useValue: items },
         { provide: getRepositoryToken(GalleryFile), useValue: files },
         { provide: getRepositoryToken(GalleryLike), useValue: likes },
-        { provide: getRepositoryToken(GalleryTaggedMember), useValue: taggedMembers },
+        { provide: getRepositoryToken(GalleryTag), useValue: tags },
         { provide: getRepositoryToken(Member), useValue: members },
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
@@ -208,6 +207,7 @@ describe('GalleryService', () => {
             ),
           },
         },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
 
@@ -346,22 +346,29 @@ describe('GalleryService', () => {
       expect(createdFiles.url).toBe(`https://cdn.example/gallery/${REGIMENT}/member-1/shot.png`);
     });
 
-    it('only tags members that belong to the regiment', async () => {
+    it('persists de-duplicated free-form tags (T-0088)', async () => {
       settings.findOne!.mockResolvedValue(buildSettings());
       items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
-      // Only one of the two requested tag ids is a real regiment member.
-      txMembers.find!.mockResolvedValue([{ id: 'member-2' } as Member]);
 
       await service.submit(
         MEMBER_USER,
-        { title: 't', type: GalleryType.Image, taggedMemberIds: ['member-2', 'foreign'] },
+        { title: 't', type: GalleryType.Image, tags: ['clutch', 'clutch', 'melee'] },
         null,
       );
 
-      expect(txTags.save).toHaveBeenCalledTimes(1);
-      const savedTags = txTags.save!.mock.calls[0][0] as Array<{ memberId: string }>;
-      expect(savedTags).toHaveLength(1);
-      expect(savedTags[0].memberId).toBe('member-2');
+      expect(txTags.insert).toHaveBeenCalledTimes(1);
+      const rows = txTags.insert!.mock.calls[0][0] as Array<{ galleryItemId: string; tag: string }>;
+      expect(rows.map((r) => r.tag)).toEqual(['clutch', 'melee']);
+      expect(rows.every((r) => r.galleryItemId === 'gallery-new')).toBe(true);
+    });
+
+    it('writes no tag rows when none are supplied (T-0088)', async () => {
+      settings.findOne!.mockResolvedValue(buildSettings());
+      items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
+
+      await service.submit(MEMBER_USER, { title: 't', type: GalleryType.Image }, null);
+
+      expect(txTags.insert).not.toHaveBeenCalled();
     });
   });
 
@@ -413,7 +420,7 @@ describe('GalleryService', () => {
   });
 
   describe('moderationQueue', () => {
-    it('lists pending items scoped to the caller regiment', async () => {
+    it('lists pending items scoped to the caller regiment (default status)', async () => {
       const qb = makeListQb([buildItem({ status: GalleryStatus.Pending })], 1);
       items.createQueryBuilder!.mockReturnValue(qb);
 
@@ -426,6 +433,70 @@ describe('GalleryService', () => {
         status: GalleryStatus.Pending,
       });
       expect(result.data).toHaveLength(1);
+    });
+
+    it('honors status=declined so the Declined tab populates with reasons (T-0089)', async () => {
+      const qb = makeListQb(
+        [buildItem({ status: GalleryStatus.Declined, declineReason: 'Off-topic' })],
+        1,
+      );
+      items.createQueryBuilder!.mockReturnValue(qb);
+
+      const result = await service.moderationQueue(ADMIN_USER, {
+        ...query,
+        status: GalleryStatus.Declined,
+      });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('item.status = :status', {
+        status: GalleryStatus.Declined,
+      });
+      expect(result.data[0].declineReason).toBe('Off-topic');
+    });
+
+    it('honors status=approved (T-0089)', async () => {
+      const qb = makeListQb([buildItem({ status: GalleryStatus.Approved })], 1);
+      items.createQueryBuilder!.mockReturnValue(qb);
+
+      await service.moderationQueue(ADMIN_USER, { ...query, status: GalleryStatus.Approved });
+
+      expect(qb.andWhere).toHaveBeenCalledWith('item.status = :status', {
+        status: GalleryStatus.Approved,
+      });
+    });
+  });
+
+  describe('findArchive (T-0086)', () => {
+    it('lists approved items for the caller regiment ignoring publicGallery, with liked populated', async () => {
+      // No public settings row / privacy is never consulted on this path.
+      const qb = makeListQb([buildItem()], 1);
+      items.createQueryBuilder!.mockReturnValue(qb);
+      likes.find!.mockResolvedValue([{ galleryItemId: 'gallery-1', memberId: 'member-1' }]);
+
+      const result = await service.findArchive(MEMBER_USER, query);
+
+      expect(settings.find).not.toHaveBeenCalled();
+      expect(qb.andWhere).toHaveBeenCalledWith('item.status = :status', {
+        status: GalleryStatus.Approved,
+      });
+      expect(result.data[0].liked).toBe(true);
+    });
+  });
+
+  describe('pendingSummary (T-0094)', () => {
+    it('returns lean { id, title, submitterUsername } for pending items', async () => {
+      const qb = makeSelectQb([
+        { id: 'gallery-1', title: 'The charge at dawn', submitterUsername: 'Jane Doe' },
+      ]);
+      items.createQueryBuilder!.mockReturnValue(qb);
+
+      const result = await service.pendingSummary(ADMIN_USER);
+
+      expect(qb.andWhere).toHaveBeenCalledWith('item.status = :status', {
+        status: GalleryStatus.Pending,
+      });
+      expect(result).toEqual([
+        { id: 'gallery-1', title: 'The charge at dawn', submitterUsername: 'Jane Doe' },
+      ]);
     });
   });
 
@@ -470,6 +541,48 @@ describe('GalleryService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'gallery.decline' }),
       );
+    });
+
+    it('DMs the submitter with the reason after the decision commits (T-0090)', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
+      members.findOne!.mockResolvedValue({
+        id: 'member-1',
+        discordIdentity: { discordUserId: 'discord-author' },
+      } as unknown as Member);
+
+      await service.decline(ADMIN_USER, 'gallery-1', { reason: 'Off-topic' }, null);
+
+      expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledTimes(1);
+      const [regimentId, payload] = discordSync.enqueueApplicationDecision.mock.calls[0];
+      expect(regimentId).toBe(REGIMENT);
+      expect(payload.discordUserId).toBe('discord-author');
+      expect(payload.content).toContain('Off-topic');
+    });
+
+    it('does not DM when the submitter has no linked Discord identity (T-0090)', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
+      members.findOne!.mockResolvedValue({ id: 'member-1', discordIdentity: null } as Member);
+
+      await service.decline(ADMIN_USER, 'gallery-1', { reason: 'x' }, null);
+
+      expect(discordSync.enqueueApplicationDecision).not.toHaveBeenCalled();
+    });
+
+    it('never fails the decline when the DM enqueue throws (T-0090)', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
+      members.findOne!.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        service.decline(ADMIN_USER, 'gallery-1', { reason: 'x' }, null),
+      ).resolves.toMatchObject({ status: GalleryStatus.Declined });
+    });
+  });
+
+  describe('approve', () => {
+    it('does NOT DM on approve (T-0090)', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
+      await service.approve(ADMIN_USER, 'gallery-1', null);
+      expect(discordSync.enqueueApplicationDecision).not.toHaveBeenCalled();
     });
   });
 

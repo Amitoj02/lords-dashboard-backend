@@ -29,7 +29,7 @@ import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { Capability } from '../common/enums';
 import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
 import { DeclineGalleryDto } from './dto/decline-gallery.dto';
-import { GalleryItemDto } from './dto/gallery-item.dto';
+import { GalleryItemDto, GallerySubmissionSummaryDto } from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
 import { GalleryLikeState, GalleryService } from './gallery.service';
 
@@ -55,15 +55,36 @@ export class GalleryController {
     return this.galleryService.findPublic(query);
   }
 
+  @Get('archive')
+  @RequireCapability(Capability.ViewGallery)
+  @ApiOperation({ summary: 'Authenticated member archive (approved items, ignores publicGallery)' })
+  @ApiOkResponse({ description: 'Paginated approved gallery items for the caller’s regiment.' })
+  findArchive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query() query: GalleryQueryDto,
+  ): Promise<PaginatedResponseDto<GalleryItemDto>> {
+    return this.galleryService.findArchive(user, query);
+  }
+
   @Get('moderation/queue')
   @RequireCapability(Capability.ModerateGallery)
-  @ApiOperation({ summary: 'List pending items awaiting moderation' })
-  @ApiOkResponse({ description: 'Paginated pending gallery items.' })
+  @ApiOperation({ summary: 'List items awaiting moderation (status filter: pending/approved/declined)' })
+  @ApiOkResponse({ description: 'Paginated gallery items in the requested moderation bucket.' })
   moderationQueue(
     @CurrentUser() user: AuthenticatedUser,
     @Query() query: GalleryQueryDto,
   ): Promise<PaginatedResponseDto<GalleryItemDto>> {
     return this.galleryService.moderationQueue(user, query);
+  }
+
+  @Get('pending-summary')
+  @RequireCapability(Capability.ManageEvents)
+  @ApiOperation({ summary: 'Pending submissions summary for the dashboard panel (events managers)' })
+  @ApiOkResponse({ type: [GallerySubmissionSummaryDto], description: 'Pending submissions { id, title, submitterUsername }.' })
+  pendingSummary(
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GallerySubmissionSummaryDto[]> {
+    return this.galleryService.pendingSummary(user);
   }
 
   @Public()
