@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsDateString,
@@ -128,9 +129,10 @@ export class CreateEventDto {
   @IsEnum(Platform, { each: true })
   platforms?: Platform[];
 
-  @ApiPropertyOptional({ type: [String], description: 'Free-form tags' })
+  @ApiPropertyOptional({ type: [String], maxItems: 10, description: 'Free-form tags (max 10)' })
   @IsOptional()
   @IsArray()
+  @ArrayMaxSize(10)
   @IsString({ each: true })
   @MaxLength(40, { each: true })
   tags?: string[];

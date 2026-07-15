@@ -287,6 +287,52 @@ describe('AuthService', () => {
       expect(authz.grantedCapabilities).toHaveBeenCalledWith('regiment-1', MemberRole.Owner);
     });
 
+    it('falls back to the Discord avatar when the member has no custom avatar (T-0093)', async () => {
+      members.findOne!.mockResolvedValue({
+        id: 'member-1',
+        name: 'Lord Commander',
+        role: MemberRole.Owner,
+        discordLinked: true,
+        avatarUrl: null,
+        discordIdentity: { avatarUrl: 'https://cdn/discord.png' },
+        rank: { name: 'General' },
+      });
+      authz.grantedCapabilities.mockResolvedValue([]);
+      const user: AuthenticatedUser = {
+        identityId: 'identity-1',
+        memberId: 'member-1',
+        discordUserId: 'd',
+        role: MemberRole.Owner,
+        regimentId: 'regiment-1',
+      };
+
+      await expect(service.getCurrentUser(user)).resolves.toMatchObject({
+        avatarUrl: 'https://cdn/discord.png',
+      });
+    });
+
+    it('returns null avatar when neither custom nor Discord avatar exists (T-0093)', async () => {
+      members.findOne!.mockResolvedValue({
+        id: 'member-1',
+        name: 'Lord Commander',
+        role: MemberRole.Member,
+        discordLinked: false,
+        avatarUrl: null,
+        discordIdentity: null,
+        rank: null,
+      });
+      authz.grantedCapabilities.mockResolvedValue([]);
+      const user: AuthenticatedUser = {
+        identityId: 'identity-1',
+        memberId: 'member-1',
+        discordUserId: 'd',
+        role: MemberRole.Member,
+        regimentId: 'regiment-1',
+      };
+
+      await expect(service.getCurrentUser(user)).resolves.toMatchObject({ avatarUrl: null });
+    });
+
     it('returns the identity projection when there is no linked member', async () => {
       identities.findOne!.mockResolvedValue({
         id: 'identity-1',

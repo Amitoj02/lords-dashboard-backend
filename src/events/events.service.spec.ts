@@ -6,7 +6,7 @@ import { AuditService } from '../audit/audit.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { EventStatus, MemberRole, RsvpStatus } from '../common/enums';
+import { EventStatus, MemberRole, RecurrenceCadence, RsvpStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -125,7 +125,7 @@ describe('EventsService', () => {
   };
 
   // Transaction manager repositories (rebuilt each test).
-  let eventTxRepo: { create: jest.Mock; save: jest.Mock };
+  let eventTxRepo: { create: jest.Mock; save: jest.Mock; softDelete: jest.Mock };
   let platformTxRepo: { delete: jest.Mock; insert: jest.Mock };
   let tagTxRepo: { delete: jest.Mock; insert: jest.Mock };
   let notifyTxRepo: { delete: jest.Mock; insert: jest.Mock };
@@ -172,6 +172,7 @@ describe('EventsService', () => {
         ...data,
       })),
       save: jest.fn((e: RegimentEvent) => Promise.resolve(e)),
+      softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     platformTxRepo = { delete: jest.fn(), insert: jest.fn() };
     tagTxRepo = { delete: jest.fn(), insert: jest.fn() };
@@ -564,6 +565,71 @@ describe('EventsService', () => {
     it('throws NotFound for a missing / wrong-regiment event', async () => {
       events.findOne.mockResolvedValue(null);
       await expect(service.remove(user(), 'missing', null)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('removeSeries (T-0079)', () => {
+    it('soft-deletes the template and every occurrence in one transaction and audits it', async () => {
+      const template = buildEvent({
+        id: 'tmpl-1',
+        isRecurring: true,
+        recurrenceCadence: RecurrenceCadence.Weekly,
+        recurrenceActive: true,
+        recurrenceTemplateId: null,
+      });
+      events.findOne.mockResolvedValue(template);
+
+      await service.removeSeries(user(), 'tmpl-1', null);
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      // template row …
+      expect(eventTxRepo.softDelete).toHaveBeenCalledWith({ id: 'tmpl-1', regimentId: REGIMENT });
+      // … and all occupancies keyed by the template id.
+      expect(eventTxRepo.softDelete).toHaveBeenCalledWith({
+        recurrenceTemplateId: 'tmpl-1',
+        regimentId: REGIMENT,
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'event.delete-series',
+          target: expect.objectContaining({ id: 'tmpl-1' }),
+        }),
+      );
+    });
+
+    it('resolves an occurrence id to its template and deletes the whole series', async () => {
+      const occurrence = buildEvent({
+        id: 'occ-9',
+        recurrenceCadence: null,
+        recurrenceTemplateId: 'tmpl-1',
+      });
+      events.findOne.mockResolvedValue(occurrence);
+
+      await service.removeSeries(user(), 'occ-9', null);
+
+      expect(eventTxRepo.softDelete).toHaveBeenCalledWith({ id: 'tmpl-1', regimentId: REGIMENT });
+      expect(eventTxRepo.softDelete).toHaveBeenCalledWith({
+        recurrenceTemplateId: 'tmpl-1',
+        regimentId: REGIMENT,
+      });
+    });
+
+    it('rejects a one-off (non-recurring) event with 400 and deletes nothing', async () => {
+      const oneOff = buildEvent({ recurrenceCadence: null, recurrenceTemplateId: null });
+      events.findOne.mockResolvedValue(oneOff);
+
+      await expect(service.removeSeries(user(), 'event-1', null)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFound for a missing / wrong-regiment id', async () => {
+      events.findOne.mockResolvedValue(null);
+      await expect(service.removeSeries(user(), 'missing', null)).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });

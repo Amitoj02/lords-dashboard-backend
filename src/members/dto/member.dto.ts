@@ -145,7 +145,8 @@ export class MemberDto {
     dto.discordTag = member.discordIdentity?.discordTag ?? null;
     dto.discordLinked = member.discordLinked;
     dto.publicProfile = member.publicProfile;
-    dto.avatarUrl = member.avatarUrl;
+    // Fall back to the linked Discord avatar when the member has no custom one.
+    dto.avatarUrl = member.avatarUrl ?? member.discordIdentity?.avatarUrl ?? null;
     dto.bannerUrl = member.bannerUrl;
     dto.standing = member.standing;
     dto.joinedAt = member.joinedAt ? member.joinedAt.toISOString() : null;

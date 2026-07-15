@@ -155,6 +155,19 @@ export class EventsController {
     return this.eventsService.remove(user, id, req.ip ?? null);
   }
 
+  @Delete(':id/series')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireCapability(Capability.ManageEvents)
+  @ApiOperation({ summary: 'Soft-delete a whole recurring series (template + all occurrences)' })
+  @ApiNoContentResponse({ description: 'The series was deleted.' })
+  removeSeries(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+  ): Promise<void> {
+    return this.eventsService.removeSeries(user, id, req.ip ?? null);
+  }
+
   @Post(':id/rsvp')
   @HttpCode(HttpStatus.OK)
   @RequireCapability(Capability.RsvpToEvents)

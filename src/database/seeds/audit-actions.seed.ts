@@ -61,6 +61,7 @@ const ACTIONS = [
   { code: 'event.publish', label: 'Event published', defaultSeverity: AuditSeverity.Info },
   { code: 'event.archive', label: 'Event archived', defaultSeverity: AuditSeverity.Info },
   { code: 'event.delete', label: 'Event deleted', defaultSeverity: AuditSeverity.Warn },
+  { code: 'event.delete-series', label: 'Event series deleted', defaultSeverity: AuditSeverity.Warn },
   { code: 'event.completed', label: 'Event completed', defaultSeverity: AuditSeverity.Info },
   {
     code: 'event.password.reveal',
