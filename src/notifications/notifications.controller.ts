@@ -5,11 +5,11 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Post,
   Query,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -83,7 +83,7 @@ export class NotificationsController {
   @ApiOkResponse({ description: 'Confirmation the notification is read.' })
   markRead(
     @CurrentUser() user: AuthenticatedUser,
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
   ): Promise<{ read: boolean }> {
     return this.notificationsService.markRead(user, id);
   }

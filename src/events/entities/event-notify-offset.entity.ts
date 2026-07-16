@@ -4,7 +4,7 @@ import { RegimentEvent } from './event.entity';
 /** Junction: notification lead times for an event, normalized to minutes. */
 @Entity('event_notify_offsets')
 export class EventNotifyOffset {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   eventId: string;
 
   @ManyToOne(() => RegimentEvent, { onDelete: 'CASCADE' })

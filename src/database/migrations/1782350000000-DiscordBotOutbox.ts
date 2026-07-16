@@ -4,7 +4,7 @@ import { MigrationInterface, QueryRunner } from 'typeorm';
  * Adds the Discord bot's persistence: a 1—1 `discord_bot_settings` row per
  * regiment (behaviour switches, channels, join role — all defaulting to the safe
  * position) and the `discord_sync_jobs` transactional outbox the worker drains.
- * FK columns are varchar(36) to match the uuid `regiments.id` PK.
+ * FK columns are char(12) to match the uuid `regiments.id` PK.
  */
 export class DiscordBotOutbox1782350000000 implements MigrationInterface {
   name = 'DiscordBotOutbox1782350000000';
@@ -12,7 +12,7 @@ export class DiscordBotOutbox1782350000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
       `CREATE TABLE \`discord_bot_settings\` (` +
-        `\`regiment_id\` varchar(36) NOT NULL, ` +
+        `\`regiment_id\` char(12) NOT NULL, ` +
         `\`bot_enabled\` tinyint NOT NULL DEFAULT 0, ` +
         `\`announcement_channel_id\` varchar(20) NULL, ` +
         `\`welcome_channel_id\` varchar(20) NULL, ` +
@@ -29,7 +29,7 @@ export class DiscordBotOutbox1782350000000 implements MigrationInterface {
     await queryRunner.query(
       `CREATE TABLE \`discord_sync_jobs\` (` +
         `\`id\` varchar(36) NOT NULL, ` +
-        `\`regiment_id\` varchar(36) NOT NULL, ` +
+        `\`regiment_id\` char(12) NOT NULL, ` +
         `\`job_type\` varchar(40) NOT NULL, ` +
         `\`status\` enum ('pending', 'processing', 'succeeded', 'failed') NOT NULL DEFAULT 'pending', ` +
         `\`payload\` json NULL, ` +

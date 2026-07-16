@@ -7,9 +7,9 @@ import {
   JoinColumn,
   ManyToOne,
   OneToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
 import { MemberRole, MemberStatus, Platform } from '../../common/enums';
 import { Rank } from '../../ranks/entities/rank.entity';
@@ -17,17 +17,15 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /** Authoritative person/roster record. */
 @Entity('members')
-export class Member {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class Member extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'regiment_id' })
   regiment?: Regiment;
 
+  // References the retained-uuid discord_identities.id (the JWT sub) → stays char(36).
   @Column({ type: 'char', length: 36, nullable: true })
   discordIdentityId: string | null;
 
@@ -35,7 +33,7 @@ export class Member {
   @JoinColumn({ name: 'discord_identity_id' })
   discordIdentity?: DiscordIdentity | null;
 
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   rankId: string;
 
   @ManyToOne(() => Rank, { onDelete: 'RESTRICT' })

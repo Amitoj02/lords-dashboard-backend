@@ -390,6 +390,43 @@ export class EventsService {
     });
   }
 
+  /**
+   * Soft-delete a whole recurring series: the recurrence template and every
+   * occurrence sharing it, in one transaction. Accepts either the template id
+   * or the id of any of its generated occurrences. Soft-deleting the template
+   * row is what halts future generation (the recurrence scheduler skips
+   * soft-deleted templates). One-off (non-recurring) events are rejected.
+   */
+  async removeSeries(user: AuthenticatedUser, id: string, ip: string | null): Promise<void> {
+    const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
+
+    let templateId: string;
+    if (event.recurrenceTemplateId != null) {
+      templateId = event.recurrenceTemplateId; // an occurrence → resolve to its template
+    } else if (event.recurrenceCadence != null) {
+      templateId = event.id; // the template itself (a stopped template still has a cadence)
+    } else {
+      throw new BadRequestException('Event is not part of a recurring series');
+    }
+
+    const target = { type: 'event', id: templateId, label: event.title };
+
+    await this.dataSource.transaction(async (manager) => {
+      const eventRepo = manager.getRepository(RegimentEvent);
+      // The template row (regiment-scoped) …
+      await eventRepo.softDelete({ id: templateId, regimentId: user.regimentId });
+      // … plus every occurrence that points at it.
+      await eventRepo.softDelete({ recurrenceTemplateId: templateId, regimentId: user.regimentId });
+    });
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'event.delete-series',
+      actor: AuditService.actorFromUser(user, ip),
+      target,
+    });
+  }
+
   // ── RSVP (RsvpToEvents) ──────────────────────────────────────────────────────
 
   /** Upsert the caller's RSVP and return the event with that RSVP reflected. */

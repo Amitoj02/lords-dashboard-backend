@@ -6,22 +6,18 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { GalleryStatus, GalleryType } from '../../common/enums';
-import { RegimentEvent } from '../../events/entities/event.entity';
 import { Member } from '../../members/entities/member.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /** A gallery submission (image/video/link) that passes through moderation. */
 @Entity('gallery_items')
 @Index(['regimentId', 'status'])
-export class GalleryItem {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class GalleryItem extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })
@@ -29,21 +25,14 @@ export class GalleryItem {
   regiment?: Regiment;
 
   @Index()
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   authorMemberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'author_member_id' })
   author?: Member;
 
-  @Column({ type: 'char', length: 36, nullable: true })
-  eventId: string | null;
-
-  @ManyToOne(() => RegimentEvent, { onDelete: 'SET NULL', nullable: true })
-  @JoinColumn({ name: 'event_id' })
-  event?: RegimentEvent | null;
-
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   moderatedByMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })

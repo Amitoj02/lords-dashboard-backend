@@ -5,7 +5,7 @@ import { RegimentEvent } from './event.entity';
 /** Junction: platforms an event runs on. */
 @Entity('event_platforms')
 export class EventPlatform {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   eventId: string;
 
   @ManyToOne(() => RegimentEvent, { onDelete: 'CASCADE' })

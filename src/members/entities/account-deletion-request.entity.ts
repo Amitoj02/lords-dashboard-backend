@@ -1,15 +1,13 @@
-import { Column, Entity, Index, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { AccountDeletionStatus } from '../../common/enums';
 import { Member } from './member.entity';
 
 /** GDPR deferred-deletion request (requires out-of-band Discord acknowledgement). */
 @Entity('account_deletion_requests')
-export class AccountDeletionRequest {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
+export class AccountDeletionRequest extends ShortIdEntity {
   @Index()
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })

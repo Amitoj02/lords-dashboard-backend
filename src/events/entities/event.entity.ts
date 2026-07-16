@@ -6,9 +6,9 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { encryptionTransformer } from '../../common/crypto/encryption.transformer';
 import { EventStatus, RecurrenceCadence } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
@@ -17,18 +17,15 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
 /** A scheduled regiment event/operation (table `events`). */
 @Entity('events')
 @Index(['regimentId', 'status'])
-export class RegimentEvent {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class RegimentEvent extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'regiment_id' })
   regiment?: Regiment;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   createdByMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })
@@ -82,7 +79,7 @@ export class RegimentEvent {
    * scheduler can cheaply find existing occurrences per template (idempotency).
    */
   @Index()
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   recurrenceTemplateId: string | null;
 
   @Column({ type: 'varchar', length: 120, nullable: true })

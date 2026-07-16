@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsShortId } from '../../common/ids/short-id';
 
 /**
  * Body for POST /api/settings/transfer-ownership. `confirm` MUST be true — a
@@ -7,8 +8,8 @@ import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-valida
  * the previous owner's side; they are demoted to Admin).
  */
 export class TransferOwnershipDto {
-  @ApiProperty({ format: 'uuid', description: 'The member to make the new Owner' })
-  @IsUUID()
+  @ApiProperty({ description: 'The member to make the new Owner' })
+  @IsShortId()
   toMemberId: string;
 
   @ApiProperty({ description: 'Must be true to confirm the ownership transfer' })

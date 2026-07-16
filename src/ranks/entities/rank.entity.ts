@@ -5,20 +5,17 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /** Editable rank ladder (lookup table, per regiment). */
 @Entity('ranks')
 @Index(['regimentId', 'name'], { unique: true })
 @Index(['regimentId', 'precedence'], { unique: true })
-export class Rank {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class Rank extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })

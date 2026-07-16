@@ -1,21 +1,12 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { NotificationTone } from '../../common/enums';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /** A "Field Dispatch" announcement. Author is a denormalized label (often bot/system). */
 @Entity('notifications')
-export class Notification {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class Notification extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })

@@ -24,7 +24,8 @@ import { Member } from '../src/members/entities/member.entity';
  * (no DISCORD_BOT_TOKEN), so nothing touches a real Discord guild.
  */
 const APPLICANT_DISCORD_ID = '900900900900900903';
-const REGIMENT_ID = '00000000-0000-4000-8000-000000000001';
+// Matches the seeded dev regiment id (src/database/seeds/seed.util.ts REGIMENT_ID).
+const REGIMENT_ID = 'Rgmt00000001';
 
 let currentProfile: Record<string, unknown> = {};
 

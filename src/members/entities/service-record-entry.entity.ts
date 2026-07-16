@@ -1,28 +1,19 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 import { Member } from './member.entity';
 
 /** A member's service timeline entry (enlistment, promotion, award, deployment). */
 @Entity('service_record_entries')
-export class ServiceRecordEntry {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class ServiceRecordEntry extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'member_id' })
   member?: Member;
 
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })

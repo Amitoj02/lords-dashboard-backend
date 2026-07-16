@@ -13,7 +13,7 @@ export class AuditLogEntry {
   @PrimaryGeneratedColumn({ type: 'bigint' })
   id: string;
 
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })
@@ -26,7 +26,7 @@ export class AuditLogEntry {
   @Column({ type: 'datetime', precision: 6 })
   occurredAt: Date;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   actorMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })
@@ -56,7 +56,7 @@ export class AuditLogEntry {
   @Column({ type: 'varchar', length: 64, nullable: true })
   targetId: string | null;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   targetMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })

@@ -6,11 +6,11 @@ import {
   HttpCode,
   HttpStatus,
   Param,
-  ParseUUIDPipe,
   Patch,
   Post,
   Req,
 } from '@nestjs/common';
+import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -80,7 +80,7 @@ export class RanksController {
   @ApiOperation({ summary: 'Update a rank' })
   @ApiOkResponse({ type: RankDto, description: 'The updated rank.' })
   update(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateRankDto,
     @Req() req: Request,
@@ -94,7 +94,7 @@ export class RanksController {
   @ApiOperation({ summary: 'Delete a rank (blocked while any member still holds it)' })
   @ApiNoContentResponse({ description: 'The rank was deleted.' })
   remove(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<void> {
@@ -107,7 +107,7 @@ export class RanksController {
   @ApiOperation({ summary: 'Link a rank to a Discord role' })
   @ApiOkResponse({ type: RankDto, description: 'The linked rank.' })
   linkDiscord(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: LinkDiscordDto,
     @Req() req: Request,
@@ -121,7 +121,7 @@ export class RanksController {
   @ApiOperation({ summary: 'Unlink a rank from its Discord role' })
   @ApiOkResponse({ type: RankDto, description: 'The unlinked rank.' })
   unlinkDiscord(
-    @Param('id', ParseUUIDPipe) id: string,
+    @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,
     @Req() req: Request,
   ): Promise<RankDto> {

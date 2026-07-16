@@ -5,7 +5,7 @@ import { RegimentEvent } from './event.entity';
 /** Junction: confirmed attendance (distinct from RSVP intent). */
 @Entity('event_attendees')
 export class EventAttendee {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   eventId: string;
 
   @ManyToOne(() => RegimentEvent, { onDelete: 'CASCADE' })
@@ -13,7 +13,7 @@ export class EventAttendee {
   event?: RegimentEvent;
 
   @Index()
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })

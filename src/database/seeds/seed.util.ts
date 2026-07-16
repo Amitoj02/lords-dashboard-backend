@@ -1,8 +1,13 @@
 import { DeepPartial, FindOptionsWhere, ObjectLiteral, Repository } from 'typeorm';
 
-/** Deterministic ids so re-seeding is idempotent and tests can rely on them. */
-export const REGIMENT_ID = '00000000-0000-4000-8000-000000000001';
-export const OWNER_MEMBER_ID = '00000000-0000-4000-8000-000000000010';
+/**
+ * Deterministic ids so re-seeding is idempotent and tests can rely on them.
+ * REGIMENT_ID / OWNER_MEMBER_ID use the 12-char short-id scheme (T-0085).
+ * OWNER_IDENTITY_ID stays a uuid because discord_identities.id is retained
+ * opaque (the JWT `sub`); OWNER_DISCORD_USER_ID is an external Discord snowflake.
+ */
+export const REGIMENT_ID = 'Rgmt00000001';
+export const OWNER_MEMBER_ID = 'Ownr00000001';
 export const OWNER_IDENTITY_ID = '00000000-0000-4000-8000-000000000020';
 export const OWNER_DISCORD_USER_ID = '100000000000000001';
 

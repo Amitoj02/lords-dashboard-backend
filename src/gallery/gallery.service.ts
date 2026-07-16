@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -10,17 +11,22 @@ import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { GalleryMediaType, GalleryStatus, MemberRole, StorageTarget } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { StorageService } from '../storage/storage.service';
 import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
 import { DeclineGalleryDto } from './dto/decline-gallery.dto';
-import { GalleryFileDto, GalleryItemDto, GalleryMemberRefDto } from './dto/gallery-item.dto';
+import {
+  GalleryFileDto,
+  GalleryItemDto,
+  GallerySubmissionSummaryDto,
+} from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
 import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
-import { GalleryTaggedMember } from './entities/gallery-tagged-member.entity';
+import { GalleryTag } from './entities/gallery-tag.entity';
 
 /** Fallbacks mirroring the regiment_settings column defaults (used when no row exists). */
 const DEFAULT_MAX_ITEMS_PER_SUBMISSION = 10;
@@ -48,6 +54,8 @@ export interface GalleryLikeState {
  */
 @Injectable()
 export class GalleryService {
+  private readonly logger = new Logger(GalleryService.name);
+
   constructor(
     @InjectRepository(GalleryItem)
     private readonly items: Repository<GalleryItem>,
@@ -55,8 +63,8 @@ export class GalleryService {
     private readonly files: Repository<GalleryFile>,
     @InjectRepository(GalleryLike)
     private readonly likes: Repository<GalleryLike>,
-    @InjectRepository(GalleryTaggedMember)
-    private readonly taggedMembers: Repository<GalleryTaggedMember>,
+    @InjectRepository(GalleryTag)
+    private readonly tags: Repository<GalleryTag>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
     @InjectRepository(RegimentSettings)
@@ -65,6 +73,8 @@ export class GalleryService {
     private readonly audit: AuditService,
     // Resolves uploaded file keys to public URLs (namespace-validated).
     private readonly storage: StorageService,
+    // Best-effort decline DMs to the submitter (never fails the decision).
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   // ── Public feed (unauthenticated — no caller to scope by) ────────────────────
@@ -110,14 +120,65 @@ export class GalleryService {
     return this.projectOne(item, null);
   }
 
+  // ── Authenticated member archive ─────────────────────────────────────────────
+
+  /**
+   * Authenticated archive: approved items for the caller's regiment, IGNORING
+   * the `publicGallery` flag (T-0086). Populated for any signed-in roster member
+   * even when the public archive is off. Scoped to the caller's regiment and
+   * passes their memberId so the per-item `liked` flag is populated.
+   */
+  findArchive(
+    user: AuthenticatedUser,
+    query: GalleryQueryDto,
+  ): Promise<PaginatedResponseDto<GalleryItemDto>> {
+    return this.listItems(user.regimentId, GalleryStatus.Approved, query, user.memberId);
+  }
+
   // ── Moderation queue ─────────────────────────────────────────────────────────
 
-  /** Pending items awaiting moderation, scoped to the caller's regiment. */
+  /**
+   * Items awaiting moderation, scoped to the caller's regiment. The `status`
+   * query param (T-0089) selects the bucket — pending (default), approved, or
+   * declined — so the FE can populate each moderation tab. Declined items carry
+   * their `declineReason` through the projection.
+   */
   moderationQueue(
     user: AuthenticatedUser,
     query: GalleryQueryDto,
   ): Promise<PaginatedResponseDto<GalleryItemDto>> {
-    return this.listItems(user.regimentId, GalleryStatus.Pending, query, user.memberId);
+    return this.listItems(
+      user.regimentId,
+      query.status ?? GalleryStatus.Pending,
+      query,
+      user.memberId,
+    );
+  }
+
+  /**
+   * Lean list of pending submissions for the dashboard "Gallery submissions"
+   * panel (T-0094): just `{ id, title, submitterUsername }`, newest first. Gated
+   * by ManageEvents at the controller (the panel is visible to events managers);
+   * moderation actions remain ModerateGallery.
+   */
+  async pendingSummary(user: AuthenticatedUser): Promise<GallerySubmissionSummaryDto[]> {
+    const rows = await this.items
+      .createQueryBuilder('item')
+      .leftJoin('item.author', 'author')
+      .select('item.id', 'id')
+      .addSelect('item.title', 'title')
+      .addSelect('author.name', 'submitterUsername')
+      .where('item.regimentId = :regimentId', { regimentId: user.regimentId })
+      .andWhere('item.status = :status', { status: GalleryStatus.Pending })
+      .andWhere('item.isDraft = :isDraft', { isDraft: false })
+      .andWhere('item.deletedAt IS NULL')
+      .orderBy('item.submittedAt', 'DESC')
+      .getRawMany<{ id: string; title: string; submitterUsername: string | null }>();
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      submitterUsername: row.submitterUsername ?? null,
+    }));
   }
 
   // ── Mutations ────────────────────────────────────────────────────────────────
@@ -150,14 +211,12 @@ export class GalleryService {
     const saved = await this.dataSource.transaction(async (manager) => {
       const itemRepo = manager.getRepository(GalleryItem);
       const fileRepo = manager.getRepository(GalleryFile);
-      const tagRepo = manager.getRepository(GalleryTaggedMember);
-      const memberRepo = manager.getRepository(Member);
+      const tagRepo = manager.getRepository(GalleryTag);
 
       const item = await itemRepo.save(
         itemRepo.create({
           regimentId: user.regimentId,
           authorMemberId: memberId,
-          eventId: dto.eventId ?? null,
           moderatedByMemberId: autoApprove ? memberId : null,
           title: dto.title,
           caption: dto.caption ?? null,
@@ -197,17 +256,12 @@ export class GalleryService {
         );
       }
 
-      const taggedIds = dto.taggedMemberIds ?? [];
-      if (taggedIds.length > 0) {
-        // Only tag members that actually belong to this regiment.
-        const validMembers = await memberRepo.find({
-          where: { id: In(taggedIds), regimentId: user.regimentId },
-        });
-        const rows = validMembers.map((member) =>
-          tagRepo.create({ galleryItemId: item.id, memberId: member.id }),
-        );
-        if (rows.length > 0) {
-          await tagRepo.save(rows);
+      const tags = dto.tags ?? [];
+      if (tags.length > 0) {
+        // De-dupe and cap defensively (the DTO also enforces @ArrayMaxSize(10)).
+        const unique = [...new Set(tags.map((t) => t.trim()).filter(Boolean))].slice(0, 10);
+        if (unique.length > 0) {
+          await tagRepo.insert(unique.map((tag) => ({ galleryItemId: item.id, tag })));
         }
       }
 
@@ -265,6 +319,9 @@ export class GalleryService {
       target: { type: 'gallery', id: saved.id, label: saved.title },
       detail: dto.reason ?? null,
     });
+
+    // Best-effort decline DM to the submitter (never affects the decision).
+    await this.enqueueDeclineDm(user.regimentId, saved.authorMemberId, saved.title, dto.reason);
 
     return this.projectOne(saved, user.memberId);
   }
@@ -336,9 +393,6 @@ export class GalleryService {
     if (query.type) {
       qb.andWhere('item.type = :type', { type: query.type });
     }
-    if (query.eventId) {
-      qb.andWhere('item.eventId = :eventId', { eventId: query.eventId });
-    }
 
     const [rows, total] = await qb
       .orderBy('item.submittedAt', 'DESC')
@@ -389,10 +443,10 @@ export class GalleryService {
       return [];
     }
     const itemIds = items.map((item) => item.id);
-    const [filesByItem, likeCounts, taggedByItem, likedSet] = await Promise.all([
+    const [filesByItem, likeCounts, tagsByItem, likedSet] = await Promise.all([
       this.filesFor(itemIds),
       this.likeCountsFor(itemIds),
-      this.taggedFor(itemIds),
+      this.tagsFor(itemIds),
       viewerMemberId ? this.likedSetFor(itemIds, viewerMemberId) : Promise.resolve(null),
     ]);
 
@@ -400,7 +454,7 @@ export class GalleryService {
       GalleryItemDto.from(item, {
         files: filesByItem.get(item.id) ?? [],
         likesCount: likeCounts.get(item.id) ?? 0,
-        taggedMembers: taggedByItem.get(item.id) ?? [],
+        tags: tagsByItem.get(item.id) ?? [],
         author: item.author ? { memberId: item.author.id, name: item.author.name } : null,
         liked: likedSet ? likedSet.has(item.id) : undefined,
       }),
@@ -440,25 +494,20 @@ export class GalleryService {
     return new Map(rows.map((row) => [row.itemId, Number(row.count)]));
   }
 
-  /** One query mapping itemId -> its tagged `{ memberId, name }` references. */
-  private async taggedFor(itemIds: string[]): Promise<Map<string, GalleryMemberRefDto[]>> {
-    const map = new Map<string, GalleryMemberRefDto[]>();
+  /** One query mapping itemId -> its free-form tags (mirrors EventsService.tagsFor). */
+  private async tagsFor(itemIds: string[]): Promise<Map<string, string[]>> {
+    const map = new Map<string, string[]>();
     if (itemIds.length === 0) {
       return map;
     }
-    const rows = await this.taggedMembers
-      .createQueryBuilder('tag')
-      .innerJoin(Member, 'member', 'member.id = tag.memberId')
-      .select('tag.galleryItemId', 'itemId')
-      .addSelect('tag.memberId', 'memberId')
-      .addSelect('member.name', 'name')
-      .where('tag.galleryItemId IN (:...itemIds)', { itemIds })
-      .orderBy('member.name', 'ASC')
-      .getRawMany<{ itemId: string; memberId: string; name: string }>();
+    const rows = await this.tags.find({
+      where: { galleryItemId: In(itemIds) },
+      order: { tag: 'ASC' },
+    });
     for (const row of rows) {
-      const list = map.get(row.itemId) ?? [];
-      list.push({ memberId: row.memberId, name: row.name });
-      map.set(row.itemId, list);
+      const list = map.get(row.galleryItemId) ?? [];
+      list.push(row.tag);
+      map.set(row.galleryItemId, list);
     }
     return map;
   }
@@ -543,6 +592,38 @@ export class GalleryService {
     const dot = base.lastIndexOf('.');
     if (dot < 0 || dot === base.length - 1) return null;
     return base.slice(dot + 1).toLowerCase();
+  }
+
+  /**
+   * Best-effort DM to a declined submission's author (T-0090). Resolves the
+   * author's Discord user id one hop through their linked identity; silently
+   * skips when there is no linked identity / Discord user. Wrapped so ANY
+   * failure here can never affect the decline result (mirrors the applications
+   * decision-DM pattern). Runs post-commit, and the underlying enqueue no-ops
+   * when the bot is disabled.
+   */
+  private async enqueueDeclineDm(
+    regimentId: string,
+    authorMemberId: string,
+    title: string,
+    reason?: string | null,
+  ): Promise<void> {
+    try {
+      const author = await this.members.findOne({
+        where: { id: authorMemberId },
+        relations: { discordIdentity: true },
+      });
+      const discordUserId = author?.discordIdentity?.discordUserId;
+      if (!discordUserId) {
+        return;
+      }
+      const trimmed = reason?.trim();
+      const content =
+        `Your gallery submission "${title}" was declined.` + (trimmed ? ` Reason: ${trimmed}` : '');
+      await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
+    } catch (error) {
+      this.logger.error(`Failed to enqueue gallery decline DM: ${(error as Error).message}`);
+    }
   }
 
   /** Guard: the caller must be an enrolled member (has a memberId). */

@@ -1,12 +1,5 @@
-import {
-  Column,
-  Entity,
-  Index,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, Entity, Index, JoinColumn, ManyToOne, UpdateDateColumn } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { RsvpStatus } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
 import { RegimentEvent } from './event.entity';
@@ -14,11 +7,8 @@ import { RegimentEvent } from './event.entity';
 /** A member's RSVP to an event (backs rsvp_counts + the password-reveal gate). */
 @Entity('event_rsvps')
 @Index(['eventId', 'memberId'], { unique: true })
-export class EventRsvp {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class EventRsvp extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   eventId: string;
 
   @ManyToOne(() => RegimentEvent, { onDelete: 'CASCADE' })
@@ -26,7 +16,7 @@ export class EventRsvp {
   event?: RegimentEvent;
 
   @Index()
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })

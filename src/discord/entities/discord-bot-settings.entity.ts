@@ -19,7 +19,7 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
  */
 @Entity('discord_bot_settings')
 export class DiscordBotSettings {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   regimentId: string;
 
   @OneToOne(() => Regiment, { onDelete: 'CASCADE' })

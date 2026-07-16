@@ -12,7 +12,7 @@ import { Regiment } from './regiment.entity';
 /** 1—1 configuration for a regiment (PK = FK). */
 @Entity('regiment_settings')
 export class RegimentSettings {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   regimentId: string;
 
   @OneToOne(() => Regiment, { onDelete: 'CASCADE' })

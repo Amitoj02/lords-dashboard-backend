@@ -5,9 +5,9 @@ import {
   Index,
   JoinColumn,
   OneToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { BotConnectionStatus } from '../../common/enums';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
@@ -16,12 +16,9 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
  * is NOT built here). Server id/name are read from the regiment, not duplicated.
  */
 @Entity('discord_connections')
-export class DiscordConnection {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
+export class DiscordConnection extends ShortIdEntity {
   @Index({ unique: true })
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @OneToOne(() => Regiment, { onDelete: 'CASCADE' })

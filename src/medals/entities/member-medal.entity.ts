@@ -1,12 +1,5 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  Index,
-  JoinColumn,
-  ManyToOne,
-  PrimaryGeneratedColumn,
-} from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { Member } from '../../members/entities/member.entity';
 import { Medal } from './medal.entity';
 
@@ -19,11 +12,8 @@ import { Medal } from './medal.entity';
  */
 @Entity('member_medals')
 @Index(['memberId', 'medalId'])
-export class MemberMedal {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class MemberMedal extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })
@@ -31,7 +21,7 @@ export class MemberMedal {
   member?: Member;
 
   @Index()
-  @Column({ type: 'char', length: 36 })
+  @Column({ type: 'char', length: 12 })
   medalId: string;
 
   @ManyToOne(() => Medal, { onDelete: 'CASCADE' })
@@ -41,7 +31,7 @@ export class MemberMedal {
   @Column({ type: 'varchar', length: 255, nullable: true })
   detail: string | null;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   awardedByMemberId: string | null;
 
   @ManyToOne(() => Member, { onDelete: 'SET NULL', nullable: true })

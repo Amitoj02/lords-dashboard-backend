@@ -74,7 +74,7 @@ export class DiscordIdentity {
   @Column({ type: 'datetime', precision: 6, nullable: true })
   applicationsBlockedAt: Date | null;
 
-  @Column({ type: 'char', length: 36, nullable: true })
+  @Column({ type: 'char', length: 12, nullable: true })
   applicationsBlockedByMemberId: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })

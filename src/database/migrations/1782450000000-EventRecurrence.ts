@@ -27,7 +27,7 @@ export class EventRecurrence1782450000000 implements MigrationInterface {
     }
     if (!(await this.columnExists(queryRunner, 'events', 'recurrence_template_id'))) {
       await queryRunner.query(
-        `ALTER TABLE \`events\` ADD \`recurrence_template_id\` char(36) NULL`,
+        `ALTER TABLE \`events\` ADD \`recurrence_template_id\` char(12) NULL`,
       );
     }
     if (!(await this.indexExists(queryRunner, 'events', 'IDX_event_recurrence_template'))) {

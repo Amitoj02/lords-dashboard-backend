@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { IsEnum, IsOptional } from 'class-validator';
+import { IsShortId } from '../../common/ids/short-id';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { MemberRole, MemberStatus } from '../../common/enums';
 
@@ -30,6 +31,6 @@ export class MemberQueryDto extends PaginationQueryDto {
     description: 'Filter by rank id',
   })
   @IsOptional()
-  @IsUUID()
+  @IsShortId()
   rankId?: string;
 }

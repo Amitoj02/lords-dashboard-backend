@@ -6,6 +6,8 @@ import { ensure, REGIMENT_ID } from './seed.util';
 const ALL = MemberRole;
 const ADMINS = [MemberRole.Owner, MemberRole.Admin];
 const STAFF = [MemberRole.Owner, MemberRole.Admin, MemberRole.Moderator];
+// Enrolled roster members excluding Mercenary (e.g. gallery submission).
+const MEMBERS = [MemberRole.Owner, MemberRole.Admin, MemberRole.Moderator, MemberRole.Member];
 const ENROLLED = [
   MemberRole.Owner,
   MemberRole.Admin,
@@ -23,9 +25,12 @@ const MATRIX: Record<Capability, MemberRole[]> = {
   [Capability.EditRanksMedals]: ADMINS,
   [Capability.ManageApplications]: STAFF,
   [Capability.ManageEvents]: STAFF,
+  // Gallery archive view: all enrolled roster members incl. Mercenary.
+  [Capability.ViewGallery]: ENROLLED,
   [Capability.ModerateGallery]: STAFF,
   [Capability.RevealEventPasswords]: ENROLLED,
-  [Capability.SubmitToGallery]: ENROLLED,
+  // Submitting to the gallery is members-only (Mercenary excluded).
+  [Capability.SubmitToGallery]: MEMBERS,
   [Capability.RsvpToEvents]: ENROLLED,
   [Capability.ViewMembersDirectory]: ENROLLED,
   [Capability.ApplyToJoin]: [MemberRole.Applicant],

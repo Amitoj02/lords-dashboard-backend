@@ -217,7 +217,7 @@ export class AuthService {
     if (user.memberId) {
       const member = await this.members.findOne({
         where: { id: user.memberId },
-        relations: { rank: true },
+        relations: { rank: true, discordIdentity: true },
       });
       if (member) {
         projection = AuthService.toMemberProjection(member);
@@ -246,7 +246,8 @@ export class AuthService {
       role: member.role,
       discordTag: null,
       discordLinked: member.discordLinked,
-      avatarUrl: member.avatarUrl,
+      // Fall back to the linked Discord avatar when the member has no custom one.
+      avatarUrl: member.avatarUrl ?? member.discordIdentity?.avatarUrl ?? null,
       isMember: true,
       // Filled in by getCurrentUser from the role_permissions matrix.
       capabilities: [],

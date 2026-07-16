@@ -5,7 +5,7 @@ import { Notification } from './notification.entity';
 /** Junction: per-member read state for notifications. */
 @Entity('notification_reads')
 export class NotificationRead {
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   notificationId: string;
 
   @ManyToOne(() => Notification, { onDelete: 'CASCADE' })
@@ -13,7 +13,7 @@ export class NotificationRead {
   notification?: Notification;
 
   @Index()
-  @PrimaryColumn({ type: 'char', length: 36 })
+  @PrimaryColumn({ type: 'char', length: 12 })
   memberId: string;
 
   @ManyToOne(() => Member, { onDelete: 'CASCADE' })

@@ -5,20 +5,17 @@ import {
   Index,
   JoinColumn,
   ManyToOne,
-  PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { MedalRibbon } from '../../common/enums';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /** Medal/award catalogue (lookup table, per regiment). */
 @Entity('medals')
 @Index(['regimentId', 'title'], { unique: true })
-export class Medal {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
-
-  @Column({ type: 'char', length: 36 })
+export class Medal extends ShortIdEntity {
+  @Column({ type: 'char', length: 12 })
   regimentId: string;
 
   @ManyToOne(() => Regiment, { onDelete: 'CASCADE' })
