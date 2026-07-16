@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
-  "lastSyncedAt": "2026-07-15T03:10:00Z",
-  "notesForNextSession": "EPIC COMPLETE (this session): all 16 planned backend tasks T-0079..T-0094 -> deploy_ready. Short-id migration (T-0081..T-0085): entity PKs/FKs -> 12-char base62 char(12) via crypto.randomInt + a global ShortIdSubscriber; retained opaque set preserved (discord_identities.id + inbound FKs, discord_sync_jobs.id, GDPR token, storage keys, snowflakes, ciphertext). Gallery epic: gallery_tags model (event-link+member-tag dropped), authenticated archive (ViewGallery), status-filtered moderation queue, pending-summary (ManageEvents), best-effort decline DM. Capability reconcile T-0091/T-0092 (view_gallery + submit members-only). Events: delete-series + tag cap. Avatar fallback to Discord. VERIFIED: lint+tsc clean, fresh db:setup idempotent, 294 unit + 38 e2e green, full-stack browser E2E (mock OAuth, short-id DB) exercised the new endpoints. REMAINING/BLOCKED: T-0025 deploy portion + T-0032 prod deploy (owner). Open PR feat/planned-tasks-epic -> main.",
-  "nextIdCounter": 95,
+  "lastSyncedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+  "lastSyncedAt": "2026-07-16T02:45:00Z",
+  "notesForNextSession": "Planned-tasks epic (T-0095..T-0107) implemented + verified → deploy_ready. members.name dropped (inGameName sole identity); platform/timezone/attendanceRate + short_tag/public_roster dropped; established_at + enrolledExcludingMercenaries added; announcements (Field Dispatch) + manage_notifications torn down; Quartermaster→Lord Adjutant; applicant_type re-added; hasServerPassword + unarchive + archived-listing on events; per-member events/rsvps endpoints; service-record self/admin gate + changeRole no-op skip; oversize-upload message standardized. 4 guarded migrations. lint/build/db:setup/298 unit/36 e2e green; live HTTP contract verified. Ship WITH the frontend PR feat/planned-tasks-fe (contracts change in lockstep). T-0025 blocked on prod deploy (T-0032) + live Discord.",
+  "nextIdCounter": 108,
   "connections": [],
   "tasks": [
     {
@@ -1158,7 +1158,7 @@
       "id": "T-0025",
       "title": "Post-MVP hardening, cross-stack E2E & full go-live",
       "summary": "After the MVP is live (T-0032), the full-stack hardening pass: cross-stack E2E including the Discord bot (dashboard action -> API -> bot -> Discord), the /security-review skill (helmet, CORS allowlist, rate limits, secret handling, token/password encryption, privileged-intent scoping), Discord production-app config, and a re-deploy of the unified prod compose with the bot enabled. Depends on the bot milestone and the frontend bot/admin UI.",
-      "status": "planned",
+      "status": "blocked",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -1186,11 +1186,16 @@
       ],
       "regressionRisk": [],
       "skippedByClaude": [
-        "Live cross-stack bot E2E + prod re-deploy remain BLOCKED on T-0032 (owner must provision VPS/domain/TLS + run the prod deploy). The /security-review portion was run this session."
+        "Live cross-stack bot E2E + prod re-deploy remain BLOCKED on T-0032 (owner must provision VPS/domain/TLS + run the prod deploy). The /security-review portion was run this session.",
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "what": "Live production deploy + real-Discord post-deploy smoke",
+          "why": "No production environment / live Discord app in this session; depends on the blocked T-0032 (MVP prod deploy)."
+        }
       ],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1233,6 +1238,13 @@
           "to": "planned",
           "by": "claude",
           "note": "Security review run over the epic's new surface (gallery endpoints, capability reconcile, decline DM, delete-series, short-id opaque-retention, avatar fallback). Deploy portion stays blocked on T-0032."
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "blocked",
+          "by": "claude",
+          "note": "Go-live task: code-side prerequisites complete (all planned feature tasks deploy_ready; cross-stack API contract verified live). Remaining work — production deploy (blocked T-0032), live Discord production app config, and post-deploy smoke against a live guild — requires the production environment and cannot be done in a code session."
         }
       ]
     },
@@ -5700,6 +5712,777 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        }
+      ]
+    },
+    {
+      "id": "T-0095",
+      "title": "Re-add applicant_type (Member/Mercenary) to applications",
+      "summary": "Restore the applicant_type field retired in T-0039: a new migration re-adds the column (enum Member/Mercenary, default Member), add applicantType to the Application entity, CreateApplicationDto (IsEnum) — UpdateMyApplicationDto inherits — and ApplicationDto(.from); branch the approve-flow enlisted role on applicantType instead of the hardcoded MemberRole.Member.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "repo": "",
+      "paths": [
+        "src/applications/entities/application.entity.ts",
+        "src/applications/dto/create-application.dto.ts",
+        "src/applications/dto/application.dto.ts",
+        "src/applications/applications.service.ts",
+        "src/common/enums/index.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Use enum values \"Member\"/\"Mercenary\" (matching the requirement + MemberRole) rather than reviving the historical \"Applicant\"/\"Mercenary\" values? Recommended: Member/Mercenary.",
+          "answer": "Member/Mercenary",
+          "askedAt": "2026-07-15T20:30:00Z",
+          "answeredAt": "2026-07-16T00:42:17.314Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "POST /applications accepts applicantType (Member|Mercenary) and persists it",
+          "status": "passed"
+        },
+        {
+          "desc": "PATCH /applications/mine updates applicantType",
+          "status": "passed"
+        },
+        {
+          "desc": "Approving a Mercenary application enlists the member with the Mercenary role; otherwise Member",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0096",
+      "title": "Expose hasServerPassword on the member Event DTO",
+      "summary": "Add a non-sensitive boolean hasServerPassword to EventDto, set in EventDto.from only under includeServer, computed as event.serverPassword != null — so the frontend can hide the password/reveal UI for passwordless events without exposing the password.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "events",
+      "repo": "",
+      "paths": [
+        "src/events/dto/event.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "The member event projection includes hasServerPassword=true for events with a password and false otherwise",
+          "status": "passed"
+        },
+        {
+          "desc": "The password value itself is still never included in EventDto",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0097",
+      "title": "Add POST /events/:id/unarchive and allow archived-event fetch",
+      "summary": "Mirror the existing archive endpoint with POST /events/:id/unarchive (set isArchived=false, audit action event.unarchive) and loosen getForMember so a capability holder can still fetch/deep-link an archived event's detail (otherwise pressing Unarchive 404s).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "events",
+      "repo": "",
+      "paths": [
+        "src/events/events.controller.ts",
+        "src/events/events.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST /events/:id/unarchive sets isArchived=false and returns the updated event",
+          "status": "passed"
+        },
+        {
+          "desc": "A capability holder can GET an archived event's detail",
+          "status": "passed"
+        },
+        {
+          "desc": "An unarchive is recorded in the audit log",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0098",
+      "title": "Support listing archived events via a query flag",
+      "summary": "Add an optional archived/includeArchived flag to EventQueryDto and branch the isArchived filter in listForMember so archived events can be listed; gate archived visibility to ManageEvents (moderators+) so ordinary members cannot list them.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "events",
+      "repo": "",
+      "paths": [
+        "src/events/dto/event-query.dto.ts",
+        "src/events/events.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /events (member) with the archived flag returns archived events for a ManageEvents holder",
+          "status": "passed"
+        },
+        {
+          "desc": "Without the flag, archived events remain excluded",
+          "status": "passed"
+        },
+        {
+          "desc": "A non-moderator cannot list archived events",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0099",
+      "title": "Drop platform + timezone columns; retire attendance metric",
+      "summary": "Per the profile-particulars cleanup, drop the members.platform and members.timezone columns (migration), remove them from the Member entity, MemberDto, UpdateMemberDto and MembersService.updateSelf, and stop exposing the derived attendanceRate metric.",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "members",
+      "repo": "",
+      "paths": [
+        "src/members/entities/member.entity.ts",
+        "src/members/dto/member.dto.ts",
+        "src/members/dto/update-member.dto.ts",
+        "src/members/members.service.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Confirm platform + timezone should be permanently dropped from the schema (they are currently persisted + self-editable). If only display removal is wanted, this task becomes a no-op and only the FE task applies.",
+          "answer": "confirm",
+          "askedAt": "2026-07-15T20:30:00Z",
+          "answeredAt": "2026-07-16T00:42:46.093Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "members.platform and members.timezone columns are dropped by the migration (with a working down())",
+          "status": "passed"
+        },
+        {
+          "desc": "MemberDto/UpdateMemberDto no longer reference platform/timezone; self-edit still works",
+          "status": "passed"
+        },
+        {
+          "desc": "No attendanceRate is exposed on the member projection",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "platform/timezone are read in the profile self-edit modal (and possibly roster); dropping the columns requires updating every consumer or the build/tests break",
+          "status": "resolved",
+          "notedAt": "2026-07-15T20:30:00Z",
+          "resolvedAt": "2026-07-16T02:45:00Z",
+          "resolvedBy": "claude",
+          "note": "Dropped platform/timezone from the entity/DTO/service; every consumer (profile self-edit, roster) repointed and the FE model updated in lockstep. Build + 298 unit + 36 e2e green; contract verified live."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0100",
+      "title": "Add per-member events + RSVPs endpoints",
+      "summary": "Add GET /members/:id/events (the member's attended past events via the event_attendee join, regiment-scoped) and GET /members/:id/rsvps (the member's RSVPs), returning EventDto/AttendeeDto-shaped rows, so the profile Event History + RSVPs tabs can be populated for any member.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "members",
+      "repo": "",
+      "paths": [
+        "src/members/members.controller.ts",
+        "src/members/members.service.ts",
+        "src/members/dto/member-detail.dto.ts",
+        "src/events/dto/event.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /members/:id/events returns that member's attended events",
+          "status": "passed"
+        },
+        {
+          "desc": "GET /members/:id/rsvps returns that member's RSVPs",
+          "status": "passed"
+        },
+        {
+          "desc": "Both are regiment-scoped and capability-checked",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0101",
+      "title": "Gate service-record reads to self/admin; record only real role changes",
+      "summary": "Add self-OR-admin gating to getServiceRecord (allow when the requester is the member, else require view_audit_log) instead of open-to-any-member, and in changeRole only write a service-record/audit entry when dto.role !== member.role (so a no-op change is skipped).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "members",
+      "repo": "",
+      "paths": [
+        "src/members/members.service.ts",
+        "src/members/members.controller.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "A member can read their own service record; a non-admin cannot read someone else's",
+          "status": "passed"
+        },
+        {
+          "desc": "An admin can read any member's service record",
+          "status": "passed"
+        },
+        {
+          "desc": "Changing a role to the same value writes no service-record/audit entry; an actual change does",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0102",
+      "title": "Add an established month/date to the regiment identity",
+      "summary": "The regiment stores only establishedYear (a bare YEAR); add an established month/date (e.g. establishedAt date or establishedMonth) via a migration, surface it on RegimentStatsDto + RegimentProfileDto, make it editable through settings (update-settings.dto + REGIMENT_KEYS), and seed it (e.g. 2023-11). Optionally add an enrolled-excluding-mercenaries convenience count to RegimentStatsDto.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "regiments",
+      "repo": "",
+      "paths": [
+        "src/regiments/entities/regiment.entity.ts",
+        "src/regiments/dto/regiment-stats.dto.ts",
+        "src/regiments/dto/regiment-profile.dto.ts",
+        "src/regiments/regiments.service.ts",
+        "src/settings/dto/update-settings.dto.ts",
+        "src/settings/settings.service.ts",
+        "src/database/seeds/regiment.seed.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "The landing wants \"Since est 11/2023\" (month precision). Add month precision (establishedAt date / establishedMonth) as planned, or is year-only (\"Since est 2023\", already available) acceptable — which would make this task unnecessary?",
+          "answer": "do whatever, i gave you full date: 20/11/2023",
+          "askedAt": "2026-07-15T20:30:00Z",
+          "answeredAt": "2026-07-16T00:43:34.648Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "GET /regiment/stats and GET /regiment expose the established month/date",
+          "status": "passed"
+        },
+        {
+          "desc": "PATCH /settings can update the established date (manage_settings gated)",
+          "status": "passed"
+        },
+        {
+          "desc": "The seed sets a sensible default established date",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0103",
+      "title": "Tear down announcements (Field Dispatch) across backend + bot",
+      "summary": "Remove the ad-hoc regiment-announcement path: delete POST /discord/announce (controller + AnnounceDto + discord.service.announce + discord-sync.enqueueAnnounce), remove NotificationsModule from app.module, and drop the notifications + notification_reads tables and discord_bot_settings.announcement_channel_id (migration); repoint enqueueEventAnnounce off the announcementChannelId fallback to eventAnnouncementChannelId. Keep DiscordSyncJobType.Announce (still used by event announcements + enlistment posts).",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/notifications/",
+        "src/discord/discord.controller.ts",
+        "src/discord/dto/discord-inputs.dto.ts",
+        "src/discord/discord.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/entities/discord-bot-settings.entity.ts",
+        "src/discord/dto/discord-settings.dto.ts",
+        "src/app.module.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST /discord/announce and the notifications endpoints/tables no longer exist",
+          "status": "passed"
+        },
+        {
+          "desc": "discord_bot_settings.announcement_channel_id is dropped and event announcements still route via eventAnnouncementChannelId",
+          "status": "passed"
+        },
+        {
+          "desc": "App boots without NotificationsModule; event-announce + enlistment Discord posts still work",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "enqueueEventAnnounce currently falls back to announcementChannelId; removing that column/fallback must not break event-announcement routing",
+          "status": "resolved",
+          "notedAt": "2026-07-15T20:30:00Z",
+          "resolvedAt": "2026-07-16T02:45:00Z",
+          "resolvedBy": "claude",
+          "note": "enqueueEventAnnounce repointed off the announcementChannelId fallback to eventAnnouncementChannelId only; announcement_channel_id + NotificationsModule + notifications tables dropped; event-announce routing still works (post-mvp e2e). /discord/announce → 404 verified live."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0104",
+      "title": "Rename Quartermaster to Lord Adjutant in the backend/bot",
+      "summary": "Rename the audit actor label \"Quartermaster bot\" → \"Lord Adjutant bot\" in discord-sync.worker (2 places) and the mock gateway role name, and update comments in config/discord entities/dtos/module for consistency. String-only, no schema change.",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "discord",
+      "repo": "",
+      "paths": [
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/gateway/mock-discord-gateway.ts",
+        "src/config/configuration.ts",
+        "src/config/env.validation.ts",
+        "src/discord/dto/discord-connection.dto.ts",
+        "src/discord/entities/discord-bot-settings.entity.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "New audit rows written by the bot use the \"Lord Adjutant bot\" actor label",
+          "status": "passed"
+        },
+        {
+          "desc": "The mock gateway bot role name reads \"Lord Adjutant\"",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0105",
+      "title": "Drop regiment short_tag (+unique) and public_roster",
+      "summary": "Drop regiments.short_tag (and its UNIQUE index) and regiment_settings.public_roster (migration), and remove them from the Regiment/RegimentSettings entities, SettingsDto/UpdateSettingsDto, RegimentProfileDto, REGIMENT_KEYS/SETTINGS_KEYS/defaultSettings and the regiment seed.",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "regiments",
+      "repo": "",
+      "paths": [
+        "src/regiments/entities/regiment.entity.ts",
+        "src/regiments/entities/regiment-settings.entity.ts",
+        "src/settings/dto/settings.dto.ts",
+        "src/settings/dto/update-settings.dto.ts",
+        "src/settings/settings.service.ts",
+        "src/regiments/dto/regiment-profile.dto.ts",
+        "src/database/seeds/regiment.seed.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "The migration drops the short_tag UNIQUE index then the column, and drops public_roster",
+          "status": "passed"
+        },
+        {
+          "desc": "GET/PATCH /settings no longer reference shortTag or publicRoster",
+          "status": "passed"
+        },
+        {
+          "desc": "Seeding + boot succeed without the dropped fields",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0106",
+      "title": "Drop the member display name; make in-game name the sole identity",
+      "summary": "Collapse the two member name fields: backfill in_game_name from name where null, ALTER in_game_name to NOT NULL, DROP the members.name column (migration). Remove name from the Member entity + MemberDto(.from) + UpdateMemberDto (add required inGameName), and repoint every name reference (audit actor/target label fallback, event attendee display, discord-sync, member-query search, self-edit, dev-owner seed) to inGameName.",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "members",
+      "repo": "",
+      "paths": [
+        "src/members/entities/member.entity.ts",
+        "src/members/dto/member.dto.ts",
+        "src/members/dto/update-member.dto.ts",
+        "src/members/dto/member-admin.dto.ts",
+        "src/members/dto/member-query.dto.ts",
+        "src/members/members.service.ts",
+        "src/audit/dto/audit-log-entry.dto.ts",
+        "src/events/dto/attendee.dto.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/database/seeds/dev-owner.seed.ts",
+        "src/database/migrations/"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Collapse strategy: DROP the members.name column and promote in_game_name to the sole required identity (recommended), or keep the name column but stop exposing it? Note there is no UNIQUE index on in_game_name today (nothing to drop).",
+          "answer": null,
+          "askedAt": "2026-07-15T20:30:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "Migration backfills in_game_name, sets it NOT NULL, and drops the name column (with a down())",
+          "status": "passed"
+        },
+        {
+          "desc": "MemberDto/UpdateMemberDto expose only inGameName (required); search + audit/attendee/discord labels use inGameName",
+          "status": "passed"
+        },
+        {
+          "desc": "Existing members render with their in-game name across the API",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "members.name is denormalized into audit labels + attendee display + discord sync; dropping it needs every read path repointed and historical labels considered",
+          "status": "resolved",
+          "notedAt": "2026-07-15T20:30:00Z",
+          "resolvedAt": "2026-07-16T02:45:00Z",
+          "resolvedBy": "claude",
+          "note": "members.name dropped; in_game_name backfilled + NOT NULL; every denormalized read path (audit actor/target label fallback, attendee display, gallery author, discord-sync, member search/order, self-edit, CurrentUserDto, dev-owner seed) repointed to inGameName. 298 unit + 36 e2e green; /auth/me → inGameName verified live."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        }
+      ]
+    },
+    {
+      "id": "T-0107",
+      "title": "Standardize the oversize-upload error message",
+      "summary": "Reword the StorageService size-cap BadRequestException to the user-facing copy \"Your file size exceeds the limit of <N> MB\" (including the computed cap), consistently across all upload targets, so the frontend can surface it verbatim.",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "storage",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/dto/request-upload.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Requesting an upload ticket for an oversize file returns 400 with \"Your file size exceeds the limit of <N> MB\"",
+          "status": "passed"
+        },
+        {
+          "desc": "The message reflects the correct per-target cap",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
+      "createdAt": "2026-07-15T20:30:00Z",
+      "updatedAt": "2026-07-16T02:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-15T20:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created during bf-plan: dashboard polish batch (nav/auth/profile/gallery/events/roster/landing/settings/audit + display-name removal + file-size errors)"
+        },
+        {
+          "at": "2026-07-16T02:45:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
         }
       ]
     }
