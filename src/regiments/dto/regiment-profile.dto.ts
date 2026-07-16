@@ -13,9 +13,6 @@ export class RegimentProfileDto {
   @ApiProperty()
   name: string;
 
-  @ApiProperty({ description: 'Short tag/abbreviation (e.g. "LORDS")' })
-  shortTag: string;
-
   @ApiProperty({ nullable: true })
   missionStatement: string | null;
 
@@ -30,6 +27,9 @@ export class RegimentProfileDto {
 
   @ApiProperty({ nullable: true })
   establishedYear: number | null;
+
+  @ApiProperty({ nullable: true, description: 'Full establishment date (YYYY-MM-DD)' })
+  establishedAt: string | null;
 
   @ApiProperty({ nullable: true })
   discordInviteUrl: string | null;
@@ -48,12 +48,12 @@ export class RegimentProfileDto {
     const dto = new RegimentProfileDto();
     dto.id = regiment.id;
     dto.name = regiment.name;
-    dto.shortTag = regiment.shortTag;
     dto.missionStatement = regiment.missionStatement;
     dto.accentTone = regiment.accentTone;
     dto.crestUrl = regiment.crestUrl;
     dto.bannerUrl = regiment.bannerUrl;
     dto.establishedYear = regiment.establishedYear;
+    dto.establishedAt = regiment.establishedAt;
     dto.discordInviteUrl = regiment.discordInviteUrl;
     dto.discordServerName = regiment.discordServerName;
     dto.setupComplete = regiment.setupComplete;

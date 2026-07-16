@@ -27,12 +27,12 @@ const user = (overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser => 
 const buildRegiment = (overrides: Partial<Regiment> = {}): Regiment => ({
   id: REGIMENT,
   name: 'Lords',
-  shortTag: 'LORDS',
   missionStatement: null,
   accentTone: 'brass',
   crestUrl: null,
   bannerUrl: null,
   establishedYear: 2018,
+  establishedAt: null,
   discordInviteUrl: null,
   discordServerId: null,
   discordServerName: null,
@@ -47,7 +47,6 @@ const buildRegiment = (overrides: Partial<Regiment> = {}): Regiment => ({
 
 const buildSettings = (overrides: Partial<RegimentSettings> = {}): RegimentSettings => ({
   regimentId: REGIMENT,
-  publicRoster: true,
   publicGallery: true,
   publicEvents: true,
   publicStats: true,
@@ -124,7 +123,8 @@ describe('SettingsService', () => {
       const dto = await service.get(user());
 
       expect(dto.name).toBe('Lords');
-      expect(dto.publicRoster).toBe(true);
+      expect(dto.establishedYear).toBe(2018);
+      expect(dto.establishedAt).toBeNull();
       expect(dto.autoApproveTrustedMembers).toBe(false);
       expect(dto.galleryMaxImageSizeMb).toBe(12);
       expect(dto.eventDefaultTimezone).toBe('UTC');
@@ -139,19 +139,28 @@ describe('SettingsService', () => {
 
       const dto = await service.update(
         user(),
-        { name: 'Lords Regiment', publicEvents: false },
+        { name: 'Lords Regiment', establishedAt: '2023-11-20', publicEvents: false },
         null,
       );
 
       expect(regimentRepo.save).toHaveBeenCalledTimes(1);
       expect(settingsRepo.save).toHaveBeenCalledTimes(1);
       expect(dto.name).toBe('Lords Regiment');
+      expect(dto.establishedAt).toBe('2023-11-20');
       expect(dto.publicEvents).toBe(false);
 
       const recorded = audit.record.mock.calls[0][0];
       expect(recorded.action).toBe('settings.update');
-      expect(recorded.before).toEqual({ name: 'Lords', publicEvents: true });
-      expect(recorded.after).toEqual({ name: 'Lords Regiment', publicEvents: false });
+      expect(recorded.before).toEqual({
+        name: 'Lords',
+        establishedAt: null,
+        publicEvents: true,
+      });
+      expect(recorded.after).toEqual({
+        name: 'Lords Regiment',
+        establishedAt: '2023-11-20',
+        publicEvents: false,
+      });
     });
 
     it('is a no-op (no save, no audit) when nothing actually changes', async () => {
@@ -310,7 +319,7 @@ describe('SettingsService', () => {
       memberRepo.findOne.mockResolvedValue({
         id: 'member-2',
         regimentId: REGIMENT,
-        name: 'Jane',
+        inGameName: 'Jane',
         role: MemberRole.Member,
       });
 
@@ -342,7 +351,10 @@ describe('SettingsService', () => {
         { role: MemberRole.Admin },
       );
       expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'settings.transfer_ownership' }),
+        expect.objectContaining({
+          action: 'settings.transfer_ownership',
+          target: expect.objectContaining({ id: 'member-2', label: 'Jane' }),
+        }),
       );
     });
 

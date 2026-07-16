@@ -8,8 +8,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, FindOptionsWhere, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
+import { AuthzService } from '../authz/authz.service';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { EventStatus, Platform, RsvpStatus, StorageTarget } from '../common/enums';
+import { Capability, EventStatus, Platform, RsvpStatus, StorageTarget } from '../common/enums';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
@@ -80,6 +81,8 @@ export class EventsService {
     private readonly discordSync: DiscordSyncService,
     // Resolves an uploaded banner key to a public URL (namespace-validated).
     private readonly storage: StorageService,
+    // Capability checks — archived events are visible only to ManageEvents holders.
+    private readonly authz: AuthzService,
   ) {}
 
   // ── Public reads (no authenticated caller) ───────────────────────────────────
@@ -144,8 +147,16 @@ export class EventsService {
     const qb = this.events
       .createQueryBuilder('event')
       .where('event.regimentId = :regimentId', { regimentId: user.regimentId })
-      .andWhere('event.isDraft = :isDraft', { isDraft: false })
-      .andWhere('event.isArchived = :isArchived', { isArchived: false });
+      .andWhere('event.isDraft = :isDraft', { isDraft: false });
+
+    // Archived events are included only when explicitly requested AND the caller
+    // holds ManageEvents; every other caller sees active events only (T-0098).
+    const includeArchived =
+      query.archived === true &&
+      (await this.authz.can(user.regimentId, user.role, Capability.ManageEvents));
+    if (!includeArchived) {
+      qb.andWhere('event.isArchived = :isArchived', { isArchived: false });
+    }
 
     if (query.status) {
       qb.andWhere('event.status = :status', { status: query.status });
@@ -169,13 +180,67 @@ export class EventsService {
    */
   async getForMember(user: AuthenticatedUser, id: string): Promise<EventDto> {
     const event = await this.events.findOne({
-      where: { id, regimentId: user.regimentId, isDraft: false, isArchived: false },
+      where: { id, regimentId: user.regimentId, isDraft: false },
     });
     if (!event) {
       throw new NotFoundException('Event not found');
     }
+    // An archived event's detail is deep-linkable/fetchable only by a ManageEvents
+    // holder (so the Unarchive control works); everyone else gets a 404 (T-0097).
+    if (event.isArchived) {
+      const canManage = await this.authz.can(user.regimentId, user.role, Capability.ManageEvents);
+      if (!canManage) {
+        throw new NotFoundException('Event not found');
+      }
+    }
     const includeServer = !!user.memberId;
     return this.serializeOne(event, { includeServer, memberId: user.memberId });
+  }
+
+  // ── Per-member reads (profile Event History / RSVPs tabs, T-0100) ────────────
+
+  /**
+   * Every event the given member has attended (via the attendee join), for the
+   * profile Event History tab. Regiment-scoped, soft-deleted rows excluded,
+   * most recent first. Uses the public (server-redacted) projection — a history
+   * list never needs the server binding.
+   */
+  async listAttendedByMember(user: AuthenticatedUser, memberId: string): Promise<EventDto[]> {
+    const rows = await this.attendees
+      .createQueryBuilder('attendee')
+      .innerJoinAndSelect('attendee.event', 'event')
+      .where('attendee.memberId = :memberId', { memberId })
+      .andWhere('event.regimentId = :regimentId', { regimentId: user.regimentId })
+      .andWhere('event.deletedAt IS NULL')
+      .orderBy('event.startsAt', 'DESC')
+      .getMany();
+    const events = rows.map((r) => r.event).filter((e): e is RegimentEvent => !!e);
+    return this.serialize(events, { includeServer: false });
+  }
+
+  /**
+   * Every event the given member has RSVP'd to, with THEIR OWN RSVP reflected on
+   * each row (profile RSVPs tab). Regiment-scoped, soft-deleted rows excluded,
+   * most recent first. Public projection otherwise (no server binding).
+   */
+  async listRsvpsByMember(user: AuthenticatedUser, memberId: string): Promise<EventDto[]> {
+    const rows = await this.rsvps
+      .createQueryBuilder('rsvp')
+      .innerJoinAndSelect('rsvp.event', 'event')
+      .where('rsvp.memberId = :memberId', { memberId })
+      .andWhere('event.regimentId = :regimentId', { regimentId: user.regimentId })
+      .andWhere('event.deletedAt IS NULL')
+      .orderBy('event.startsAt', 'DESC')
+      .getMany();
+    const events = rows.map((r) => r.event).filter((e): e is RegimentEvent => !!e);
+    const dtos = await this.serialize(events, { includeServer: false });
+    // Reflect the member's own RSVP on each row (this is a view of THEIR RSVPs).
+    const rsvpByEvent = new Map(rows.map((r) => [r.eventId, r]));
+    for (const dto of dtos) {
+      const r = rsvpByEvent.get(dto.id);
+      dto.myRsvp = r ? { status: r.status, reminderOffsetMinutes: r.reminderOffsetMinutes } : null;
+    }
+    return dtos;
   }
 
   // ── Authoring + lifecycle (ManageEvents) ─────────────────────────────────────
@@ -334,6 +399,22 @@ export class EventsService {
     await this.audit.record({
       regimentId: user.regimentId,
       action: 'event.archive',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'event', id: saved.id, label: saved.title },
+    });
+
+    return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
+  }
+
+  /** Unarchive an event (isArchived=false) — restores it to the public calendar. */
+  async unarchive(user: AuthenticatedUser, id: string, ip: string | null): Promise<EventDto> {
+    const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
+    event.isArchived = false;
+    const saved = await this.events.save(event);
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'event.unarchive',
       actor: AuditService.actorFromUser(user, ip),
       target: { type: 'event', id: saved.id, label: saved.title },
     });
@@ -665,7 +746,7 @@ export class EventsService {
     const members = memberIds.length
       ? await this.members.find({ where: { id: In(memberIds) } })
       : [];
-    const nameById = new Map(members.map((m) => [m.id, m.name]));
+    const nameById = new Map(members.map((m) => [m.id, m.inGameName]));
     return rows
       .map((row) => AttendeeDto.from(row, nameById.get(row.memberId) ?? null))
       .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));

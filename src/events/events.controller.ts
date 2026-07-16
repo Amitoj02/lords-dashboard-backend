@@ -128,6 +128,19 @@ export class EventsController {
     return this.eventsService.archive(user, id, req.ip ?? null);
   }
 
+  @Post(':id/unarchive')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.ManageEvents)
+  @ApiOperation({ summary: 'Unarchive an event' })
+  @ApiOkResponse({ type: EventDto, description: 'The unarchived event.' })
+  unarchive(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseShortIdPipe) id: string,
+    @Req() req: Request,
+  ): Promise<EventDto> {
+    return this.eventsService.unarchive(user, id, req.ip ?? null);
+  }
+
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
   @RequireCapability(Capability.ManageEvents)

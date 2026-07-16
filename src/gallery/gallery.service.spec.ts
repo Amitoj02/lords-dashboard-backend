@@ -48,7 +48,7 @@ const buildItem = (overrides: Partial<GalleryItem> = {}): GalleryItem => ({
   id: 'gallery-1',
   regimentId: REGIMENT,
   authorMemberId: 'member-1',
-  author: { id: 'member-1', name: 'Jane Doe' } as unknown as Member,
+  author: { id: 'member-1', inGameName: 'Jane Doe' } as unknown as Member,
   moderatedByMemberId: null,
   title: 'The charge at dawn',
   caption: null,
@@ -68,7 +68,6 @@ const buildItem = (overrides: Partial<GalleryItem> = {}): GalleryItem => ({
 
 const buildSettings = (overrides: Partial<RegimentSettings> = {}): RegimentSettings => ({
   regimentId: REGIMENT,
-  publicRoster: true,
   publicGallery: true,
   publicEvents: true,
   publicStats: true,

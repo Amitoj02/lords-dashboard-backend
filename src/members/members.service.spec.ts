@@ -10,10 +10,11 @@ import { AuditService } from '../audit/audit.service';
 import { SessionContextService } from '../auth/session-context.service';
 import { StorageService } from '../storage/storage.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
+import { AuthzService } from '../authz/authz.service';
+import { EventsService } from '../events/events.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MemberRole, MemberStatus, Platform, StorageTarget } from '../common/enums';
+import { Capability, MemberRole, MemberStatus, StorageTarget } from '../common/enums';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
-import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -38,12 +39,9 @@ const buildMember = (overrides: Partial<Member> = {}): Member =>
   ({
     id: 'member-1',
     regimentId: REGIMENT,
-    name: 'Lord Commander',
     inGameName: 'LC',
     role: MemberRole.Member,
     status: MemberStatus.Active,
-    platform: Platform.Steam,
-    timezone: 'America/Toronto',
     discordLinked: true,
     publicProfile: true,
     avatarUrl: 'https://cdn/a.png',
@@ -89,7 +87,6 @@ describe('MembersService', () => {
     createQueryBuilder: jest.fn(),
   };
 
-  const eventRepo = { count: jest.fn() };
   const rankRepo = { findOne: jest.fn() };
   const medalRepo = { findOne: jest.fn() };
   const memberMedalRepo = {
@@ -120,6 +117,13 @@ describe('MembersService', () => {
   };
   const storage = {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+  };
+  // Capability gate for self-OR-admin service-record reads (T-0101).
+  const authz = { can: jest.fn() };
+  // Per-member events/RSVP tabs delegate to the events projection machinery.
+  const eventsService = {
+    listAttendedByMember: jest.fn(),
+    listRsvpsByMember: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -156,7 +160,6 @@ describe('MembersService', () => {
         MembersService,
         { provide: getRepositoryToken(Member), useValue: memberRepo },
         { provide: getRepositoryToken(EventAttendee), useValue: attendeeRepo },
-        { provide: getRepositoryToken(RegimentEvent), useValue: eventRepo },
         { provide: getRepositoryToken(Rank), useValue: rankRepo },
         { provide: getRepositoryToken(Medal), useValue: medalRepo },
         { provide: getRepositoryToken(MemberMedal), useValue: memberMedalRepo },
@@ -167,6 +170,8 @@ describe('MembersService', () => {
         { provide: DiscordSyncService, useValue: discordSync },
         { provide: SessionContextService, useValue: sessionContext },
         { provide: StorageService, useValue: storage },
+        { provide: AuthzService, useValue: authz },
+        { provide: EventsService, useValue: eventsService },
       ],
     }).compile();
 
@@ -174,10 +179,9 @@ describe('MembersService', () => {
   });
 
   describe('findAll', () => {
-    it('scopes by regiment, applies filters, and computes derived fields + attendance rate', async () => {
+    it('scopes by regiment, applies filters, and computes derived fields + attendance count', async () => {
       const member = buildMember();
       memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
-      eventRepo.count.mockResolvedValue(10); // 10 past events
       attendeeQb.getRawMany.mockResolvedValue([{ memberId: 'member-1', count: '7' }]);
 
       const result = await service.findAll(
@@ -198,52 +202,49 @@ describe('MembersService', () => {
         regimentId: REGIMENT,
       });
       expect(memberQb.andWhere).toHaveBeenCalledWith('member.deletedAt IS NULL');
-      // Search lowercased.
-      expect(memberQb.andWhere).toHaveBeenCalledWith(expect.stringContaining('LIKE :term'), {
-        term: '%comm%',
-      });
-      // Ordered by precedence then name.
+      // Search lowercased; LIKE clause covers inGameName + discordTag only.
+      expect(memberQb.andWhere).toHaveBeenCalledWith(
+        expect.stringContaining('LOWER(member.inGameName) LIKE :term'),
+        { term: '%comm%' },
+      );
+      // Ordered by precedence then in-game name.
       expect(memberQb.orderBy).toHaveBeenCalledWith('rank.precedence', 'ASC');
-      expect(memberQb.addOrderBy).toHaveBeenCalledWith('member.name', 'ASC');
+      expect(memberQb.addOrderBy).toHaveBeenCalledWith('member.inGameName', 'ASC');
 
       // Grouped attendance query was used (no N+1 .count per row).
       expect(attendeeRepo.createQueryBuilder).toHaveBeenCalledTimes(1);
       expect(attendeeRepo.count).not.toHaveBeenCalled();
 
       const dto = result.data[0];
+      expect(dto.inGameName).toBe('LC');
       expect(dto.rank).toBe('Sergeant');
       expect(dto.chevrons).toBe(3);
       expect(dto.rankPrecedence).toBe(2);
       expect(dto.discordTag).toBe('@commander');
       expect(dto.eventsAttended).toBe(7);
-      expect(dto.attendanceRate).toBe(70); // round(7/10*100)
       expect(dto.joinedAt).toBe('2024-01-01T00:00:00.000Z');
       expect(result.meta.total).toBe(1);
     });
 
-    it('returns attendanceRate 0 when there are no past events', async () => {
+    it('reflects the grouped attendance count on each row', async () => {
       const member = buildMember();
       memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
-      eventRepo.count.mockResolvedValue(0);
       attendeeQb.getRawMany.mockResolvedValue([{ memberId: 'member-1', count: '5' }]);
 
       const result = await service.findAll({ page: 1, limit: 20, skip: 0 }, user());
 
       expect(result.data[0].eventsAttended).toBe(5);
-      expect(result.data[0].attendanceRate).toBe(0);
     });
 
     it('defaults attendance to 0 for members absent from the grouped result', async () => {
-      const member = buildMember({ id: 'member-2', name: 'Recruit', rank: undefined });
+      const member = buildMember({ id: 'member-2', inGameName: 'Recruit', rank: undefined });
       memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
-      eventRepo.count.mockResolvedValue(4);
       attendeeQb.getRawMany.mockResolvedValue([]); // nobody attended
 
       const result = await service.findAll({ page: 1, limit: 20, skip: 0 }, user());
 
       const dto = result.data[0];
       expect(dto.eventsAttended).toBe(0);
-      expect(dto.attendanceRate).toBe(0);
       // Unranked member falls back gracefully.
       expect(dto.rank).toBeNull();
       expect(dto.chevrons).toBe(0);
@@ -254,7 +255,6 @@ describe('MembersService', () => {
   describe('findOne', () => {
     it('returns the projection with a per-member attendance count', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
-      eventRepo.count.mockResolvedValue(8);
       attendeeRepo.count.mockResolvedValue(2);
 
       const dto = await service.findOne('member-1', user());
@@ -263,8 +263,8 @@ describe('MembersService', () => {
         where: { id: 'member-1', regimentId: REGIMENT },
         relations: { rank: true, discordIdentity: true },
       });
+      expect(dto.inGameName).toBe('LC');
       expect(dto.eventsAttended).toBe(2);
-      expect(dto.attendanceRate).toBe(25); // round(2/8*100)
     });
 
     it('throws NotFound when the member is missing/wrong-regiment/soft-deleted', async () => {
@@ -285,20 +285,17 @@ describe('MembersService', () => {
       const member = buildMember();
       memberRepo.findOne.mockResolvedValue(member);
       memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
-      eventRepo.count.mockResolvedValue(0);
       attendeeRepo.count.mockResolvedValue(3);
 
       const dto = await service.updateSelf(
         'member-1',
-        { inGameName: 'NewIGN', timezone: 'UTC' },
+        { inGameName: 'NewIGN' },
         user({ memberId: 'member-1' }),
       );
 
       const saved = memberRepo.save.mock.calls[0][0] as Member;
       expect(saved.inGameName).toBe('NewIGN');
-      expect(saved.timezone).toBe('UTC');
       // Untouched fields are preserved.
-      expect(saved.platform).toBe(Platform.Steam);
       expect(saved.avatarUrl).toBe('https://cdn/a.png');
       // Self edits emit no audit row.
       expect(audit.record).not.toHaveBeenCalled();
@@ -310,7 +307,6 @@ describe('MembersService', () => {
       const member = buildMember();
       memberRepo.findOne.mockResolvedValue(member);
       memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
-      eventRepo.count.mockResolvedValue(0);
       attendeeRepo.count.mockResolvedValue(0);
 
       await service.updateSelf(
@@ -340,7 +336,7 @@ describe('MembersService', () => {
     it('throws NotFound when the authenticated member no longer exists', async () => {
       memberRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.updateSelf('member-1', { timezone: 'UTC' }, user({ memberId: 'member-1' })),
+        service.updateSelf('member-1', { inGameName: 'X' }, user({ memberId: 'member-1' })),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
@@ -348,7 +344,6 @@ describe('MembersService', () => {
   describe('admin actions', () => {
     beforeEach(() => {
       memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
-      eventRepo.count.mockResolvedValue(0);
       attendeeRepo.count.mockResolvedValue(0);
     });
 
@@ -394,6 +389,41 @@ describe('MembersService', () => {
       await expect(
         service.changeRole('owner-member', { role: MemberRole.Member }, user(), null),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('changeRole is a no-op when the new role matches the current role (T-0101)', async () => {
+      // buildMember defaults to MemberRole.Member, so assigning Member is a no-op.
+      memberRepo.findOne.mockResolvedValue(buildMember());
+
+      const dto = await service.changeRole('member-1', { role: MemberRole.Member }, user(), null);
+
+      // Projection is still returned, but nothing security-relevant is written.
+      expect(dto.role).toBe(MemberRole.Member);
+      expect(memberRepo.save).not.toHaveBeenCalled();
+      expect(serviceRecordRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+      expect(sessionContext.invalidate).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+    });
+
+    it('changeRole applies a real change and records service/audit + invalidation + role sync', async () => {
+      memberRepo.findOne.mockResolvedValue(buildMember());
+
+      const dto = await service.changeRole(
+        'member-1',
+        { role: MemberRole.Admin },
+        user({ role: MemberRole.Owner }),
+        '1.2.3.4',
+      );
+
+      expect(dto.role).toBe(MemberRole.Admin);
+      expect(memberRepo.save).toHaveBeenCalledTimes(1);
+      expect(serviceRecordRepo.save).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'member.role.change', regimentId: REGIMENT }),
+      );
+      expect(sessionContext.invalidate).toHaveBeenCalledTimes(1);
+      expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
     });
 
     it('awardMedal inserts a member_medal row and audits medal.award', async () => {
@@ -450,6 +480,73 @@ describe('MembersService', () => {
       await expect(service.unban('member-1', user(), null)).rejects.toBeInstanceOf(
         ConflictException,
       );
+    });
+  });
+
+  describe('getServiceRecord (self-OR-admin gate, T-0101)', () => {
+    beforeEach(() => {
+      memberRepo.findOne.mockResolvedValue(buildMember());
+      serviceRecordRepo.find.mockResolvedValue([]);
+    });
+
+    it('allows a member to read their own record without a capability check', async () => {
+      const result = await service.getServiceRecord('member-1', user({ memberId: 'member-1' }));
+
+      expect(result).toEqual([]);
+      expect(authz.can).not.toHaveBeenCalled();
+    });
+
+    it('allows another caller who holds view_audit_log', async () => {
+      authz.can.mockResolvedValue(true);
+
+      const result = await service.getServiceRecord(
+        'member-1',
+        user({ memberId: 'other-member', role: MemberRole.Admin }),
+      );
+
+      expect(result).toEqual([]);
+      expect(authz.can).toHaveBeenCalledWith(REGIMENT, MemberRole.Admin, Capability.ViewAuditLog);
+    });
+
+    it('forbids another caller lacking view_audit_log', async () => {
+      authz.can.mockResolvedValue(false);
+
+      await expect(
+        service.getServiceRecord('member-1', user({ memberId: 'other-member' })),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(serviceRecordRepo.find).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getEvents / getRsvps (per-member tabs, T-0100)', () => {
+    it('getEvents loads the member then delegates to EventsService.listAttendedByMember', async () => {
+      memberRepo.findOne.mockResolvedValue(buildMember());
+      const events = [{ id: 'event-1' }] as never;
+      eventsService.listAttendedByMember.mockResolvedValue(events);
+
+      const caller = user();
+      const result = await service.getEvents('member-1', caller);
+
+      expect(result).toBe(events);
+      expect(eventsService.listAttendedByMember).toHaveBeenCalledWith(caller, 'member-1');
+    });
+
+    it('getEvents 404s when the member is not in the caller regiment', async () => {
+      memberRepo.findOne.mockResolvedValue(null);
+      await expect(service.getEvents('missing', user())).rejects.toBeInstanceOf(NotFoundException);
+      expect(eventsService.listAttendedByMember).not.toHaveBeenCalled();
+    });
+
+    it('getRsvps loads the member then delegates to EventsService.listRsvpsByMember', async () => {
+      memberRepo.findOne.mockResolvedValue(buildMember());
+      const events = [{ id: 'event-2' }] as never;
+      eventsService.listRsvpsByMember.mockResolvedValue(events);
+
+      const caller = user();
+      const result = await service.getRsvps('member-1', caller);
+
+      expect(result).toBe(events);
+      expect(eventsService.listRsvpsByMember).toHaveBeenCalledWith(caller, 'member-1');
     });
   });
 

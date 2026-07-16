@@ -11,23 +11,25 @@ import { In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
+import { AuthzService } from '../authz/authz.service';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import {
   AccountDeletionStatus,
-  EventStatus,
+  Capability,
   MemberRole,
   MemberStatus,
   StorageTarget,
 } from '../common/enums';
 import { StorageService } from '../storage/storage.service';
+import { EventDto } from '../events/dto/event.dto';
+import { EventsService } from '../events/events.service';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
-import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
-import { MemberDto, MemberMedalSummary, MemberMetrics } from './dto/member.dto';
+import { MemberDto, MemberMedalSummary } from './dto/member.dto';
 import { MemberQueryDto } from './dto/member-query.dto';
 import {
   AwardMedalDto,
@@ -47,10 +49,10 @@ import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 /**
  * Roster read/profile + admin actions. Every query is scoped to the caller's
  * regiment (single-tenant) and excludes soft-deleted rows. Derived fields —
- * rank, chevrons, medals, confirmed attendance and attendance rate — are
- * computed server-side; the client is never trusted for them. List lookups
- * (attendance, medals) are batched into grouped queries to avoid N+1. Every
- * admin mutation writes a service-record entry and an audit row.
+ * rank, chevrons, medals and confirmed attendance count — are computed
+ * server-side; the client is never trusted for them. List lookups (attendance,
+ * medals) are batched into grouped queries to avoid N+1. Every admin mutation
+ * writes a service-record entry and an audit row.
  */
 @Injectable()
 export class MembersService {
@@ -59,8 +61,6 @@ export class MembersService {
     private readonly members: Repository<Member>,
     @InjectRepository(EventAttendee)
     private readonly attendees: Repository<EventAttendee>,
-    @InjectRepository(RegimentEvent)
-    private readonly events: Repository<RegimentEvent>,
     @InjectRepository(Rank)
     private readonly ranks: Repository<Rank>,
     @InjectRepository(Medal)
@@ -82,6 +82,10 @@ export class MembersService {
     private readonly sessionContext: SessionContextService,
     // Resolves uploaded avatar/banner keys to public URLs (namespace-validated).
     private readonly storage: StorageService,
+    // Capability checks for self-OR-admin gating (service-record read, T-0101).
+    private readonly authz: AuthzService,
+    // Reuses the events projection machinery for the per-member events/RSVP tabs.
+    private readonly eventsService: EventsService,
   ) {}
 
   /**
@@ -103,7 +107,7 @@ export class MembersService {
     if (query.search) {
       const term = `%${query.search.toLowerCase()}%`;
       qb.andWhere(
-        '(LOWER(member.name) LIKE :term OR LOWER(member.inGameName) LIKE :term OR LOWER(identity.discordTag) LIKE :term)',
+        '(LOWER(member.inGameName) LIKE :term OR LOWER(identity.discordTag) LIKE :term)',
         { term },
       );
     }
@@ -118,15 +122,14 @@ export class MembersService {
     }
 
     qb.orderBy('rank.precedence', 'ASC')
-      .addOrderBy('member.name', 'ASC')
+      .addOrderBy('member.inGameName', 'ASC')
       .skip(query.skip)
       .take(query.limit);
 
     const [rows, total] = await qb.getManyAndCount();
 
-    // Compute shared denominator once, then batch the attendance counts + medals
-    // for the whole page in single grouped queries (no per-row N+1).
-    const totalPastEvents = await this.countPastEvents(user.regimentId);
+    // Batch the attendance counts + medals for the whole page in single grouped
+    // queries (no per-row N+1).
     const memberIds = rows.map((m) => m.id);
     const attendanceByMember = await this.attendanceCounts(memberIds);
     const medalsByMember = await this.medalsByMember(memberIds);
@@ -134,7 +137,7 @@ export class MembersService {
     const data = rows.map((member) =>
       MemberDto.from(
         member,
-        this.metricsFor(attendanceByMember.get(member.id) ?? 0, totalPastEvents),
+        { eventsAttended: attendanceByMember.get(member.id) ?? 0 },
         medalsByMember.get(member.id) ?? [],
       ),
     );
@@ -154,9 +157,9 @@ export class MembersService {
   /**
    * Self-service profile update. A member may only edit their own profile — any
    * mismatch with the authenticated member id is forbidden. Only the restricted
-   * set of fields (name/platform/timezone/inGameName + avatar/banner via an
-   * uploaded storage key) is mutable here. Changing role/status/rank belongs to
-   * the admin actions below and is not permitted through this handler.
+   * set of fields (inGameName + avatar/banner via an uploaded storage key) is
+   * mutable here. Changing role/status/rank belongs to the admin actions below
+   * and is not permitted through this handler.
    */
   async updateSelf(id: string, dto: UpdateMemberDto, user: AuthenticatedUser): Promise<MemberDto> {
     if (user.memberId !== id) {
@@ -165,11 +168,8 @@ export class MembersService {
 
     const member = await this.loadMember(id, user.regimentId);
 
-    // Display name is self-editable; like the other self-edit fields below it is
+    // In-game name is self-editable; like the avatar/banner below it is
     // intentionally not audited (no security-relevant role/status/rank change).
-    if (dto.name !== undefined) member.name = dto.name;
-    if (dto.platform !== undefined) member.platform = dto.platform;
-    if (dto.timezone !== undefined) member.timezone = dto.timezone;
     if (dto.inGameName !== undefined) member.inGameName = dto.inGameName;
     // Avatar/banner are set from an uploaded storage key; the key's namespace is
     // re-validated (it must live under THIS member's prefix) before it is
@@ -216,7 +216,7 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'member.rank.change',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
       before,
       after: { rankId: rank.id, rank: rank.name },
       detail: dto.note ?? null,
@@ -246,6 +246,12 @@ export class MembersService {
       throw new ForbiddenException("Cannot change the regiment owner's role");
     }
 
+    // A no-op change (same role) records nothing — no service-record entry, no
+    // audit row, no session invalidation or Discord role sync (T-0101).
+    if (dto.role === member.role) {
+      return this.project(member);
+    }
+
     const before = { role: member.role };
     member.role = dto.role;
     await this.members.save(member);
@@ -255,7 +261,7 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'member.role.change',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
       before,
       after: { role: dto.role },
       detail: dto.note ?? null,
@@ -296,7 +302,7 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'medal.award',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
       detail: `Awarded ${medal.title}`,
     });
 
@@ -330,7 +336,7 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'medal.remove',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
       detail: `Removed ${title}`,
     });
 
@@ -368,7 +374,7 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'member.suspend',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
       before,
       after: { suspendedUntil: until.toISOString() },
       detail: dto.reason ?? null,
@@ -410,7 +416,7 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'member.ban',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
       after: { bannedAt: member.bannedAt.toISOString() },
       detail: dto.reason ?? null,
     });
@@ -442,15 +448,29 @@ export class MembersService {
       regimentId: user.regimentId,
       action: 'member.unban',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: member.id, memberId: member.id, label: member.name },
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
     });
 
     return this.project(member);
   }
 
-  /** A member's service timeline (most recent first). Any authed member may read. */
+  /**
+   * A member's service timeline (most recent first). Readable only by the member
+   * themselves or an admin holding view_audit_log — any other caller is
+   * forbidden (T-0101). The privacy-gated profile section mirrors this rule.
+   */
   async getServiceRecord(id: string, user: AuthenticatedUser): Promise<ServiceRecordEntryDto[]> {
     await this.loadMember(id, user.regimentId); // 404s if not in the regiment
+    if (user.memberId !== id) {
+      const canViewAudit = await this.authz.can(
+        user.regimentId,
+        user.role,
+        Capability.ViewAuditLog,
+      );
+      if (!canViewAudit) {
+        throw new ForbiddenException('You can only view your own service record');
+      }
+    }
     const entries = await this.serviceRecords.find({
       where: { memberId: id, regimentId: user.regimentId },
       order: { occurredAt: 'DESC', createdAt: 'DESC' },
@@ -477,10 +497,21 @@ export class MembersService {
       throw new BadRequestException('Both acknowledgements are required');
     }
 
+    // Idempotent: if a pending request already exists (e.g. a prior confirm step
+    // failed after this one was created), return ITS token to the same owner so the
+    // flow can be retried and completed — rather than getting stuck behind a 409
+    // with the original token lost. The token authorizes only the caller's own
+    // deletion, so returning it to self is safe.
     const existing = await this.deletionRequests.findOne({
       where: { memberId: user.memberId, status: AccountDeletionStatus.PendingDiscordConfirmation },
     });
-    if (existing) throw new ConflictException('A deletion request is already pending');
+    if (existing) {
+      return {
+        requestId: existing.id,
+        status: existing.status,
+        confirmToken: existing.confirmToken,
+      };
+    }
 
     const request = await this.deletionRequests.save(
       this.deletionRequests.create({
@@ -580,10 +611,30 @@ export class MembersService {
 
   /** Project a single loaded member to a DTO, computing its metrics + medals. */
   private async project(member: Member): Promise<MemberDto> {
-    const totalPastEvents = await this.countPastEvents(member.regimentId);
     const eventsAttended = await this.attendees.count({ where: { memberId: member.id } });
     const medals = (await this.medalsByMember([member.id])).get(member.id) ?? [];
-    return MemberDto.from(member, this.metricsFor(eventsAttended, totalPastEvents), medals);
+    return MemberDto.from(member, { eventsAttended }, medals);
+  }
+
+  // ── Per-member events + RSVPs (profile Event History / RSVPs tabs, T-0100) ────
+
+  /**
+   * The events the given member attended (past attendances), for the profile
+   * Event History tab. 404s if the member is not in the caller's regiment; the
+   * projection is the public (server-redacted) event shape.
+   */
+  async getEvents(id: string, user: AuthenticatedUser): Promise<EventDto[]> {
+    await this.loadMember(id, user.regimentId); // 404s if not in the regiment
+    return this.eventsService.listAttendedByMember(user, id);
+  }
+
+  /**
+   * The events the given member RSVP'd to (with their own RSVP reflected), for
+   * the profile RSVPs tab. 404s if the member is not in the caller's regiment.
+   */
+  async getRsvps(id: string, user: AuthenticatedUser): Promise<EventDto[]> {
+    await this.loadMember(id, user.regimentId); // 404s if not in the regiment
+    return this.eventsService.listRsvpsByMember(user, id);
   }
 
   /** Append a service-record entry for a member. */
@@ -611,13 +662,6 @@ export class MembersService {
     if (regiment?.ownerMemberId === member.id) {
       throw new ForbiddenException('Cannot suspend or ban the regiment owner');
     }
-  }
-
-  /** Count of past (previous, non-archived) events — the attendance denominator. */
-  private countPastEvents(regimentId: string): Promise<number> {
-    return this.events.count({
-      where: { regimentId, status: EventStatus.Previous, isArchived: false },
-    });
   }
 
   /**
@@ -666,14 +710,5 @@ export class MembersService {
       map.set(award.memberId, list);
     }
     return map;
-  }
-
-  /** Derive the attendance metrics (rate clamped 0..100; 0 when no past events). */
-  private metricsFor(eventsAttended: number, totalPastEvents: number): MemberMetrics {
-    if (totalPastEvents <= 0) {
-      return { eventsAttended, attendanceRate: 0 };
-    }
-    const rate = Math.round((eventsAttended / totalPastEvents) * 100);
-    return { eventsAttended, attendanceRate: Math.max(0, Math.min(100, rate)) };
   }
 }

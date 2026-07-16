@@ -8,7 +8,29 @@ import {
   Max,
   MaxLength,
   Min,
+  Validate,
+  ValidatorConstraint,
+  ValidatorConstraintInterface,
 } from 'class-validator';
+
+/**
+ * Validates a YYYY-MM-DD date for both SHAPE and CALENDAR validity, so an
+ * impossible-but-well-formatted value (e.g. 2023-02-31, 2023-13-01, 0000-00-00)
+ * is rejected with a clean 400 rather than reaching the MySQL DATE column and
+ * 500ing under strict sql_mode.
+ */
+@ValidatorConstraint({ name: 'isCalendarDate', async: false })
+export class IsCalendarDate implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const [y, m, d] = value.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+  }
+  defaultMessage(): string {
+    return 'establishedAt must be a valid YYYY-MM-DD calendar date';
+  }
+}
 
 /**
  * Body for PATCH /api/settings. EVERY field is optional — only the provided,
@@ -26,12 +48,6 @@ export class UpdateSettingsDto {
   @IsString()
   @MaxLength(120)
   name?: string;
-
-  @ApiPropertyOptional({ maxLength: 6 })
-  @IsOptional()
-  @IsString()
-  @MaxLength(6)
-  shortTag?: string;
 
   @ApiPropertyOptional({ maxLength: 400 })
   @IsOptional()
@@ -64,6 +80,14 @@ export class UpdateSettingsDto {
   @Max(9999)
   establishedYear?: number;
 
+  @ApiPropertyOptional({
+    description: 'Full establishment date as YYYY-MM-DD',
+    example: '2023-11-20',
+  })
+  @IsOptional()
+  @Validate(IsCalendarDate)
+  establishedAt?: string;
+
   @ApiPropertyOptional({ maxLength: 255 })
   @IsOptional()
   @IsString()
@@ -77,11 +101,6 @@ export class UpdateSettingsDto {
   discordServerName?: string;
 
   // ── Privacy toggles ──────────────────────────────────────────────────────────
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  publicRoster?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -123,7 +123,9 @@ export class StorageService {
     const maxMb = await this.maxMbFor(dto.target, kind, user.regimentId);
     const capMb = Math.min(maxMb, this.cfg.maxUploadMb);
     if (dto.sizeBytes > capMb * 1024 * 1024) {
-      throw new BadRequestException(`File exceeds the ${capMb} MB limit for ${dto.target}`);
+      // User-facing copy standardized across every upload target (T-0107) so the
+      // frontend can surface it verbatim.
+      throw new BadRequestException(`Your file size exceeds the limit of ${capMb} MB`);
     }
 
     await this.authorize(user, dto.target, policy);

@@ -2,8 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { DiscordModule } from '../discord/discord.module';
+import { EventsModule } from '../events/events.module';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
-import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -29,7 +29,6 @@ import { MembersService } from './members.service';
       Rank,
       DiscordIdentity,
       EventAttendee,
-      RegimentEvent,
       Medal,
       MemberMedal,
       ServiceRecordEntry,
@@ -41,6 +40,8 @@ import { MembersService } from './members.service';
     DiscordModule,
     // Resolves uploaded avatar/banner keys to public URLs (StorageService).
     StorageModule,
+    // Reuses the events projection for the per-member events/RSVP profile tabs.
+    EventsModule,
   ],
   controllers: [MembersController],
   providers: [MembersService],

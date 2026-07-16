@@ -241,7 +241,7 @@ export class AuthService {
   private static toMemberProjection(member: Member): CurrentUserDto {
     return {
       id: member.id,
-      name: member.name,
+      inGameName: member.inGameName,
       rank: member.rank?.name ?? null,
       role: member.role,
       discordTag: null,
@@ -257,7 +257,7 @@ export class AuthService {
   private static toIdentityProjection(identity: DiscordIdentity): CurrentUserDto {
     return {
       id: identity.id,
-      name: identity.globalName ?? identity.discordUsername ?? 'Recruit',
+      inGameName: identity.globalName ?? identity.discordUsername ?? 'Recruit',
       rank: null,
       role: MemberRole.Applicant,
       discordTag: identity.discordTag,

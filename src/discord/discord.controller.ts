@@ -28,18 +28,13 @@ import {
   DiscordVerifyConnectionDto,
 } from './dto/discord-connection.dto';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
-import {
-  AnnounceDto,
-  BindGuildDto,
-  DiscordOperationsQueryDto,
-  SimulateJoinDto,
-} from './dto/discord-inputs.dto';
+import { BindGuildDto, DiscordOperationsQueryDto, SimulateJoinDto } from './dto/discord-inputs.dto';
 
 /**
- * Discord bot control API. Everything requires ManageSettings except /announce
- * (ManageNotifications). The bot has no slash commands — it only syncs roles and
- * posts announcements — so this is the sole surface for driving it. All work is
- * enqueued through the outbox and audited in the service.
+ * Discord bot control API. Everything requires ManageSettings. The bot has no
+ * slash commands — it only syncs roles and posts event/enlistment announcements —
+ * so this is the sole surface for driving it. All work is enqueued through the
+ * outbox and audited in the service.
  */
 @ApiTags('discord')
 @ApiBearerAuth('access-token')
@@ -120,18 +115,6 @@ export class DiscordController {
     @Req() req: Request,
   ): Promise<{ enqueued: number }> {
     return this.discordService.resync(user, req.ip ?? null);
-  }
-
-  @Post('announce')
-  @HttpCode(HttpStatus.OK)
-  @RequireCapability(Capability.ManageNotifications)
-  @ApiOperation({ summary: 'Broadcast an announcement to Discord (via the outbox)' })
-  announce(
-    @Body() dto: AnnounceDto,
-    @CurrentUser() user: AuthenticatedUser,
-    @Req() req: Request,
-  ): Promise<{ enqueued: boolean }> {
-    return this.discordService.announce(user, dto, req.ip ?? null);
   }
 
   @Get('operations')

@@ -110,6 +110,13 @@ export class EventDto {
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   serverRegion?: string | null;
 
+  @ApiPropertyOptional({
+    description:
+      'Whether a server password is set (member view only) — lets the UI hide the ' +
+      'password/reveal controls for passwordless events. The password itself is never projected.',
+  })
+  hasServerPassword?: boolean;
+
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   recurrenceRule?: string | null;
 
@@ -197,6 +204,9 @@ export class EventDto {
     if (opts.includeServer) {
       dto.serverName = event.serverName;
       dto.serverRegion = event.serverRegion;
+      // Non-sensitive presence flag — the password value itself is NEVER projected
+      // (only the dedicated reveal endpoint returns it).
+      dto.hasServerPassword = event.serverPassword != null;
       dto.recurrenceRule = event.recurrenceRule;
       dto.recurrenceCadence = event.recurrenceCadence;
       dto.recurrenceActive = event.recurrenceActive;

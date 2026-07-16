@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ApplicationStatus } from '../../common/enums';
+import { ApplicantType, ApplicationStatus } from '../../common/enums';
 import { Application } from '../entities/application.entity';
 
 /**
@@ -19,6 +19,9 @@ export class ApplicationDto {
 
   @ApiProperty({ example: 'JaneTheGreat' })
   inGameName: string;
+
+  @ApiProperty({ enum: ApplicantType, description: 'Enlistment track (Member or Mercenary)' })
+  applicantType: ApplicantType;
 
   @ApiProperty({ example: 'None' })
   currentRegiment: string;
@@ -75,6 +78,7 @@ export class ApplicationDto {
       applicantName: application.applicantName,
       discordTag: application.discordTag,
       inGameName: application.inGameName,
+      applicantType: application.applicantType,
       currentRegiment: application.currentRegiment,
       howFound: application.howFound,
       preferredClasses: application.preferredClasses,

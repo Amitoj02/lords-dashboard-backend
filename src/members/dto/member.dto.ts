@@ -1,13 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { MedalRibbon, MemberRole, MemberStatus, Platform } from '../../common/enums';
+import { MedalRibbon, MemberRole, MemberStatus } from '../../common/enums';
 import { Member } from '../entities/member.entity';
 
-/** Computed/derived attendance metrics passed into the {@link MemberDto} mapper. */
+/** Computed/derived metrics passed into the {@link MemberDto} mapper. */
 export interface MemberMetrics {
   /** Number of past events this member has confirmed attendance for. */
   eventsAttended: number;
-  /** Attendance percentage (0..100), rounded; 0 when there are no past events. */
-  attendanceRate: number;
 }
 
 /**
@@ -47,23 +45,14 @@ export class MemberDto {
   @ApiProperty({ format: 'uuid' })
   id: string;
 
-  @ApiProperty()
-  name: string;
-
-  @ApiProperty({ nullable: true })
-  inGameName: string | null;
+  @ApiProperty({ description: 'In-game name — the sole display identity' })
+  inGameName: string;
 
   @ApiProperty({ enum: MemberRole })
   role: MemberRole;
 
   @ApiProperty({ enum: MemberStatus })
   status: MemberStatus;
-
-  @ApiProperty({ enum: Platform, nullable: true })
-  platform: Platform | null;
-
-  @ApiProperty({ nullable: true })
-  timezone: string | null;
 
   @ApiProperty({ nullable: true, description: 'Rank name (from the rank ladder)' })
   rank: string | null;
@@ -104,9 +93,6 @@ export class MemberDto {
   @ApiProperty({ description: 'Confirmed attendances at past events' })
   eventsAttended: number;
 
-  @ApiProperty({ description: 'Attendance rate as a 0..100 percentage' })
-  attendanceRate: number;
-
   @ApiProperty({ nullable: true, description: 'ISO timestamp until which the member is suspended' })
   suspendedUntil: string | null;
 
@@ -132,12 +118,9 @@ export class MemberDto {
   ): MemberDto {
     const dto = new MemberDto();
     dto.id = member.id;
-    dto.name = member.name;
     dto.inGameName = member.inGameName;
     dto.role = member.role;
     dto.status = member.status;
-    dto.platform = member.platform;
-    dto.timezone = member.timezone;
     dto.rank = member.rank?.name ?? null;
     dto.rankId = member.rankId;
     dto.chevrons = member.rank?.chevrons ?? 0;
@@ -152,7 +135,6 @@ export class MemberDto {
     dto.joinedAt = member.joinedAt ? member.joinedAt.toISOString() : null;
     dto.lastSeenAt = member.lastSeenAt ? member.lastSeenAt.toISOString() : null;
     dto.eventsAttended = metrics.eventsAttended;
-    dto.attendanceRate = metrics.attendanceRate;
     dto.suspendedUntil = member.suspendedUntil ? member.suspendedUntil.toISOString() : null;
     dto.bannedAt = member.bannedAt ? member.bannedAt.toISOString() : null;
     dto.medals = medals;

@@ -12,7 +12,6 @@ import { MemberRole } from '../src/common/enums';
 import { RegimentEvent } from '../src/events/entities/event.entity';
 import { GalleryItem } from '../src/gallery/entities/gallery-item.entity';
 import { Member } from '../src/members/entities/member.entity';
-import { Notification } from '../src/notifications/entities/notification.entity';
 
 /**
  * End-to-end coverage of the POST-MVP feature modules against a real MySQL
@@ -68,7 +67,6 @@ describe('Post-MVP feature modules (e2e)', () => {
   // Rows created during the run, torn down in afterAll.
   let eventId: string | undefined;
   let galleryId: string | undefined;
-  const notificationIds: string[] = [];
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -101,7 +99,6 @@ describe('Post-MVP feature modules (e2e)', () => {
       );
     if (eventId) await dataSource.getRepository(RegimentEvent).delete(eventId);
     if (galleryId) await dataSource.getRepository(GalleryItem).delete(galleryId);
-    for (const id of notificationIds) await dataSource.getRepository(Notification).delete(id);
     await cleanupApplicant();
     await app.close();
   });
@@ -323,42 +320,6 @@ describe('Post-MVP feature modules (e2e)', () => {
     });
   });
 
-  // ── Notifications (T-0018) ─────────────────────────────────────────────────
-  describe('notifications: compose + per-member unread state', () => {
-    it('composing raises the unread count and marking read clears it', async () => {
-      const before = await request(server())
-        .get('/api/notifications/unread-count')
-        .set(bearer(ownerToken))
-        .expect(200);
-      const baseline = before.body.count as number;
-
-      const created = await request(server())
-        .post('/api/notifications')
-        .set(bearer(ownerToken))
-        .send({ title: 'E2E Dispatch', body: 'Muster at 1900.' })
-        .expect(201);
-      const notificationId = created.body.id as string;
-      notificationIds.push(notificationId);
-
-      const afterCompose = await request(server())
-        .get('/api/notifications/unread-count')
-        .set(bearer(ownerToken))
-        .expect(200);
-      expect(afterCompose.body.count).toBe(baseline + 1);
-
-      await request(server())
-        .post(`/api/notifications/${notificationId}/read`)
-        .set(bearer(ownerToken))
-        .expect(200);
-
-      const afterRead = await request(server())
-        .get('/api/notifications/unread-count')
-        .set(bearer(ownerToken))
-        .expect(200);
-      expect(afterRead.body.count).toBe(baseline);
-    });
-  });
-
   // ── Audit read (T-0017) ────────────────────────────────────────────────────
   describe('audit read: detail + CSV export are capability-gated', () => {
     it('serves entry detail and a CSV export to an authorized reader', async () => {
@@ -388,13 +349,17 @@ describe('Post-MVP feature modules (e2e)', () => {
     });
 
     it('neutralizes spreadsheet formula injection in the CSV export', async () => {
-      // A dispatch title that is a formula lands in an audit row's targetLabel.
-      const created = await request(server())
-        .post('/api/notifications')
+      // An event title that is a formula lands in an audit row's targetLabel.
+      await request(server())
+        .post('/api/events')
         .set(bearer(ownerToken))
-        .send({ title: '=HYPERLINK("http://evil","x")', body: 'payload' })
+        .send({
+          title: '=HYPERLINK("http://evil","x")',
+          startsAt: '2099-02-02T20:00:00.000Z',
+          platforms: ['steam'],
+          tags: ['e2e'],
+        })
         .expect(201);
-      notificationIds.push(created.body.id as string);
 
       const csv = await request(server())
         .get('/api/audit/export')

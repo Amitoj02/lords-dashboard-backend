@@ -34,9 +34,6 @@ const MATRIX: Record<Capability, MemberRole[]> = {
   [Capability.RsvpToEvents]: ENROLLED,
   [Capability.ViewMembersDirectory]: ENROLLED,
   [Capability.ApplyToJoin]: [MemberRole.Applicant],
-  // Composing field dispatches / announcements (may cross-post to Discord) is an
-  // admin action — Owner + Admin only, not Moderator.
-  [Capability.ManageNotifications]: ADMINS,
 };
 
 export async function seedRolePermissions(ds: DataSource): Promise<void> {

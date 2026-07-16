@@ -167,7 +167,7 @@ export class GalleryService {
       .leftJoin('item.author', 'author')
       .select('item.id', 'id')
       .addSelect('item.title', 'title')
-      .addSelect('author.name', 'submitterUsername')
+      .addSelect('author.inGameName', 'submitterUsername')
       .where('item.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('item.status = :status', { status: GalleryStatus.Pending })
       .andWhere('item.isDraft = :isDraft', { isDraft: false })
@@ -455,7 +455,7 @@ export class GalleryService {
         files: filesByItem.get(item.id) ?? [],
         likesCount: likeCounts.get(item.id) ?? 0,
         tags: tagsByItem.get(item.id) ?? [],
-        author: item.author ? { memberId: item.author.id, name: item.author.name } : null,
+        author: item.author ? { memberId: item.author.id, name: item.author.inGameName } : null,
         liked: likedSet ? likedSet.has(item.id) : undefined,
       }),
     );

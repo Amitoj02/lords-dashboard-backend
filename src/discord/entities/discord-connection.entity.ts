@@ -12,7 +12,7 @@ import { BotConnectionStatus } from '../../common/enums';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /**
- * Read-only persisted status of the "Quartermaster" Discord bot (the bot itself
+ * Read-only persisted status of the "Lord Adjutant" Discord bot (the bot itself
  * is NOT built here). Server id/name are read from the regiment, not duplicated.
  */
 @Entity('discord_connections')

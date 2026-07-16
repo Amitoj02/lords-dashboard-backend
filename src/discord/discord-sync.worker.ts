@@ -175,7 +175,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         await this.audit.record({
           regimentId: job.regimentId,
           action: 'discord.member.ban_role',
-          actor: { type: AuditActorType.Bot, memberId: null, label: 'Quartermaster bot' },
+          actor: { type: AuditActorType.Bot, memberId: null, label: 'Lord Adjutant bot' },
           detail: `Stripped managed roles and applied the Ban role to ${String(p.discordUserId)}`,
         });
         return;
@@ -379,7 +379,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     await this.audit.record({
       regimentId: job.regimentId,
       action: 'discord.sync.failed',
-      actor: { type: AuditActorType.Bot, memberId: null, label: 'Quartermaster bot' },
+      actor: { type: AuditActorType.Bot, memberId: null, label: 'Lord Adjutant bot' },
       detail: `${job.jobType} failed after ${job.attempts} attempts: ${error.message}`.slice(
         0,
         500,

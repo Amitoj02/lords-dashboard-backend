@@ -16,11 +16,11 @@ export async function seedRegiment(ds: DataSource): Promise<void> {
     { id: REGIMENT_ID },
     {
       name: 'Lords Regiment',
-      shortTag: 'LORDS',
       missionStatement:
         'Discipline, honour, and the line. A Holdfast: Nations at War regiment of standing.',
       accentTone: 'brass',
-      establishedYear: 2021,
+      establishedYear: 2023,
+      establishedAt: '2023-11-20',
       setupStep: 5,
       setupComplete: !isRealDeploy,
     },

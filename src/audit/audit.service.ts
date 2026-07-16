@@ -237,11 +237,11 @@ export class AuditService {
           row.action,
           row.severity,
           row.actorType,
-          row.actorLabel ?? row.actorMember?.name ?? '',
+          row.actorLabel ?? row.actorMember?.inGameName ?? '',
           row.actorMemberId,
           row.targetType,
           row.targetId,
-          row.targetLabel ?? row.targetMember?.name ?? '',
+          row.targetLabel ?? row.targetMember?.inGameName ?? '',
           row.detail,
         ]
           .map((field) => this.escapeCsvField(field))

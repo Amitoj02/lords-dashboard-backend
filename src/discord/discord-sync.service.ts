@@ -89,30 +89,14 @@ export class DiscordSyncService {
     });
   }
 
-  /** Enqueue an ad-hoc announcement broadcast (defaults to the announcement channel). */
-  async enqueueAnnounce(
-    regimentId: string,
-    content: string,
-    channelId?: string | null,
-  ): Promise<DiscordSyncJob | null> {
-    return this.guarded(regimentId, async (s) => {
-      const target = channelId ?? s.announcementChannelId;
-      if (!target) return null;
-      return this.insertJob(regimentId, DiscordSyncJobType.Announce, {
-        channelId: target,
-        content: content.slice(0, 2000),
-      });
-    });
-  }
-
   /**
    * Enqueue an EVENT announcement/reminder (T-0044): routes to the dedicated
-   * event-announcements channel, falling back to the general announcement
-   * channel so a partially-configured bot still posts somewhere.
+   * event-announcements channel. No-ops when that channel is unset (the general
+   * ad-hoc announcement path + its fallback channel were retired in T-0103).
    */
   async enqueueEventAnnounce(regimentId: string, content: string): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
-      const target = s.eventAnnouncementChannelId ?? s.announcementChannelId;
+      const target = s.eventAnnouncementChannelId;
       if (!target) return null;
       // Cap at Discord's 2000-char limit so a long event description can't
       // create a permanently-failing outbox job.

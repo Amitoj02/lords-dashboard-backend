@@ -48,7 +48,7 @@ export const envValidationSchema = Joi.object({
   DISCORD_MOCK: Joi.boolean(),
   DISCORD_MOCK_DEFAULT_PERSONA: Joi.string().default('owner'),
 
-  // Discord BOT (gateway) — the in-process "Quartermaster" that syncs roles +
+  // Discord BOT (gateway) — the in-process "Lord Adjutant" that syncs roles +
   // posts announcements. Allowed empty so the app boots with the bot mocked.
   DISCORD_BOT_TOKEN: Joi.string().allow('').default(''),
   DISCORD_APPLICATION_ID: Joi.string().allow('').default(''),

@@ -9,7 +9,7 @@ import {
 } from 'typeorm';
 import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
-import { ApplicationStatus } from '../../common/enums';
+import { ApplicantType, ApplicationStatus } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
@@ -62,6 +62,10 @@ export class Application extends ShortIdEntity {
 
   @Column({ type: 'varchar', length: 120 })
   inGameName: string;
+
+  /** Enlistment track chosen on the apply form; selects the enrolled role on approval. */
+  @Column({ type: 'enum', enum: ApplicantType, default: ApplicantType.Member })
+  applicantType: ApplicantType;
 
   /** The applicant's current/most-recent regiment (free text; "None" is common). */
   @Column({ type: 'varchar', length: 255, default: '' })
