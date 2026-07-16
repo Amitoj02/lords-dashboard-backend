@@ -123,7 +123,7 @@ describe('Auth (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(me.body).toMatchObject({
-      name: 'Fresh Recruit',
+      inGameName: 'Fresh Recruit',
       role: MemberRole.Applicant,
       rank: null,
       isMember: false,
@@ -148,9 +148,9 @@ describe('Auth (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(me.body).toMatchObject({
-      // For a linked member, /auth/me returns the seeded roster member.name,
-      // which now defaults to 'Admin' (T-0057) — NOT the Discord global_name.
-      name: 'Admin',
+      // For a linked member, /auth/me returns the seeded roster member's in-game
+      // name (the sole display identity after T-0106) — NOT the Discord global_name.
+      inGameName: 'Lord_Commander',
       role: MemberRole.Owner,
       rank: 'General',
       isMember: true,

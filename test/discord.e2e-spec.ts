@@ -118,7 +118,6 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
         applyBanRoleOnBan: false,
         banRoleId: null,
         joinRoleId: null,
-        announcementChannelId: null,
       },
     );
     await app.close();
@@ -167,7 +166,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     await request(server())
       .patch('/api/discord/settings')
       .set(bearer(ownerToken))
-      .send({ botEnabled: true, joinRoleId: '900000000000000001', announcementChannelId: '123456' })
+      .send({ botEnabled: true, joinRoleId: '900000000000000001' })
       .expect(200);
 
     const verify = await request(server())
@@ -265,20 +264,6 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     expect(drained.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
   });
 
-  it('queues + drains an announcement broadcast', async () => {
-    const res = await request(server())
-      .post('/api/discord/announce')
-      .set(bearer(ownerToken))
-      .send({ content: 'Stand to! Line battle at 1900.' })
-      .expect(200);
-    expect(res.body.enqueued).toBe(true);
-
-    await drainAll();
-    const announces = await jobsOfType(DiscordSyncJobType.Announce);
-    expect(announces.length).toBeGreaterThanOrEqual(1);
-    expect(announces.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
-  });
-
   it('onboards a joining member: welcome + Guest join-role jobs, then drains them', async () => {
     await request(server())
       .post('/api/discord/simulate/member-join')
@@ -301,12 +286,14 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .send({ botEnabled: false })
       .expect(200);
 
-    const res = await request(server())
-      .post('/api/discord/announce')
+    // A member-join normally enqueues Welcome + join-role jobs; with the bot
+    // disabled every enqueue no-ops, so nothing is queued at all.
+    await request(server())
+      .post('/api/discord/simulate/member-join')
       .set(bearer(ownerToken))
-      .send({ content: 'should not queue' })
+      .send({ discordUserId: '555000000000000001' })
       .expect(200);
-    expect(res.body.enqueued).toBe(false);
-    expect(await jobsOfType(DiscordSyncJobType.Announce)).toHaveLength(0);
+    expect(await jobsOfType(DiscordSyncJobType.Welcome)).toHaveLength(0);
+    expect(await jobsOfType(DiscordSyncJobType.RoleAssign)).toHaveLength(0);
   });
 });

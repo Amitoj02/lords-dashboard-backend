@@ -12,7 +12,6 @@ const USER_ID = '900900900900900900';
 const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettings => ({
   regimentId: REGIMENT,
   botEnabled: true,
-  announcementChannelId: '111',
   welcomeChannelId: null,
   welcomeMessage: 'hi',
   enlistmentChannelId: null,
@@ -57,9 +56,11 @@ describe('DiscordSyncService', () => {
 
   describe('master switch (botEnabled)', () => {
     it('enqueues NOTHING when the bot is disabled', async () => {
-      settingsRepo.findOne.mockResolvedValue(settings({ botEnabled: false }));
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ botEnabled: false, eventAnnouncementChannelId: 'evt-1' }),
+      );
       expect(await service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).toBeNull();
-      expect(await service.enqueueAnnounce(REGIMENT, 'hey')).toBeNull();
+      expect(await service.enqueueEventAnnounce(REGIMENT, 'hey')).toBeNull();
       expect(jobsRepo.save).not.toHaveBeenCalled();
     });
   });
@@ -155,23 +156,17 @@ describe('DiscordSyncService', () => {
       );
     });
 
-    it('routes an event announce to the event channel, falling back to the general one', async () => {
-      settingsRepo.findOne.mockResolvedValue(
-        settings({ eventAnnouncementChannelId: 'evt-1', announcementChannelId: 'gen-1' }),
-      );
+    it('routes an event announce to the event channel, and no-ops when it is unset', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
       await service.enqueueEventAnnounce(REGIMENT, 'New event');
       expect(jobsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ payload: expect.objectContaining({ channelId: 'evt-1' }) }),
       );
 
       jest.clearAllMocks();
-      settingsRepo.findOne.mockResolvedValue(
-        settings({ eventAnnouncementChannelId: null, announcementChannelId: 'gen-1' }),
-      );
-      await service.enqueueEventAnnounce(REGIMENT, 'New event');
-      expect(jobsRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ payload: expect.objectContaining({ channelId: 'gen-1' }) }),
-      );
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: null }));
+      expect(await service.enqueueEventAnnounce(REGIMENT, 'New event')).toBeNull();
+      expect(jobsRepo.create).not.toHaveBeenCalled();
     });
   });
 

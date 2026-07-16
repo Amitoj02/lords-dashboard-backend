@@ -11,7 +11,7 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /**
  * 1—1 configuration for a regiment's Discord bot (PK = FK). Drives what the
- * in-process "Quartermaster" gateway does: role sync + announcements only (no
+ * in-process "Lord Adjutant" gateway does: role sync + announcements only (no
  * slash commands). All the behaviour switches default to the SAFE position:
  * `botEnabled` is off (nothing is enqueued until an admin turns the bot on), and
  * `applyBanRoleOnBan` is off (an app-side ban does NOT touch Discord until
@@ -29,10 +29,6 @@ export class DiscordBotSettings {
   /** Master switch. When false, no sync jobs are enqueued (the bot is dormant). */
   @Column({ default: false })
   botEnabled: boolean;
-
-  /** Channel snowflake ad-hoc announcements/dispatches are posted to. */
-  @Column({ type: 'varchar', length: 20, nullable: true })
-  announcementChannelId: string | null;
 
   /** Channel snowflake welcome messages are posted to (falls back to a DM). */
   @Column({ type: 'varchar', length: 20, nullable: true })

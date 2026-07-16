@@ -11,7 +11,7 @@ import { AuditService } from '../audit/audit.service';
 import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
+import { ApplicantType, ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
@@ -60,6 +60,7 @@ const baseApplication = (overrides: Partial<Application> = {}): Application => (
   applicantName: 'Jane Doe',
   discordTag: '@janedoe',
   inGameName: 'JaneTheGreat',
+  applicantType: ApplicantType.Member,
   currentRegiment: 'None',
   howFound: 'A friend in the Discord invited me.',
   preferredClasses: 'Line Infantry, Rifleman',
@@ -443,12 +444,14 @@ describe('ApplicationsService', () => {
       expect(createdMember).toMatchObject({
         regimentId: 'regiment-1',
         rankId: 'rank-recruit',
+        // A default (Member) applicant enlists as a Member (T-0095).
         role: MemberRole.Member,
         status: MemberStatus.Active,
-        name: 'Jane Doe',
         inGameName: 'JaneTheGreat',
         discordLinked: true,
       });
+      // The created member no longer carries a display `name` — only inGameName (T-0106).
+      expect(createdMember).not.toHaveProperty('name');
       // Promotion drops the applicant's cached Applicant context (T-0046).
       expect(sessionContext.invalidate).toHaveBeenCalledWith('identity-applicant');
       expect(result.status).toBe(ApplicationStatus.Approved);
@@ -467,6 +470,22 @@ describe('ApplicationsService', () => {
           }),
         }),
       );
+    });
+
+    it('enlists a Mercenary applicant as a Mercenary (T-0095)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ applicantType: ApplicantType.Mercenary }),
+      );
+      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      const createdMember = txMembers.create!.mock.calls[0][0] as Partial<Member>;
+      // Still enlists at the entry rank, but on the Mercenary track.
+      expect(createdMember).toMatchObject({
+        rankId: 'rank-recruit',
+        role: MemberRole.Mercenary,
+      });
     });
 
     it('approves an application that was on hold', async () => {

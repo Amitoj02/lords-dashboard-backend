@@ -18,10 +18,6 @@ export class Regiment extends ShortIdEntity {
   @Column({ type: 'varchar', length: 120 })
   name: string;
 
-  @Index({ unique: true })
-  @Column({ type: 'varchar', length: 6 })
-  shortTag: string;
-
   @Column({ type: 'varchar', length: 400, nullable: true })
   missionStatement: string | null;
 
@@ -40,6 +36,11 @@ export class Regiment extends ShortIdEntity {
 
   @Column({ type: 'smallint', unsigned: true, nullable: true })
   establishedYear: number | null;
+
+  // Full establishment date (YYYY-MM-DD). Read back from MySQL as a string; drives
+  // the landing "Since est MM/YYYY" line (T-0102). `establishedYear` is retained.
+  @Column({ type: 'date', nullable: true })
+  establishedAt: string | null;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   discordInviteUrl: string | null;

@@ -28,6 +28,7 @@ import {
   DeletionRequestDto,
   SuspendMemberDto,
 } from './dto/member-admin.dto';
+import { EventDto } from '../events/dto/event.dto';
 import { CommandInfoDto, ServiceRecordEntryDto } from './dto/member-detail.dto';
 import { MemberDto } from './dto/member.dto';
 import { MemberQueryDto } from './dto/member-query.dto';
@@ -103,6 +104,28 @@ export class MembersController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<ServiceRecordEntryDto[]> {
     return this.membersService.getServiceRecord(id, user);
+  }
+
+  @Get(':id/events')
+  @RequireCapability(Capability.ViewMembersDirectory)
+  @ApiOperation({ summary: "A member's attended events (profile Event History)" })
+  @ApiOkResponse({ type: [EventDto] })
+  events(
+    @Param('id', ParseShortIdPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<EventDto[]> {
+    return this.membersService.getEvents(id, user);
+  }
+
+  @Get(':id/rsvps')
+  @RequireCapability(Capability.ViewMembersDirectory)
+  @ApiOperation({ summary: "A member's event RSVPs (profile RSVPs tab)" })
+  @ApiOkResponse({ type: [EventDto] })
+  rsvps(
+    @Param('id', ParseShortIdPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<EventDto[]> {
+    return this.membersService.getRsvps(id, user);
   }
 
   @Get(':id/command-info')

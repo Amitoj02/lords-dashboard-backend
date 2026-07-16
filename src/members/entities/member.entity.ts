@@ -11,7 +11,7 @@ import {
 } from 'typeorm';
 import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
-import { MemberRole, MemberStatus, Platform } from '../../common/enums';
+import { MemberRole, MemberStatus } from '../../common/enums';
 import { Rank } from '../../ranks/entities/rank.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
@@ -40,11 +40,10 @@ export class Member extends ShortIdEntity {
   @JoinColumn({ name: 'rank_id' })
   rank?: Rank;
 
+  // The member's in-game name is the sole display identity (the former separate
+  // `name` display column was dropped in T-0106; in_game_name is now NOT NULL).
   @Column({ type: 'varchar', length: 120 })
-  name: string;
-
-  @Column({ type: 'varchar', length: 120, nullable: true })
-  inGameName: string | null;
+  inGameName: string;
 
   @Index()
   @Column({ type: 'enum', enum: MemberRole, default: MemberRole.Applicant })
@@ -53,12 +52,6 @@ export class Member extends ShortIdEntity {
   @Index()
   @Column({ type: 'enum', enum: MemberStatus, default: MemberStatus.Pending })
   status: MemberStatus;
-
-  @Column({ type: 'enum', enum: Platform, nullable: true })
-  platform: Platform | null;
-
-  @Column({ type: 'varchar', length: 40, nullable: true })
-  timezone: string | null;
 
   @Column({ default: false })
   discordLinked: boolean;

@@ -20,9 +20,6 @@ export class RegimentSettings {
   regiment?: Regiment;
 
   @Column({ default: true })
-  publicRoster: boolean;
-
-  @Column({ default: true })
   publicGallery: boolean;
 
   @Column({ default: true })

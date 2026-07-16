@@ -14,12 +14,12 @@ const buildRegiment = (overrides: Partial<Regiment> = {}): Regiment =>
   ({
     id: REGIMENT_ID,
     name: 'Lords Regiment',
-    shortTag: 'LORDS',
     missionStatement: 'Discipline, honour, and the line.',
     accentTone: 'brass',
     crestUrl: 'https://cdn/crest.png',
     bannerUrl: null,
     establishedYear: 2021,
+    establishedAt: '2021-01-01',
     discordInviteUrl: 'https://discord.gg/lords',
     discordServerId: '999888777',
     discordServerName: 'Lords HQ',
@@ -91,8 +91,10 @@ describe('RegimentsService', () => {
 
       expect(dto.id).toBe(REGIMENT_ID);
       expect(dto.name).toBe('Lords Regiment');
-      expect(dto.shortTag).toBe('LORDS');
+      expect(dto.establishedAt).toBe('2021-01-01');
       expect(dto.memberCount).toBe(42);
+      // shortTag was dropped from the identity — never projected.
+      expect(dto).not.toHaveProperty('shortTag');
       // Sensitive/internal fields are never projected.
       expect(dto).not.toHaveProperty('discordServerId');
       expect(dto).not.toHaveProperty('ownerMemberId');
@@ -139,6 +141,8 @@ describe('RegimentsService', () => {
 
       // totalMembers excludes Applicants (1 + 2 + 20 + 3 = 26).
       expect(stats.totalMembers).toBe(26);
+      // enrolledExcludingMercenaries drops Mercenaries too (1 + 2 + 20 = 23).
+      expect(stats.enrolledExcludingMercenaries).toBe(23);
       expect(stats.activeMembers).toBe(18);
       // Full per-role breakdown with every role key present.
       expect(stats.membersByRole).toEqual({
@@ -153,6 +157,7 @@ describe('RegimentsService', () => {
       expect(stats.upcomingEvents).toBe(3);
       expect(stats.previousEvents).toBe(5);
       expect(stats.establishedYear).toBe(2021);
+      expect(stats.establishedAt).toBe('2021-01-01');
 
       // activeMembers filtered by Active status.
       expect(memberRepo.count).toHaveBeenCalledWith({
@@ -172,7 +177,9 @@ describe('RegimentsService', () => {
 
       const stats = await service.getStats();
       expect(stats.totalMembers).toBe(0);
+      expect(stats.enrolledExcludingMercenaries).toBe(0);
       expect(stats.establishedYear).toBe(2021);
+      expect(stats.establishedAt).toBe('2021-01-01');
     });
   });
 });

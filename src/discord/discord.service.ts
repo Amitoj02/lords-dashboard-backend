@@ -17,12 +17,7 @@ import {
 } from './dto/discord-connection.dto';
 import { DiscordChannel, DiscordRole } from './gateway/discord-gateway';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
-import {
-  AnnounceDto,
-  BindGuildDto,
-  DiscordOperationsQueryDto,
-  SimulateJoinDto,
-} from './dto/discord-inputs.dto';
+import { BindGuildDto, DiscordOperationsQueryDto, SimulateJoinDto } from './dto/discord-inputs.dto';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
@@ -30,7 +25,7 @@ import { DiscordGateway } from './gateway/discord-gateway';
 
 /**
  * Bot-control plane behind /discord: connection status + verification, bot
- * settings, resync/announce, and the bot-operations ledger. Every mutation is
+ * settings, resync, and the bot-operations ledger. Every mutation is
  * regiment-scoped and audited; the actual Discord work is always enqueued
  * through the outbox, never done inline.
  */
@@ -153,8 +148,6 @@ export class DiscordService {
     const banGateWas = settings.applyBanRoleOnBan;
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
-    if (dto.announcementChannelId !== undefined)
-      settings.announcementChannelId = dto.announcementChannelId;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
     if (dto.welcomeMessage !== undefined) settings.welcomeMessage = dto.welcomeMessage;
     if (dto.enlistmentChannelId !== undefined)
@@ -210,23 +203,6 @@ export class DiscordService {
       detail: `Enqueued ${enqueued} role syncs`,
     });
     return { enqueued };
-  }
-
-  /** Enqueue an announcement broadcast to Discord. */
-  async announce(
-    user: AuthenticatedUser,
-    dto: AnnounceDto,
-    ip: string | null,
-  ): Promise<{ enqueued: boolean }> {
-    const job = await this.sync.enqueueAnnounce(user.regimentId, dto.content, dto.channelId);
-    await this.audit.record({
-      regimentId: user.regimentId,
-      action: 'discord.announce',
-      actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'discord', label: 'announce' },
-      detail: job ? 'Announcement queued' : 'Announcement not queued (bot disabled or no channel)',
-    });
-    return { enqueued: !!job };
   }
 
   /** Paginated recent bot operations for the regiment. */

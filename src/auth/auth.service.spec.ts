@@ -257,7 +257,7 @@ describe('AuthService', () => {
     it('returns the member projection when the user is enrolled', async () => {
       members.findOne!.mockResolvedValue({
         id: 'member-1',
-        name: 'Lord Commander',
+        inGameName: 'Lord Commander',
         role: MemberRole.Owner,
         discordLinked: true,
         avatarUrl: 'https://cdn/a.png',
@@ -274,7 +274,7 @@ describe('AuthService', () => {
 
       await expect(service.getCurrentUser(user)).resolves.toEqual({
         id: 'member-1',
-        name: 'Lord Commander',
+        inGameName: 'Lord Commander',
         rank: 'General',
         role: MemberRole.Owner,
         discordTag: null,
@@ -290,7 +290,7 @@ describe('AuthService', () => {
     it('falls back to the Discord avatar when the member has no custom avatar (T-0093)', async () => {
       members.findOne!.mockResolvedValue({
         id: 'member-1',
-        name: 'Lord Commander',
+        inGameName: 'Lord Commander',
         role: MemberRole.Owner,
         discordLinked: true,
         avatarUrl: null,
@@ -314,7 +314,7 @@ describe('AuthService', () => {
     it('returns null avatar when neither custom nor Discord avatar exists (T-0093)', async () => {
       members.findOne!.mockResolvedValue({
         id: 'member-1',
-        name: 'Lord Commander',
+        inGameName: 'Lord Commander',
         role: MemberRole.Member,
         discordLinked: false,
         avatarUrl: null,
@@ -351,7 +351,7 @@ describe('AuthService', () => {
 
       await expect(service.getCurrentUser(user)).resolves.toEqual({
         id: 'identity-1',
-        name: 'New Bie',
+        inGameName: 'New Bie',
         rank: null,
         role: MemberRole.Applicant,
         discordTag: '@newbie',

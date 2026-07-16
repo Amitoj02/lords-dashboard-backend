@@ -55,7 +55,7 @@ export class DiscordConnectionDto {
  * OMITS the sensitive authority/config fields the wizard needs (botRolePosition,
  * permissions, ban config) — it carries only online/offline + the live runtime
  * metrics + last-activity timestamps, so Owner/Admin/Moderator can see whether
- * the Quartermaster is healthy without exposing settings surface.
+ * the Lord Adjutant is healthy without exposing settings surface.
  */
 export class BotStatusDto {
   @ApiProperty() connected: boolean;

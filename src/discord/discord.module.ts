@@ -22,7 +22,7 @@ import { MockDiscordGateway } from './gateway/mock-discord-gateway';
 import { RealDiscordGateway } from './gateway/real-discord-gateway';
 
 /**
- * The "Quartermaster" Discord bot: an outbox that syncs roles + posts
+ * The "Lord Adjutant" Discord bot: an outbox that syncs roles + posts
  * announcements (NO slash commands — members use the webapp). The in-process
  * gateway is swapped for MockDiscordGateway when `discord.botMock` is set, so the
  * whole pipeline runs with no real bot (mirrors the OAuth mock/real seam).

@@ -60,6 +60,7 @@ const ACTIONS = [
   { code: 'event.update', label: 'Event updated', defaultSeverity: AuditSeverity.Info },
   { code: 'event.publish', label: 'Event published', defaultSeverity: AuditSeverity.Info },
   { code: 'event.archive', label: 'Event archived', defaultSeverity: AuditSeverity.Info },
+  { code: 'event.unarchive', label: 'Event unarchived', defaultSeverity: AuditSeverity.Info },
   { code: 'event.delete', label: 'Event deleted', defaultSeverity: AuditSeverity.Warn },
   {
     code: 'event.delete-series',

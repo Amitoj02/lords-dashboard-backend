@@ -15,9 +15,6 @@ export class SettingsDto {
   @ApiProperty()
   name: string;
 
-  @ApiProperty()
-  shortTag: string;
-
   @ApiProperty({ nullable: true })
   missionStatement: string | null;
 
@@ -32,6 +29,9 @@ export class SettingsDto {
 
   @ApiProperty({ nullable: true })
   establishedYear: number | null;
+
+  @ApiProperty({ nullable: true, description: 'Full establishment date (YYYY-MM-DD)' })
+  establishedAt: string | null;
 
   @ApiProperty({ nullable: true })
   discordInviteUrl: string | null;
@@ -48,9 +48,6 @@ export class SettingsDto {
   setupComplete: boolean;
 
   // ── Privacy toggles ──────────────────────────────────────────────────────────
-
-  @ApiProperty()
-  publicRoster: boolean;
 
   @ApiProperty()
   publicGallery: boolean;
@@ -112,17 +109,16 @@ export class SettingsDto {
   static from(regiment: Regiment, settings: RegimentSettings): SettingsDto {
     const dto = new SettingsDto();
     dto.name = regiment.name;
-    dto.shortTag = regiment.shortTag;
     dto.missionStatement = regiment.missionStatement;
     dto.accentTone = regiment.accentTone;
     dto.crestUrl = regiment.crestUrl;
     dto.bannerUrl = regiment.bannerUrl;
     dto.establishedYear = regiment.establishedYear;
+    dto.establishedAt = regiment.establishedAt;
     dto.discordInviteUrl = regiment.discordInviteUrl;
     dto.discordServerId = regiment.discordServerId;
     dto.discordServerName = regiment.discordServerName;
     dto.setupComplete = regiment.setupComplete;
-    dto.publicRoster = settings.publicRoster;
     dto.publicGallery = settings.publicGallery;
     dto.publicEvents = settings.publicEvents;
     dto.publicStats = settings.publicStats;

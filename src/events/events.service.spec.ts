@@ -3,10 +3,17 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { AuthzService } from '../authz/authz.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { EventStatus, MemberRole, RecurrenceCadence, RsvpStatus } from '../common/enums';
+import {
+  Capability,
+  EventStatus,
+  MemberRole,
+  RecurrenceCadence,
+  RsvpStatus,
+} from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -70,6 +77,7 @@ const selectQb = () => {
   for (const m of [
     'select',
     'addSelect',
+    'innerJoinAndSelect',
     'where',
     'andWhere',
     'groupBy',
@@ -82,6 +90,7 @@ const selectQb = () => {
   }
   qb.getRawMany = jest.fn().mockResolvedValue([]);
   qb.getManyAndCount = jest.fn().mockResolvedValue([[], 0]);
+  qb.getMany = jest.fn().mockResolvedValue([]);
   return qb;
 };
 
@@ -119,6 +128,9 @@ describe('EventsService', () => {
   const members = { find: jest.fn() };
   const settings = { find: jest.fn(), findOne: jest.fn() };
   const audit = { record: jest.fn() };
+  // Capability gate for archived-event visibility (T-0097/T-0098). Defaults to
+  // denying ManageEvents; individual tests opt in with mockResolvedValue(true).
+  const authz = { can: jest.fn() };
   const discordSync = { enqueueEventAnnounce: jest.fn().mockResolvedValue(null) };
   const storage = {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
@@ -164,6 +176,9 @@ describe('EventsService', () => {
     settings.find.mockResolvedValue([{ regimentId: REGIMENT, publicEvents: true }]);
     settings.findOne.mockResolvedValue(null);
 
+    // Deny the ManageEvents capability by default; archived-visibility tests opt in.
+    authz.can.mockResolvedValue(false);
+
     eventTxRepo = {
       create: jest.fn((data: Partial<RegimentEvent>) => ({
         id: 'event-new',
@@ -202,6 +217,7 @@ describe('EventsService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        { provide: AuthzService, useValue: authz },
         { provide: DiscordSyncService, useValue: discordSync },
         { provide: StorageService, useValue: storage },
       ],
@@ -341,7 +357,18 @@ describe('EventsService', () => {
         status: RsvpStatus.Interested,
         reminderOffsetMinutes: 30,
       });
-      // The password is never projected, even in the member view.
+      // The password value is never projected, but the presence flag is (T-0106).
+      expect(result.data[0]).not.toHaveProperty('serverPassword');
+      expect(result.data[0].hasServerPassword).toBe(true);
+    });
+
+    it('reports hasServerPassword=false in the member view when no password is set (T-0106)', async () => {
+      eventsQb.getManyAndCount.mockResolvedValue([[buildEvent({ serverPassword: null })], 1]);
+
+      const result = await service.listForMember(user(), { page: 1, limit: 20, skip: 0 });
+
+      expect(result.data[0].serverName).toBe('LORDS-1');
+      expect(result.data[0].hasServerPassword).toBe(false);
       expect(result.data[0]).not.toHaveProperty('serverPassword');
     });
 
@@ -358,6 +385,37 @@ describe('EventsService', () => {
       expect(result.data[0].serverRegion).toBeUndefined();
       expect(result.data[0].myRsvp).toBeUndefined();
       expect(result.data[0]).not.toHaveProperty('serverPassword');
+      // The presence flag is a member-only field — absent from the redacted view.
+      expect(result.data[0].hasServerPassword).toBeUndefined();
+    });
+
+    it('applies the isArchived=false filter for a normal caller (T-0098)', async () => {
+      await service.listForMember(user(), { page: 1, limit: 20, skip: 0 });
+
+      expect(eventsQb.andWhere).toHaveBeenCalledWith('event.isArchived = :isArchived', {
+        isArchived: false,
+      });
+    });
+
+    it('still excludes archived when archived=true but the caller lacks ManageEvents (T-0098)', async () => {
+      authz.can.mockResolvedValue(false);
+
+      await service.listForMember(user(), { page: 1, limit: 20, skip: 0, archived: true });
+
+      expect(eventsQb.andWhere).toHaveBeenCalledWith('event.isArchived = :isArchived', {
+        isArchived: false,
+      });
+    });
+
+    it('includes archived when archived=true AND the caller holds ManageEvents (T-0098)', async () => {
+      authz.can.mockResolvedValue(true);
+
+      await service.listForMember(user(), { page: 1, limit: 20, skip: 0, archived: true });
+
+      expect(authz.can).toHaveBeenCalledWith(REGIMENT, MemberRole.Admin, Capability.ManageEvents);
+      expect(eventsQb.andWhere).not.toHaveBeenCalledWith('event.isArchived = :isArchived', {
+        isArchived: false,
+      });
     });
   });
 
@@ -373,7 +431,82 @@ describe('EventsService', () => {
       events.findOne.mockResolvedValue(buildEvent());
       const result = await service.getForMember(user(), 'event-1');
       expect(result.serverName).toBe('LORDS-1');
+      expect(result.hasServerPassword).toBe(true);
       expect(result).not.toHaveProperty('serverPassword');
+    });
+
+    it('404s an archived event for a caller without ManageEvents (T-0097)', async () => {
+      events.findOne.mockResolvedValue(buildEvent({ isArchived: true }));
+      authz.can.mockResolvedValue(false);
+
+      await expect(service.getForMember(user(), 'event-1')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(authz.can).toHaveBeenCalledWith(REGIMENT, MemberRole.Admin, Capability.ManageEvents);
+    });
+
+    it('returns an archived event to a ManageEvents holder (T-0097)', async () => {
+      events.findOne.mockResolvedValue(buildEvent({ isArchived: true }));
+      authz.can.mockResolvedValue(true);
+
+      const result = await service.getForMember(user(), 'event-1');
+
+      expect(result.id).toBe('event-1');
+      expect(result.isArchived).toBe(true);
+    });
+  });
+
+  describe('per-member reads (T-0100)', () => {
+    it('listAttendedByMember returns the public projection, most recent first', async () => {
+      const event = buildEvent();
+      attendeesQb.getMany.mockResolvedValue([{ eventId: 'event-1', event }]);
+
+      const result = await service.listAttendedByMember(user(), MEMBER);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('event-1');
+      // History uses the server-redacted (public) projection.
+      expect(result[0].serverName).toBeUndefined();
+      expect(result[0]).not.toHaveProperty('serverPassword');
+    });
+
+    it('listRsvpsByMember reflects the member’s own RSVP on each row', async () => {
+      const event = buildEvent();
+      rsvpsQb.getMany.mockResolvedValue([
+        {
+          eventId: 'event-1',
+          event,
+          status: RsvpStatus.Interested,
+          reminderOffsetMinutes: 15,
+        },
+      ]);
+
+      const result = await service.listRsvpsByMember(user(), MEMBER);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('event-1');
+      expect(result[0].myRsvp).toEqual({
+        status: RsvpStatus.Interested,
+        reminderOffsetMinutes: 15,
+      });
+      // Public projection — no server binding leaked.
+      expect(result[0].serverName).toBeUndefined();
+    });
+  });
+
+  describe('unarchive', () => {
+    it('clears isArchived and audits event.unarchive', async () => {
+      const event = buildEvent({ isArchived: true });
+      events.findOne.mockResolvedValue(event);
+
+      const result = await service.unarchive(user(), 'event-1', '1.2.3.4');
+
+      const saved = events.save.mock.calls[0][0] as RegimentEvent;
+      expect(saved.isArchived).toBe(false);
+      expect(result.isArchived).toBe(false);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'event.unarchive' }),
+      );
     });
   });
 
@@ -515,7 +648,7 @@ describe('EventsService', () => {
   describe('addAttendees', () => {
     it('rejects member ids that do not belong to the regiment', async () => {
       events.findOne.mockResolvedValue(buildEvent());
-      members.find.mockResolvedValue([{ id: 'member-1', name: 'Alpha' }]);
+      members.find.mockResolvedValue([{ id: 'member-1', inGameName: 'Alpha' }]);
 
       await expect(
         service.addAttendees(user(), 'event-1', { memberIds: ['member-1', 'stranger'] }),
@@ -526,8 +659,8 @@ describe('EventsService', () => {
     it('idempotently inserts only members not already checked in', async () => {
       events.findOne.mockResolvedValue(buildEvent());
       members.find.mockResolvedValue([
-        { id: 'member-1', name: 'Alpha' },
-        { id: 'member-2', name: 'Bravo' },
+        { id: 'member-1', inGameName: 'Alpha' },
+        { id: 'member-2', inGameName: 'Bravo' },
       ]);
       // member-1 is already an attendee; only member-2 should be inserted.
       attendees.find

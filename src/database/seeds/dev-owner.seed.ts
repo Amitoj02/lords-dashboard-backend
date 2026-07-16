@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
-import { MemberRole, MemberStatus, Platform } from '../../common/enums';
+import { MemberRole, MemberStatus } from '../../common/enums';
 import { Member } from '../../members/entities/member.entity';
 import { Rank } from '../../ranks/entities/rank.entity';
 import { Regiment } from '../../regiments/entities/regiment.entity';
@@ -23,7 +23,7 @@ import {
  *   real person's Discord snowflake, so their first sign-in resolves the Owner
  *   member. The dev fixture is never valid for prod.
  *
- * The seeded Owner display name defaults to the literal "Admin" and is applied
+ * The seeded Owner in-game name (the sole display identity) is applied
  * insert-only, so an Owner who has since renamed themselves (self-service, see
  * T-0058) keeps their chosen name across a re-seed.
  */
@@ -57,18 +57,16 @@ export async function seedDevOwner(ds: DataSource): Promise<void> {
       regimentId: REGIMENT_ID,
       discordIdentityId: identity.id,
       rankId: generalRank.id,
-      inGameName: isRealOwner ? null : 'Lord_Commander',
       role: MemberRole.Owner,
       status: MemberStatus.Active,
-      platform: Platform.Steam,
-      timezone: 'America/Toronto',
       discordLinked: true,
       standing: 'Good Order',
       joinedAt: new Date('2021-01-01T00:00:00.000Z'),
       lastSeenAt: new Date('2026-06-22T00:00:00.000Z'),
     },
-    // Insert-only: the display name is set once and never overwritten on re-seed.
-    { name: 'Admin' },
+    // Insert-only: the in-game name (the sole display identity) is set once and
+    // never overwritten on re-seed, so a self-renamed Owner keeps their name.
+    { inGameName: isRealOwner ? 'Commander' : 'Lord_Commander' },
   );
 
   await ds.getRepository(Regiment).update({ id: REGIMENT_ID }, { ownerMemberId: member.id });

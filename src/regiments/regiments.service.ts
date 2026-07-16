@@ -58,6 +58,9 @@ export class RegimentsService {
 
     const membersByRole = await this.memberCountsByRole(regiment.id);
     const totalMembers = ENROLLED_ROLES.reduce((sum, role) => sum + membersByRole[role], 0);
+    const enrolledExcludingMercenaries = ENROLLED_ROLES.filter(
+      (role) => role !== MemberRole.Mercenary,
+    ).reduce((sum, role) => sum + membersByRole[role], 0);
 
     const [activeMembers, totalEvents, upcomingEvents, previousEvents] = await Promise.all([
       this.members.count({ where: { regimentId: regiment.id, status: MemberStatus.Active } }),
@@ -70,12 +73,14 @@ export class RegimentsService {
 
     const dto = new RegimentStatsDto();
     dto.totalMembers = totalMembers;
+    dto.enrolledExcludingMercenaries = enrolledExcludingMercenaries;
     dto.activeMembers = activeMembers;
     dto.membersByRole = membersByRole;
     dto.totalEvents = totalEvents;
     dto.upcomingEvents = upcomingEvents;
     dto.previousEvents = previousEvents;
     dto.establishedYear = regiment.establishedYear;
+    dto.establishedAt = regiment.establishedAt;
     return dto;
   }
 

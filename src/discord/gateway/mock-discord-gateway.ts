@@ -15,7 +15,7 @@ const MOCK_ROLES: DiscordRole[] = [
   { id: '900000000000000003', name: 'Sergeant', position: 5 },
   { id: '900000000000000004', name: 'Officer', position: 8 },
   { id: '900000000000000006', name: 'Banned', position: 3 },
-  { id: '900000000000000005', name: 'Quartermaster (bot)', position: 20 },
+  { id: '900000000000000005', name: 'Lord Adjutant (bot)', position: 20 },
 ];
 
 /** A canned text-channel set so the channel picker looks realistic in the wizard. */

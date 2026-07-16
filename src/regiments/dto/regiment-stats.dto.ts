@@ -14,6 +14,11 @@ export class RegimentStatsDto {
   })
   totalMembers: number;
 
+  @ApiProperty({
+    description: 'Enrolled members excluding Mercenaries (the landing "members" count)',
+  })
+  enrolledExcludingMercenaries: number;
+
   @ApiProperty({ description: 'Members whose status is Active' })
   activeMembers: number;
 
@@ -35,4 +40,10 @@ export class RegimentStatsDto {
 
   @ApiProperty({ nullable: true, description: 'Year the regiment was established' })
   establishedYear: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Full establishment date (YYYY-MM-DD); drives the landing "Since est MM/YYYY"',
+  })
+  establishedAt: string | null;
 }

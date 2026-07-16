@@ -14,6 +14,16 @@ export enum MemberRole {
   Applicant = 'Applicant',
 }
 
+/**
+ * The enlistment track an applicant chooses on the apply form (T-0095). On
+ * approval it selects the enrolled {@link MemberRole}: Member → Member,
+ * Mercenary → Mercenary.
+ */
+export enum ApplicantType {
+  Member = 'Member',
+  Mercenary = 'Mercenary',
+}
+
 export enum MemberStatus {
   Active = 'Active',
   Inactive = 'Inactive',
@@ -175,5 +185,4 @@ export enum Capability {
   RsvpToEvents = 'rsvp_to_events',
   ViewMembersDirectory = 'view_members_directory',
   ApplyToJoin = 'apply_to_join',
-  ManageNotifications = 'manage_notifications',
 }

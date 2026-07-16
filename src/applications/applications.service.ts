@@ -14,7 +14,7 @@ import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { DiscordSyncService } from '../discord/discord-sync.service';
-import { ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
+import { ApplicantType, ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -31,12 +31,16 @@ import { UpdateMyApplicationDto } from './dto/update-my-application.dto';
 import { Application } from './entities/application.entity';
 
 /**
- * Every approved applicant enlists as a Member at the entry rank. The old
- * Applicant/Mercenary split was retired with the enlistment-form reshape
- * (T-0039); the form no longer collects an applicant type.
+ * Every approved applicant enlists at the entry rank. The enrolled role is
+ * selected from the application's applicantType (re-added in T-0095): a
+ * Mercenary applicant enlists as a Mercenary, otherwise as a Member.
  */
 const ENTRY_RANK_NAME = 'Recruit';
-const ENTRY_ROLE = MemberRole.Member;
+
+/** Map the chosen enlistment track to the enrolled member role. */
+function enrolledRoleFor(applicantType: ApplicantType): MemberRole {
+  return applicantType === ApplicantType.Mercenary ? MemberRole.Mercenary : MemberRole.Member;
+}
 
 /**
  * Recruitment applications: applicant self-submit + the staff review queue
@@ -100,6 +104,7 @@ export class ApplicationsService {
       discordIdentityId: user.identityId,
       applicantName: dto.applicantName,
       inGameName: dto.inGameName,
+      applicantType: dto.applicantType ?? ApplicantType.Member,
       discordTag: dto.discordTag ?? null,
       currentRegiment: dto.currentRegiment,
       howFound: dto.howFound,
@@ -176,6 +181,7 @@ export class ApplicationsService {
 
     if (dto.applicantName !== undefined) application.applicantName = dto.applicantName;
     if (dto.inGameName !== undefined) application.inGameName = dto.inGameName;
+    if (dto.applicantType !== undefined) application.applicantType = dto.applicantType;
     if (dto.discordTag !== undefined) application.discordTag = dto.discordTag ?? null;
     if (dto.currentRegiment !== undefined) application.currentRegiment = dto.currentRegiment;
     if (dto.howFound !== undefined) application.howFound = dto.howFound;
@@ -334,7 +340,7 @@ export class ApplicationsService {
       const applicationRepo = manager.getRepository(Application);
 
       const rankName = ENTRY_RANK_NAME;
-      const role = ENTRY_ROLE;
+      const role = enrolledRoleFor(application.applicantType);
       const rank = await rankRepo.findOneOrFail({
         where: { regimentId: user.regimentId, name: rankName },
       });
@@ -344,7 +350,6 @@ export class ApplicationsService {
         regimentId: user.regimentId,
         discordIdentityId: application.discordIdentityId,
         rankId: rank.id,
-        name: application.applicantName,
         inGameName: application.inGameName,
         role,
         status: MemberStatus.Active,

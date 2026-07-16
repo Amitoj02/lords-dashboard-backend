@@ -1,5 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Equals, IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  Equals,
+  IsBoolean,
+  IsEnum,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+import { ApplicantType } from '../../common/enums';
 
 /**
  * Body for POST /api/applications, matching the regiment's "Application for
@@ -20,6 +29,15 @@ export class CreateApplicationDto {
   @MinLength(1)
   @MaxLength(120)
   inGameName: string;
+
+  @ApiPropertyOptional({
+    enum: ApplicantType,
+    default: ApplicantType.Member,
+    description: 'Enlistment track: Member or Mercenary (defaults to Member).',
+  })
+  @IsOptional()
+  @IsEnum(ApplicantType)
+  applicantType?: ApplicantType;
 
   @ApiPropertyOptional({ maxLength: 64, example: '@janedoe' })
   @IsOptional()

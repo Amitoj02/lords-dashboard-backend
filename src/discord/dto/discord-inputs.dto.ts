@@ -1,21 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
-
-/** Compose an announcement to cross-post to Discord. */
-export class AnnounceDto {
-  @ApiProperty({ maxLength: 2000 })
-  @IsString()
-  @MinLength(1)
-  @MaxLength(2000)
-  content: string;
-
-  @ApiPropertyOptional({ description: 'Override the configured announcement channel.' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  channelId?: string;
-}
 
 /** Bind (or rebind) the regiment to a Discord guild. */
 export class BindGuildDto {

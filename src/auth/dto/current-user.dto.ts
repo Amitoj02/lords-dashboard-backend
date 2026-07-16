@@ -6,8 +6,8 @@ export class CurrentUserDto {
   @ApiProperty({ description: 'Member id when enrolled, else the Discord identity id' })
   id: string;
 
-  @ApiProperty()
-  name: string;
+  @ApiProperty({ description: 'In-game name (member) or Discord display name (identity-only)' })
+  inGameName: string;
 
   @ApiProperty({
     nullable: true,

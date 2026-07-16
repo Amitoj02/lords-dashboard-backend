@@ -25,19 +25,18 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
 /** Editable keys that live on the regiment row (identity/branding/Discord invite). */
 const REGIMENT_KEYS = [
   'name',
-  'shortTag',
   'missionStatement',
   'accentTone',
   'crestUrl',
   'bannerUrl',
   'establishedYear',
+  'establishedAt',
   'discordInviteUrl',
   'discordServerName',
 ] as const;
 
 /** Editable keys that live on the 1—1 regiment_settings row. */
 const SETTINGS_KEYS = [
-  'publicRoster',
   'publicGallery',
   'publicEvents',
   'publicStats',
@@ -318,7 +317,7 @@ export class SettingsService {
       regimentId: user.regimentId,
       action: 'settings.transfer_ownership',
       actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: target.id, memberId: target.id, label: target.name },
+      target: { type: 'member', id: target.id, memberId: target.id, label: target.inGameName },
       before: { ownerMemberId: previousOwnerId },
       after: { ownerMemberId: target.id },
     });
@@ -446,7 +445,6 @@ export class SettingsService {
   private defaultSettings(regimentId: string): RegimentSettings {
     const settings = new RegimentSettings();
     settings.regimentId = regimentId;
-    settings.publicRoster = true;
     settings.publicGallery = true;
     settings.publicEvents = true;
     settings.publicStats = true;
