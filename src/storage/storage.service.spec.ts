@@ -1,3 +1,4 @@
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -190,6 +191,42 @@ describe('StorageService', () => {
       expect(() => service.resolveKeyToPublicUrl(user(), key, StorageTarget.MemberAvatar)).toThrow(
         BadRequestException,
       );
+    });
+  });
+
+  describe('deleteObject (T-0116)', () => {
+    it('deletes the object whose key it recovers from the public URL', async () => {
+      const send = jest
+        .spyOn((service as unknown as { s3: { send: jest.Mock } }).s3, 'send')
+        .mockResolvedValue({});
+      const key = `gallery/${REGIMENT}/${MEMBER}/x.png`;
+
+      await service.deleteObject(`${STORAGE_CFG.publicBaseUrl}/${key}`);
+
+      expect(send).toHaveBeenCalledTimes(1);
+      const cmd = send.mock.calls[0][0] as DeleteObjectCommand;
+      expect(cmd).toBeInstanceOf(DeleteObjectCommand);
+      expect(cmd.input).toEqual({ Bucket: STORAGE_CFG.bucket, Key: key });
+    });
+
+    it('swallows a storage error (already-missing object) without throwing', async () => {
+      jest
+        .spyOn((service as unknown as { s3: { send: jest.Mock } }).s3, 'send')
+        .mockRejectedValue(new Error('NoSuchKey'));
+
+      await expect(
+        service.deleteObject(`${STORAGE_CFG.publicBaseUrl}/gallery/${REGIMENT}/${MEMBER}/gone.png`),
+      ).resolves.toBeUndefined();
+    });
+
+    it('is a no-op for a URL outside the storage base (never calls S3)', async () => {
+      const send = jest
+        .spyOn((service as unknown as { s3: { send: jest.Mock } }).s3, 'send')
+        .mockResolvedValue({});
+
+      await service.deleteObject('https://youtu.be/abc123');
+
+      expect(send).not.toHaveBeenCalled();
     });
   });
 });

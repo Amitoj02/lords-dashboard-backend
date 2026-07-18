@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
@@ -186,6 +186,30 @@ export class StorageService {
   /** The stable, query-string-free public URL an object is served from. */
   publicUrlForKey(key: string): string {
     return `${this.cfg.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+  }
+
+  /**
+   * Best-effort delete of a stored object, given the public URL it was persisted
+   * under (the exact inverse of {@link publicUrlForKey}). Used when a resource
+   * that owns uploaded media is removed (e.g. a gallery item) so the bytes don't
+   * outlive the row. A URL outside our public base (external/link-type media, or
+   * a file stored with no key) is skipped, and any storage error — including an
+   * already-missing object — is swallowed: purging media must never fail or roll
+   * back the owning delete. (S3/MinIO DeleteObject is itself idempotent for
+   * absent keys.)
+   */
+  async deleteObject(url: string): Promise<void> {
+    const base = `${this.cfg.publicBaseUrl.replace(/\/$/, '')}/`;
+    if (!url.startsWith(base)) {
+      this.logger.warn(`Skipping delete of object outside the storage base: ${url}`);
+      return;
+    }
+    const key = url.slice(base.length);
+    try {
+      await this.s3.send(new DeleteObjectCommand({ Bucket: this.cfg.bucket, Key: key }));
+    } catch (error) {
+      this.logger.warn(`Failed to delete object ${key}: ${(error as Error).message}`);
+    }
   }
 
   // ── Internals ────────────────────────────────────────────────────────────────

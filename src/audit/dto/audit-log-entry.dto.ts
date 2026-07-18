@@ -25,6 +25,12 @@ export class AuditLogEntryDto {
   @ApiProperty({ nullable: true })
   actorLabel: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    description: 'Actor avatar (custom, else linked Discord avatar); null for system/bot actors',
+  })
+  actorAvatarUrl: string | null;
+
   @ApiProperty({ nullable: true })
   targetType: string | null;
 
@@ -36,6 +42,12 @@ export class AuditLogEntryDto {
 
   @ApiProperty({ nullable: true })
   targetLabel: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Target member avatar (custom, else linked Discord avatar), or null',
+  })
+  targetAvatarUrl: string | null;
 
   @ApiProperty({ nullable: true })
   detail: string | null;
@@ -67,10 +79,16 @@ export class AuditLogEntryDto {
       // Prefer the stored denormalised label; fall back to the joined member's
       // in-game name so human actors/targets are never rendered as null.
       actorLabel: entry.actorLabel ?? entry.actorMember?.inGameName ?? null,
+      // Custom avatar first, then the linked Discord avatar (mirrors member.dto /
+      // gallery author projection). System/bot actors have no member ⇒ null.
+      actorAvatarUrl:
+        entry.actorMember?.avatarUrl ?? entry.actorMember?.discordIdentity?.avatarUrl ?? null,
       targetType: entry.targetType,
       targetId: entry.targetId,
       targetMemberId: entry.targetMemberId,
       targetLabel: entry.targetLabel ?? entry.targetMember?.inGameName ?? null,
+      targetAvatarUrl:
+        entry.targetMember?.avatarUrl ?? entry.targetMember?.discordIdentity?.avatarUrl ?? null,
       detail: entry.detail,
       before: entry.beforeValue,
       after: entry.afterValue,

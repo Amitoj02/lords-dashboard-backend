@@ -185,9 +185,13 @@ export class AuditService {
   ): Promise<PaginatedResponseDto<AuditLogEntryDto>> {
     const [rows, total] = await this.entries.findAndCount({
       where: this.buildWhere(regimentId, query),
-      // Join the actor/target members so the DTO can resolve a human name when
-      // the denormalised label was not stored (actor FK is onDelete SET NULL).
-      relations: { actorMember: true, targetMember: true },
+      // Join the actor/target members (and their Discord identity) so the DTO can
+      // resolve a human name when the denormalised label was not stored (actor FK
+      // is onDelete SET NULL) and a real avatar with a Discord fallback (T-0117).
+      relations: {
+        actorMember: { discordIdentity: true },
+        targetMember: { discordIdentity: true },
+      },
       order: { occurredAt: 'DESC', id: 'DESC' },
       skip: query.skip,
       take: query.limit,
@@ -205,8 +209,11 @@ export class AuditService {
   async findOne(regimentId: string, id: string): Promise<AuditLogEntryDto> {
     const row = await this.entries.findOne({
       where: { id, regimentId },
-      // See findEntries: resolve the actor/target member name when unstored.
-      relations: { actorMember: true, targetMember: true },
+      // See findEntries: resolve the actor/target member name + avatar when unstored.
+      relations: {
+        actorMember: { discordIdentity: true },
+        targetMember: { discordIdentity: true },
+      },
     });
     if (!row) throw new NotFoundException('Audit entry not found');
     return AuditLogEntryDto.from(row);
@@ -220,15 +227,19 @@ export class AuditService {
   async exportCsv(regimentId: string, query: AuditQueryDto): Promise<string> {
     const rows = await this.entries.find({
       where: this.buildWhere(regimentId, query),
-      // Join the actor/target members so the CSV resolves the human name when the
-      // denormalised label was not stored — matching the JSON read paths + DTO.
-      relations: { actorMember: true, targetMember: true },
+      // Join the actor/target members (and their Discord identity) so the CSV
+      // resolves the human name when the denormalised label was not stored and a
+      // real avatar with a Discord fallback — matching the JSON read paths + DTO.
+      relations: {
+        actorMember: { discordIdentity: true },
+        targetMember: { discordIdentity: true },
+      },
       order: { occurredAt: 'DESC', id: 'DESC' },
       take: 10000,
     });
 
     const header =
-      'occurredAt,action,severity,actorType,actorLabel,actorMemberId,targetType,targetId,targetLabel,detail';
+      'occurredAt,action,severity,actorType,actorLabel,actorMemberId,actorAvatarUrl,targetType,targetId,targetLabel,targetAvatarUrl,detail';
     const lines = [header];
     for (const row of rows) {
       lines.push(
@@ -239,9 +250,11 @@ export class AuditService {
           row.actorType,
           row.actorLabel ?? row.actorMember?.inGameName ?? '',
           row.actorMemberId,
+          row.actorMember?.avatarUrl ?? row.actorMember?.discordIdentity?.avatarUrl ?? null,
           row.targetType,
           row.targetId,
           row.targetLabel ?? row.targetMember?.inGameName ?? '',
+          row.targetMember?.avatarUrl ?? row.targetMember?.discordIdentity?.avatarUrl ?? null,
           row.detail,
         ]
           .map((field) => this.escapeCsvField(field))

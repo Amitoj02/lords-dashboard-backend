@@ -97,7 +97,7 @@ describe('AuditService', () => {
   });
 
   describe('findOne', () => {
-    it('returns the entry projection scoped to the regiment', async () => {
+    it('returns the entry projection scoped to the regiment, eager-loading member identities', async () => {
       entriesRepo.findOne.mockResolvedValue({
         id: '42',
         regimentId: 'r1',
@@ -107,10 +107,22 @@ describe('AuditService', () => {
         actorType: AuditActorType.Member,
         actorMemberId: 'm1',
         actorLabel: 'Sgt. Rock',
+        // Actor has a custom avatar — it wins over the Discord one (T-0117).
+        actorMember: {
+          inGameName: 'Sgt. Rock',
+          avatarUrl: 'https://cdn.example/rock.png',
+          discordIdentity: { avatarUrl: 'https://cdn.discordapp.com/avatars/1/x.png' },
+        },
         targetType: 'member',
         targetId: 'm2',
         targetMemberId: 'm2',
         targetLabel: 'Pvt. Snafu',
+        // Target has no custom avatar — falls back to the linked Discord avatar.
+        targetMember: {
+          inGameName: 'Pvt. Snafu',
+          avatarUrl: null,
+          discordIdentity: { avatarUrl: 'https://cdn.discordapp.com/avatars/2/y.png' },
+        },
         detail: null,
         beforeValue: null,
         afterValue: null,
@@ -120,11 +132,43 @@ describe('AuditService', () => {
 
       expect(entriesRepo.findOne).toHaveBeenCalledWith({
         where: { id: '42', regimentId: 'r1' },
-        relations: { actorMember: true, targetMember: true },
+        relations: {
+          actorMember: { discordIdentity: true },
+          targetMember: { discordIdentity: true },
+        },
       });
       expect(dto.id).toBe('42');
       expect(dto.occurredAt).toBe('2026-06-22T18:30:00.000Z');
       expect(dto.action).toBe('rank.change');
+      // Custom avatar preferred; Discord avatar used as the fallback (T-0117).
+      expect(dto.actorAvatarUrl).toBe('https://cdn.example/rock.png');
+      expect(dto.targetAvatarUrl).toBe('https://cdn.discordapp.com/avatars/2/y.png');
+    });
+
+    it('resolves avatars to null when the actor has no member (system actor)', async () => {
+      entriesRepo.findOne.mockResolvedValue({
+        id: '43',
+        regimentId: 'r1',
+        occurredAt: new Date('2026-06-22T18:30:00.000Z'),
+        action: 'discord.sync',
+        severity: AuditSeverity.Info,
+        actorType: AuditActorType.System,
+        actorMemberId: null,
+        actorLabel: null,
+        actorMember: null,
+        targetType: null,
+        targetId: null,
+        targetMemberId: null,
+        targetLabel: null,
+        targetMember: null,
+        detail: null,
+        beforeValue: null,
+        afterValue: null,
+      });
+
+      const dto = await service.findOne('r1', '43');
+      expect(dto.actorAvatarUrl).toBeNull();
+      expect(dto.targetAvatarUrl).toBeNull();
     });
 
     it('throws NotFound for a missing/wrong-regiment entry', async () => {
@@ -149,8 +193,34 @@ describe('AuditService', () => {
         }),
       );
       expect(csv).toBe(
-        'occurredAt,action,severity,actorType,actorLabel,actorMemberId,targetType,targetId,targetLabel,detail',
+        'occurredAt,action,severity,actorType,actorLabel,actorMemberId,actorAvatarUrl,targetType,targetId,targetLabel,targetAvatarUrl,detail',
       );
+    });
+
+    it('emits the actor/target avatar columns (custom, else Discord fallback)', async () => {
+      entriesRepo.find.mockResolvedValue([
+        {
+          occurredAt: new Date('2026-06-22T18:30:00.000Z'),
+          action: 'rank.change',
+          severity: AuditSeverity.Warn,
+          actorType: AuditActorType.Member,
+          actorLabel: 'Sgt. Rock',
+          actorMemberId: 'm1',
+          actorMember: { avatarUrl: null, discordIdentity: { avatarUrl: 'https://cdn/disc.png' } },
+          targetType: 'member',
+          targetId: 'm2',
+          targetLabel: 'Pvt. Snafu',
+          targetMember: { avatarUrl: 'https://cdn/custom.png', discordIdentity: null },
+          detail: null,
+        },
+      ]);
+
+      const csv = await service.exportCsv('r1', query);
+      const row = csv.split('\n')[1];
+
+      // Actor falls back to its Discord avatar; target uses its custom avatar.
+      expect(row).toContain('"https://cdn/disc.png"');
+      expect(row).toContain('"https://cdn/custom.png"');
     });
 
     it('quote-escapes commas and quotes and renders nulls as empty cells', async () => {
