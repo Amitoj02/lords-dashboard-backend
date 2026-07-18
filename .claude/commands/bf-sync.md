@@ -7,6 +7,11 @@ Read the `lastSyncedCommit` from `.blueframe/state.json`, then run
 
 Reconcile every commit into the state file:
 - Advance task `status` values to match what the commits actually did.
+  Because `/bf-sync` reconciles commits already on the repo's default
+  branch, a task whose work appears in those commits is **`deployed`**, not
+  `deploy_ready` — the Orbit Developer Sun only absorbs `deployed`, so never
+  leave finished, merged work parked at `deploy_ready`. Reserve
+  `deploy_ready` for built-and-verified work not yet on the default branch.
 - Add `regressionRisk` entries (status `open`) for shared/core code that
   was touched.
 - Re-check every OPEN `regressionRisk` across ALL tasks against the new
@@ -43,7 +48,9 @@ Each **Task** object (every field required unless noted):
   "type": "feature",
   "size": "M",
   "sizeWeight": 3,
-  "area": "auth",
+  "area": "dashboard",
+  "feature": "events",
+  "subfeature": "view-archived",
   "repo": "",
   "paths": ["src/foo.ts"],
   "dependsOn": [],
@@ -63,6 +70,10 @@ Enums — `status`: planned | in_progress | questionnaire | review | test | depl
 with `sizeWeight` XS=1, S=2, M=3, L=5, XL=8. `testPlan[].status`: pending | passed | failed.
 `history[].by`: claude | human | system. `questions[].answer` is null until answered.
 All timestamps are ISO-8601 strings. `id` must be unique and never reused.
+`skippedByClaude`, `paths`, `dependsOn` and `blocks` are arrays of PLAIN
+STRINGS (one short sentence each) — NEVER objects. Writing an object into
+`skippedByClaude` makes the whole file fail validation and the repo shows as
+broken.
 
 **Risk lifecycle:** each `regressionRisk` entry is an object
 `{ "desc", "status": "open" | "resolved", "notedAt"?, "resolvedAt"?, "resolvedBy"?, "note"? }`.
@@ -75,8 +86,26 @@ open risks it retires; when that task reaches `deployed`, those
 risks are auto-resolved. Omit `resolvesRisk` entirely when a task retires
 nothing.
 
-**Monorepo convention:** set `area` to the package/workspace dir name
-(`packages/web` → `web`) so tasks group by package in the UI.
+**Project-Manager hierarchy (`area` → `feature` → `subfeature`):** the Orbit
+Project-Manager lens renders ONE node per *feature*, not one per task — many
+work-tasks roll up into the same feature. Tag related tasks with a shared,
+durable, product-facing hierarchy so they collapse together instead of
+littering the map:
+- `area` = the top-level **module / bounded context** (the planet): a broad
+  product domain like `dashboard`, `discord-bot`, `auth`, `platform`. Aim for
+  ~3–8 modules across the whole repo — NEVER one repo-wide `area`. In a
+  monorepo the package name (`packages/web` → `web`) is a fine module.
+- `feature` = the durable **capability** under that module (a moon): `events`,
+  `gallery`, `applications`. Reuse the SAME `feature` string on every task
+  that builds, fixes or extends it, so they become one feature node.
+- `subfeature` = a specific **control / slice** within that feature (a
+  sub-moon): `view-archived`, `rsvp`. Optional — omit when the task IS the
+  whole feature.
+Name `feature`/`subfeature` as short **product nouns** (`view-archived`), NOT
+as the task title (`Add "View archived" events control for moderators`). The
+task keeps its descriptive `title`; these are the short, stable labels the PM
+map shows. Pure infra/chore with no product feature may omit `feature` — it
+still counts toward its module gauge but draws no moon.
 **Cross-repo dependencies:** a `dependsOn` entry may reference a task in another
 workspace repo as `"<repoKey>:T-####"`; bare `T-####` ids are always local to
 this repo. Leave the `repo` field as `""` — the workspace layer supplies it.

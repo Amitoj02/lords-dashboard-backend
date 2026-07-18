@@ -4,15 +4,19 @@ description: Reverse-engineer this codebase into Blueframe state
 
 Scan this codebase. Reverse-engineer the current feature set into `.blueframe/state.json`:
 
-- Record clearly-completed, shipped work as tasks with status `deployed`, and
+- Record clearly-completed, shipped work (already merged to the default
+  branch) as tasks with status `deployed` so the Orbit Sun absorbs it, and
   work that exists but looks unverified as `review`.
 - Record obvious gaps / TODOs as `planned` tasks.
 - Record uncertainties as tasks in status `questionnaire`, each with concrete
   `questions` for the human.
 - Give every task a stable `id` (`T-####`, never colliding), a `size`
-  (XS/S/M/L/XL) with the matching `sizeWeight` (XS=1,S=2,M=3,L=5,XL=8), an
-  `area` (in a monorepo: the package name, e.g. `packages/web` → `web`), and
-  the primary `paths` it touches.
+  (XS/S/M/L/XL) with the matching `sizeWeight` (XS=1,S=2,M=3,L=5,XL=8), its
+  PM hierarchy — `area` (module / bounded context; decompose the repo into
+  ~3–8 modules, never one repo-wide area), `feature` (the capability) and
+  `subfeature` (a specific control) — and the primary `paths` it touches.
+  Group tasks that build the same capability under one `area`+`feature` so
+  the Orbit PM lens shows one feature node, not one node per task.
 - If the repo has migrations or ORM models, generate `.blueframe/schema.mmd`
   as a Mermaid ERD of the data model.
 
@@ -35,7 +39,9 @@ Each **Task** object (every field required unless noted):
   "type": "feature",
   "size": "M",
   "sizeWeight": 3,
-  "area": "auth",
+  "area": "dashboard",
+  "feature": "events",
+  "subfeature": "view-archived",
   "repo": "",
   "paths": ["src/foo.ts"],
   "dependsOn": [],
@@ -55,6 +61,10 @@ Enums — `status`: planned | in_progress | questionnaire | review | test | depl
 with `sizeWeight` XS=1, S=2, M=3, L=5, XL=8. `testPlan[].status`: pending | passed | failed.
 `history[].by`: claude | human | system. `questions[].answer` is null until answered.
 All timestamps are ISO-8601 strings. `id` must be unique and never reused.
+`skippedByClaude`, `paths`, `dependsOn` and `blocks` are arrays of PLAIN
+STRINGS (one short sentence each) — NEVER objects. Writing an object into
+`skippedByClaude` makes the whole file fail validation and the repo shows as
+broken.
 
 **Risk lifecycle:** each `regressionRisk` entry is an object
 `{ "desc", "status": "open" | "resolved", "notedAt"?, "resolvedAt"?, "resolvedBy"?, "note"? }`.
@@ -67,8 +77,26 @@ open risks it retires; when that task reaches `deployed`, those
 risks are auto-resolved. Omit `resolvesRisk` entirely when a task retires
 nothing.
 
-**Monorepo convention:** set `area` to the package/workspace dir name
-(`packages/web` → `web`) so tasks group by package in the UI.
+**Project-Manager hierarchy (`area` → `feature` → `subfeature`):** the Orbit
+Project-Manager lens renders ONE node per *feature*, not one per task — many
+work-tasks roll up into the same feature. Tag related tasks with a shared,
+durable, product-facing hierarchy so they collapse together instead of
+littering the map:
+- `area` = the top-level **module / bounded context** (the planet): a broad
+  product domain like `dashboard`, `discord-bot`, `auth`, `platform`. Aim for
+  ~3–8 modules across the whole repo — NEVER one repo-wide `area`. In a
+  monorepo the package name (`packages/web` → `web`) is a fine module.
+- `feature` = the durable **capability** under that module (a moon): `events`,
+  `gallery`, `applications`. Reuse the SAME `feature` string on every task
+  that builds, fixes or extends it, so they become one feature node.
+- `subfeature` = a specific **control / slice** within that feature (a
+  sub-moon): `view-archived`, `rsvp`. Optional — omit when the task IS the
+  whole feature.
+Name `feature`/`subfeature` as short **product nouns** (`view-archived`), NOT
+as the task title (`Add "View archived" events control for moderators`). The
+task keeps its descriptive `title`; these are the short, stable labels the PM
+map shows. Pure infra/chore with no product feature may omit `feature` — it
+still counts toward its module gauge but draws no moon.
 **Cross-repo dependencies:** a `dependsOn` entry may reference a task in another
 workspace repo as `"<repoKey>:T-####"`; bare `T-####` ids are always local to
 this repo. Leave the `repo` field as `""` — the workspace layer supplies it.
