@@ -1,9 +1,9 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
-  "lastSyncedAt": "2026-07-16T02:45:00Z",
-  "notesForNextSession": "Planned-tasks epic (T-0095..T-0107) implemented + verified → deploy_ready. members.name dropped (inGameName sole identity); platform/timezone/attendanceRate + short_tag/public_roster dropped; established_at + enrolledExcludingMercenaries added; announcements (Field Dispatch) + manage_notifications torn down; Quartermaster→Lord Adjutant; applicant_type re-added; hasServerPassword + unarchive + archived-listing on events; per-member events/rsvps endpoints; service-record self/admin gate + changeRole no-op skip; oversize-upload message standardized. 4 guarded migrations. lint/build/db:setup/298 unit/36 e2e green; live HTTP contract verified. Ship WITH the frontend PR feat/planned-tasks-fe (contracts change in lockstep). T-0025 blocked on prod deploy (T-0032) + live Discord.",
+  "lastSyncedCommit": "6af4c096b3ac4870b8c9d8df9fc9fdeae824e08a",
+  "lastSyncedAt": "2026-07-18T02:02:30Z",
+  "notesForNextSession": "Planned-tasks epic T-0108..T-0114 implemented + verified -> deploy_ready. last_seen_at now bumps on every authenticated request (throttled 5min at the SessionContext.resolve choke point, fire-and-forget). New server-side media resolver + Medal.tv thumbnail proxy (cached bytes behind a stable URL, SSRF host-allowlist, bounded read + cache eviction) at /api/gallery/media/{resolve, medal/:id/thumbnail}; optional key-gated YouTube enrichment (YOUTUBE_API_KEY). Account deletion finalized: execute (soft-delete member + anonymise PII + HARD-DELETE the Discord identity for durable GDPR erasure) + cancel; audit actions seeded; NO migration needed (enum/columns already present). Gallery author projection now returns avatarUrl (custom -> Discord fallback). lint/build/334 unit/39 e2e green; browser-verified end-to-end. Ship WITH the frontend PR feat/gallery-profile-admin-polish (media proxy + author.avatarUrl + deletion contracts change in lockstep). No planned tasks remain; T-0025 still blocked on prod deploy (T-0032) + live Discord.",
   "nextIdCounter": 114,
   "connections": [],
   "tasks": [
@@ -6490,7 +6490,7 @@
       "id": "T-0108",
       "title": "Track last_seen_at on every authenticated request",
       "summary": "Today members.last_seen_at is only stamped at Discord sign-in (auth.service.ts) and application acceptance, so it means 'last logged in', not 'last accessed the site'. Bump last_seen_at whenever a resolved member makes any authenticated request, via a throttled fire-and-forget update at the SessionContextService.resolve choke point. Keep the login stamp as a floor.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -6519,8 +6519,8 @@
       "regressionRisk": [
         {
           "desc": "SessionContextService.resolve is the single authorization choke point for every protected route; adding a write side-effect there must not add latency to or fail an authenticated request.",
-          "status": "open",
-          "notedAt": "2026-07-17T00:00:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
         }
       ],
       "skippedByClaude": [],
@@ -6534,14 +6534,15 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: make last_seen_at reflect last site access (throttled bump on authenticated request)"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     },
     {
       "id": "T-0109",
       "title": "Tests: last_seen_at advances on authenticated requests",
       "summary": "Unit-test the throttled last-seen bump in SessionContextService (writes once per window, skips Applicant sessions, tolerates DB errors) and add an e2e assertion that last_seen_at advances after an authenticated request rather than only at login.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
@@ -6571,14 +6572,15 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: test coverage for last-seen-on-request"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     },
     {
       "id": "T-0110",
       "title": "Media link resolver + Medal.tv thumbnail proxy (server-side)",
       "summary": "Add a server-side media service that resolves an external gallery link (YouTube / Medal.tv / direct image / direct video) into a provider + embedUrl + thumbnailUrl shape, plus a Medal.tv thumbnail proxy that reads the clip og:image (or the unofficial api-v2.medal.tv/content/:id JSON) and caches the bytes behind a stable URL. Medal media/thumbnail URLs are signed and expiring and the clip page/api are not CORS-enabled, so this must live in NestJS - the browser cannot fetch them.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -6606,7 +6608,7 @@
         { "desc": "Unit: clip-id and video-id extraction handles every documented medal.tv and youtube URL shape", "status": "pending" }
       ],
       "regressionRisk": [
-        { "desc": "New outbound server-side fetch of medal.tv (SSRF/timeout surface); synchronous resolution could add latency to gallery submit/list.", "status": "open", "notedAt": "2026-07-17T00:00:00Z" }
+        { "desc": "New outbound server-side fetch of medal.tv (SSRF/timeout surface); synchronous resolution could add latency to gallery submit/list.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6619,14 +6621,15 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: server-side media resolver + Medal.tv thumbnail proxy (CORS forces this server-side)"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     },
     {
       "id": "T-0111",
       "title": "Add YOUTUBE_API_KEY env + typed config plumbing",
       "summary": "Register an optional YOUTUBE_API_KEY secret across the three-file config pattern - Joi schema in env.validation.ts (allow empty so the app still boots), a typed accessor in configuration.ts, and .env.example - plus the docker-compose files that inject env. No functional use yet; this unblocks the YouTube Data API enrichment.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "infra",
       "size": "S",
       "sizeWeight": 2,
@@ -6649,7 +6652,7 @@
         { "desc": ".env.example documents the key under an external-integrations section", "status": "pending" }
       ],
       "regressionRisk": [
-        { "desc": "Touches the Joi env schema that gates app boot for every environment; a malformed rule could block startup.", "status": "open", "notedAt": "2026-07-17T00:00:00Z" }
+        { "desc": "Touches the Joi env schema that gates app boot for every environment; a malformed rule could block startup.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6662,14 +6665,15 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: YOUTUBE_API_KEY env/config plumbing"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     },
     {
       "id": "T-0112",
       "title": "YouTube Data API v3 enrichment (title/duration) - optional, key-gated",
       "summary": "When YOUTUBE_API_KEY is present, enrich a resolved or submitted YouTube link via videos.list (part=snippet,contentDetails, 1 quota unit, cached) to return the canonical title, duration and authoritative thumbnail; degrade gracefully to the static i.ytimg.com thumbnail when the key is absent or the call fails. Wire it into the media resolver from T-0110.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -6702,14 +6706,15 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: optional YouTube Data API enrichment gated on YOUTUBE_API_KEY"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     },
     {
       "id": "T-0113",
       "title": "Finalize self-service account deletion (execute + cancel)",
       "summary": "The existing request -> confirm deletion flow sets status to Confirmed but never removes the member: no code transitions to Executed/Cancelled and nothing triggers the member soft-delete. Implement the terminal execute step (soft-delete + anonymise PII, audit, set executedAt) and a cancel transition/endpoint, so the frontend dedicated deletion page performs a real deletion end-to-end.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -6735,7 +6740,7 @@
         { "desc": "e2e: full request -> confirm -> execute path via /api/members/me/deletion-request*", "status": "pending" }
       ],
       "regressionRisk": [
-        { "desc": "Deletion/anonymisation touches the shared Member entity and roster/auth reads; a cascade or soft-delete-scope error could hide live members.", "status": "open", "notedAt": "2026-07-17T00:00:00Z" }
+        { "desc": "Deletion/anonymisation touches the shared Member entity and roster/auth reads; a cascade or soft-delete-scope error could hide live members.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6748,14 +6753,15 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: finalize account-deletion execution + cancel (surfaced during planning; unblocks FE deletion page)"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     },
     {
       "id": "T-0114",
       "title": "Add submitter avatar to the gallery author projection",
       "summary": "The gallery author reference (GalleryMemberRefDto) is only { memberId, name }, so the API never returns the submitter's profile picture and the frontend card can only show initials. Add an avatarUrl field populated from the author member's avatarUrl with a Discord-avatar fallback (mirroring member.dto), and load the author.discordIdentity relation in the gallery projection query so the fallback resolves.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -6777,7 +6783,7 @@
         { "desc": "gallery.service.spec passes with the new avatarUrl field asserted on the author projection", "status": "pending" }
       ],
       "regressionRisk": [
-        { "desc": "Adds an author.discordIdentity join + avatarUrl to the shared gallery projection (projectMany/projectOne) consumed by list, detail, and moderation reads; an extra relation load could change query results or add latency across all gallery endpoints.", "status": "open", "notedAt": "2026-07-17T00:00:00Z" }
+        { "desc": "Adds an author.discordIdentity join + avatarUrl to the shared gallery projection (projectMany/projectOne) consumed by list, detail, and moderation reads; an extra relation load could change query results or add latency across all gallery endpoints.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6790,7 +6796,8 @@
           "to": "planned",
           "by": "claude",
           "note": "created during bf-plan: add submitter avatarUrl to the gallery author projection (unblocks FE gallery avatar rendering lords-regiment-dashboard:T-0174)"
-        }
+        },
+        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
       ]
     }
   ]
