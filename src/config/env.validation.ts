@@ -75,4 +75,10 @@ export const envValidationSchema = Joi.object({
   S3_FORCE_PATH_STYLE: Joi.boolean().default(true),
   S3_PRESIGN_EXPIRY_SECONDS: Joi.number().integer().min(60).max(3600).default(900),
   S3_MAX_UPLOAD_MB: Joi.number().integer().min(1).max(2048).default(100),
+
+  // External integrations — optional third-party API keys. Allowed empty so the
+  // app boots without them; the dependent feature degrades gracefully when unset.
+  // YOUTUBE_API_KEY enables YouTube Data API enrichment (canonical title +
+  // duration) for gallery links; without it the static i.ytimg thumbnail is used.
+  YOUTUBE_API_KEY: Joi.string().allow('').default(''),
 });

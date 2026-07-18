@@ -26,6 +26,7 @@ export interface AppConfig {
   discord: DiscordConfig;
   frontend: FrontendConfig;
   storage: StorageConfig;
+  integrations: IntegrationsConfig;
 }
 
 export interface DatabaseConfig {
@@ -105,6 +106,14 @@ export interface StorageConfig {
   maxUploadMb: number;
 }
 
+export interface IntegrationsConfig {
+  /**
+   * YouTube Data API v3 key. Optional: when empty, gallery link resolution falls
+   * back to the static i.ytimg.com thumbnail and skips title/duration enrichment.
+   */
+  youtubeApiKey: string;
+}
+
 export default (): AppConfig => ({
   env: (process.env.NODE_ENV as AppConfig['env']) ?? 'development',
   port: parseInt(process.env.PORT ?? '3000', 10),
@@ -166,4 +175,7 @@ export default (): AppConfig => ({
       maxUploadMb: parseInt(process.env.S3_MAX_UPLOAD_MB ?? '100', 10),
     };
   })(),
+  integrations: {
+    youtubeApiKey: process.env.YOUTUBE_API_KEY ?? '',
+  },
 });

@@ -3,13 +3,19 @@ import { GalleryMediaType, GalleryStatus, GalleryType } from '../../common/enums
 import { GalleryFile } from '../entities/gallery-file.entity';
 import { GalleryItem } from '../entities/gallery-item.entity';
 
-/** Lightweight `{ memberId, name }` reference used for the author + tagged members. */
+/** Lightweight reference used for the author + tagged members. */
 export class GalleryMemberRefDto {
   @ApiProperty({ format: 'uuid' })
   memberId: string;
 
   @ApiProperty({ example: 'Jane Doe' })
   name: string;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Author avatar (custom, else linked Discord avatar), or null',
+  })
+  avatarUrl: string | null;
 }
 
 /** A single file within a gallery submission (image/video asset). */

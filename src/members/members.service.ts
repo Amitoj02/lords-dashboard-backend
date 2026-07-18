@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
@@ -556,6 +557,104 @@ export class MembersService {
     request.confirmedAt = new Date();
     request.discordReauthenticatedAt = new Date();
     await this.deletionRequests.save(request);
+    return { status: request.status };
+  }
+
+  /**
+   * Terminal execution of a CONFIRMED deletion request (T-0113): soft-delete the
+   * member (hides them from the roster + downgrades their auth context to
+   * Applicant), anonymise their PII on both the member row and the linked Discord
+   * identity, mark the request Executed, revoke outstanding sessions and audit it.
+   * The member + identity rows and the audit trail are retained (soft-delete),
+   * only the personal data is scrubbed. Idempotent-safe: requires a Confirmed
+   * request, so a re-invocation after execution 404s rather than double-running.
+   */
+  async executeSelfDeletion(
+    user: AuthenticatedUser,
+    ip: string | null,
+  ): Promise<{ status: AccountDeletionStatus }> {
+    if (!user.memberId)
+      throw new ForbiddenException('Only enrolled members can delete their account');
+    const request = await this.deletionRequests.findOne({
+      where: { memberId: user.memberId, status: AccountDeletionStatus.Confirmed },
+    });
+    if (!request) throw new NotFoundException('No confirmed deletion request to execute');
+
+    const member = await this.loadMember(user.memberId, user.regimentId);
+    const identityId = member.discordIdentityId;
+
+    // Anonymise + soft-delete atomically so the roster can never observe a
+    // half-deleted member (PII cleared but row still live, or vice versa).
+    await this.members.manager.transaction(async (mgr) => {
+      // Overwrite roster-facing PII (in_game_name is NOT NULL → placeholder).
+      member.inGameName = '[deleted member]';
+      member.avatarUrl = null;
+      member.bannerUrl = null;
+      member.standing = null;
+      member.status = MemberStatus.Inactive;
+      member.discordLinked = false;
+      await mgr.getRepository(Member).save(member);
+      await mgr.getRepository(Member).softRemove(member);
+
+      // Hard-delete the linked identity (the sensitive PII — email, OAuth tokens —
+      // lives here). Anonymising the fields in place would be silently undone on
+      // the next Discord sign-in, which upserts the row by discord_user_id and
+      // rewrites fresh PII. Deleting the row makes the erasure durable: a later
+      // sign-in creates a BRAND-NEW identity (the members/applications FKs are
+      // ON DELETE SET NULL, so the soft-deleted member simply de-links).
+      if (identityId) {
+        await mgr.getRepository(DiscordIdentity).delete({ id: identityId });
+      }
+
+      request.status = AccountDeletionStatus.Executed;
+      request.executedAt = new Date();
+      await mgr.getRepository(AccountDeletionRequest).save(request);
+    });
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'member.deletion.execute',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'member', id: user.memberId, memberId: user.memberId },
+      detail: 'Account deleted (member soft-deleted + anonymised; Discord identity erased)',
+    });
+
+    // Revoke every outstanding token for the identity and drop the cached
+    // context, so the deleted member is fully logged out immediately (T-0048).
+    await this.sessionContext.invalidateSessions(identityId);
+
+    return { status: request.status };
+  }
+
+  /**
+   * Cancel a pending or confirmed deletion request before it is executed (T-0113).
+   * A member who changes their mind can back out at either the pre-confirm or
+   * post-confirm (pre-execute) stage; once Executed there is nothing to cancel.
+   */
+  async cancelSelfDeletion(
+    user: AuthenticatedUser,
+    ip: string | null,
+  ): Promise<{ status: AccountDeletionStatus }> {
+    if (!user.memberId) throw new ForbiddenException('Only enrolled members can cancel deletion');
+    const request = await this.deletionRequests.findOne({
+      where: [
+        { memberId: user.memberId, status: AccountDeletionStatus.PendingDiscordConfirmation },
+        { memberId: user.memberId, status: AccountDeletionStatus.Confirmed },
+      ],
+    });
+    if (!request) throw new NotFoundException('No pending deletion request to cancel');
+
+    request.status = AccountDeletionStatus.Cancelled;
+    await this.deletionRequests.save(request);
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'member.deletion.cancel',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'member', id: user.memberId, memberId: user.memberId },
+      detail: 'Account deletion request cancelled',
+    });
+
     return { status: request.status };
   }
 

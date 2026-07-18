@@ -13,7 +13,13 @@ import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthzService } from '../authz/authz.service';
 import { EventsService } from '../events/events.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { Capability, MemberRole, MemberStatus, StorageTarget } from '../common/enums';
+import {
+  AccountDeletionStatus,
+  Capability,
+  MemberRole,
+  MemberStatus,
+  StorageTarget,
+} from '../common/enums';
 import { EventAttendee } from '../events/entities/event-attendee.entity';
 import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
@@ -68,10 +74,24 @@ describe('MembersService', () => {
     take: jest.Mock;
     getManyAndCount: jest.Mock;
   };
+  // Shared per-transaction repo mock so tests can assert save/softRemove/delete.
+  const txRepo = {
+    save: jest.fn((x: unknown) => Promise.resolve(x)),
+    softRemove: jest.fn((x: unknown) => Promise.resolve(x)),
+    delete: jest.fn(() => Promise.resolve({ affected: 1 })),
+  };
   const memberRepo = {
     createQueryBuilder: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn(),
+    // Account-deletion execute runs inside a transaction; the mock manager invokes
+    // the callback with a shared repo whose save/softRemove/delete are no-ops, so
+    // the service's in-memory mutations still occur and the delete can be asserted.
+    manager: {
+      transaction: jest.fn((cb: (mgr: unknown) => Promise<unknown>) =>
+        cb({ getRepository: () => txRepo }),
+      ),
+    },
   };
 
   // EventAttendee repository: count + grouped QueryBuilder.
@@ -576,6 +596,95 @@ describe('MembersService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'member.deletion.request' }),
       );
+    });
+
+    it('confirmSelfDeletion transitions a pending request to Confirmed', async () => {
+      const request = {
+        id: 'req-1',
+        memberId: 'member-1',
+        status: AccountDeletionStatus.PendingDiscordConfirmation,
+        confirmedAt: null as Date | null,
+        discordReauthenticatedAt: null as Date | null,
+      };
+      deletionRepo.findOne.mockResolvedValue(request);
+      deletionRepo.save.mockImplementation((r: unknown) => Promise.resolve(r));
+
+      const res = await service.confirmSelfDeletion(user({ memberId: 'member-1' }), {
+        token: 'tok',
+      });
+
+      expect(res.status).toBe(AccountDeletionStatus.Confirmed);
+      expect(request.confirmedAt).toBeInstanceOf(Date);
+    });
+
+    it('executeSelfDeletion soft-deletes + anonymises the member and marks it Executed', async () => {
+      const request = {
+        id: 'req-1',
+        memberId: 'member-1',
+        status: AccountDeletionStatus.Confirmed,
+        executedAt: null as Date | null,
+      };
+      deletionRepo.findOne.mockResolvedValue(request);
+      deletionRepo.save.mockImplementation((r: unknown) => Promise.resolve(r));
+      const member = buildMember({
+        discordIdentityId: 'identity-1',
+        avatarUrl: 'https://cdn/a.png',
+        discordIdentity: {
+          discordTag: '@commander',
+          email: 'x@y.z',
+          accessToken: 'secret',
+        } as unknown as Member['discordIdentity'],
+      });
+      memberRepo.findOne.mockResolvedValue(member);
+
+      const res = await service.executeSelfDeletion(user({ memberId: 'member-1' }), '1.2.3.4');
+
+      expect(res.status).toBe(AccountDeletionStatus.Executed);
+      expect(request.executedAt).toBeInstanceOf(Date);
+      // Member PII anonymised.
+      expect(member.inGameName).toBe('[deleted member]');
+      expect(member.avatarUrl).toBeNull();
+      expect(member.discordLinked).toBe(false);
+      expect(member.status).toBe(MemberStatus.Inactive);
+      // Member soft-removed + linked identity HARD-deleted (durable erasure).
+      expect(txRepo.softRemove).toHaveBeenCalledWith(member);
+      expect(txRepo.delete).toHaveBeenCalledWith({ id: 'identity-1' });
+      // Audited + sessions revoked.
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'member.deletion.execute' }),
+      );
+      expect(sessionContext.invalidateSessions).toHaveBeenCalledWith('identity-1');
+    });
+
+    it('executeSelfDeletion 404s when there is no confirmed request', async () => {
+      deletionRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.executeSelfDeletion(user({ memberId: 'member-1' }), null),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('cancelSelfDeletion transitions a pending/confirmed request to Cancelled', async () => {
+      const request = {
+        id: 'req-1',
+        memberId: 'member-1',
+        status: AccountDeletionStatus.Confirmed,
+      };
+      deletionRepo.findOne.mockResolvedValue(request);
+      deletionRepo.save.mockImplementation((r: unknown) => Promise.resolve(r));
+
+      const res = await service.cancelSelfDeletion(user({ memberId: 'member-1' }), null);
+
+      expect(res.status).toBe(AccountDeletionStatus.Cancelled);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'member.deletion.cancel' }),
+      );
+    });
+
+    it('cancelSelfDeletion 404s when there is no cancellable request', async () => {
+      deletionRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.cancelSelfDeletion(user({ memberId: 'member-1' }), null),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });
