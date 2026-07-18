@@ -15,7 +15,8 @@
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "config",
+      "area": "platform",
+      "feature": "config",
       "repo": "",
       "paths": [
         "src/main.ts",
@@ -56,7 +57,8 @@
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "common",
+      "area": "platform",
+      "feature": "common",
       "repo": "",
       "paths": [
         "src/common/crypto/encryption.transformer.ts",
@@ -104,7 +106,8 @@
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
       "repo": "",
       "paths": [
         "src/database/migrations/1782177187006-InitialSchema.ts",
@@ -155,6 +158,7 @@
       "size": "L",
       "sizeWeight": 5,
       "area": "auth",
+      "feature": "auth",
       "repo": "",
       "paths": [
         "src/auth/auth.controller.ts",
@@ -195,11 +199,12 @@
       "id": "T-0005",
       "title": "Health module (liveness + DB probe)",
       "summary": "Health controller/module exposing a liveness endpoint and a database connectivity probe. No test coverage yet; marked review pending a smoke check.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "XS",
       "sizeWeight": 1,
-      "area": "health",
+      "area": "platform",
+      "feature": "health",
       "repo": "",
       "paths": [
         "src/health/health.controller.ts",
@@ -220,7 +225,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -235,6 +240,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -242,11 +254,12 @@
       "id": "T-0006",
       "title": "Capability authorization layer + capabilities on /auth/me",
       "summary": "CapabilitiesGuard + @RequireCapability() decorator reading the seeded role_permissions matrix (capability-based, stricter than the coarse RolesGuard). Also project the caller's effective capabilities into the CurrentUser DTO returned by /auth/me, so the frontend can gate UI by capability instead of coarse role. The matrix data + entity exist; the guard/decorator/projection do not.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "authz",
+      "area": "auth",
+      "feature": "authz",
       "repo": "",
       "paths": [
         "src/authz/",
@@ -272,7 +285,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -294,6 +307,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -301,11 +321,12 @@
       "id": "T-0007",
       "title": "Shared AuditService + audit interceptor",
       "summary": "An AuditService and interceptor/helper so every mutating endpoint writes an audit_log_entries row (actor, action from audit_actions, before/after, severity, discord_sync_status). audit_actions are seeded; the service is not built.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "audit",
+      "area": "platform",
+      "feature": "audit",
       "repo": "",
       "paths": [
         "src/audit/",
@@ -326,7 +347,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -341,6 +362,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -352,7 +380,8 @@
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "infra",
+      "area": "platform",
+      "feature": "infra",
       "repo": "",
       "paths": [
         ".github/workflows/ci.yml"
@@ -420,11 +449,12 @@
       "id": "T-0009",
       "title": "Unified Docker Compose stack (api + MySQL 8 + web, dev/prod parity)",
       "summary": "A single docker-compose at the backend repo root that runs the whole product: api (this repo), db (MySQL 8), and web (the Angular frontend, build context ../lords-regiment-dashboard). Multi-stage Dockerfile (deps -> build -> slim runtime) plus a base docker-compose.yml + docker-compose.override.yml (dev: bind mounts, hot reload, exposed ports) + docker-compose.prod.yml (prod: built images, no mounts, restart policies), with healthcheck-gated startup so api waits for db. `docker compose up` serves /api/health, /api/docs and the SPA. Does not exist yet.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
-      "area": "infra",
+      "area": "platform",
+      "feature": "infra",
       "repo": "",
       "paths": [
         "Dockerfile",
@@ -452,7 +482,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -474,6 +504,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -481,11 +518,12 @@
       "id": "T-0010",
       "title": "MembersModule — roster + admin actions + GDPR",
       "summary": "GET /members (filter + pagination), GET/PATCH /members/:id, admin actions (change rank/role, award/remove medal, suspend, ban, unban), service-record and command-info reads, and GDPR (deletion-request + confirm + export). Derived values (chevrons, events_attended, attendance_percent) computed server-side. Entities exist; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "src/members/"
@@ -515,7 +553,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -530,6 +568,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -537,11 +582,12 @@
       "id": "T-0011",
       "title": "RanksModule — CRUD + reorder + link-discord",
       "summary": "Ranks CRUD, precedence reorder, and Discord-role link fields (the sync itself lands with the bot). Entity + seed exist; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "ranks",
+      "area": "roster",
+      "feature": "ranks",
       "repo": "",
       "paths": [
         "src/ranks/"
@@ -569,7 +615,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -584,6 +630,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -591,11 +644,12 @@
       "id": "T-0012",
       "title": "MedalsModule — CRUD + link-discord",
       "summary": "Medals catalog CRUD and Discord-role link fields; holders_count derived server-side. Entity + seed exist; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "medals",
+      "area": "roster",
+      "feature": "medals",
       "repo": "",
       "paths": [
         "src/medals/"
@@ -623,7 +677,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -638,6 +692,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -645,11 +706,12 @@
       "id": "T-0013",
       "title": "Regiment profile & stats endpoints",
       "summary": "GET /regiment (public profile) and GET /regiment/stats (landing counters, public if public_stats), plus onboarding state endpoints. Values computed server-side, never trusted from client.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "regiments",
+      "area": "roster",
+      "feature": "regiments",
       "repo": "",
       "paths": [
         "src/regiments/"
@@ -671,7 +733,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -686,6 +748,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -693,11 +762,12 @@
       "id": "T-0014",
       "title": "ApplicationsModule — intake + decisions + promote",
       "summary": "Public POST /applications intake, admin list/detail, approve/decline/hold with moderator_note + discord_dm_message. Approve promotes to a members row (link identity, default rank, role=Member, set promoted_member_id, service-record + audit). Honors open_recruitment and reapplication detection. Entity exists; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
       "area": "applications",
+      "feature": "intake",
       "repo": "",
       "paths": [
         "src/applications/"
@@ -720,7 +790,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -735,6 +805,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -742,11 +819,12 @@
       "id": "T-0015",
       "title": "EventsModule — CRUD + RSVP + attendees + password reveal",
       "summary": "Events CRUD (+ draft/archive), child writes for platforms/tags/notify_offsets, RSVP, attendee check-in, and the sensitive POST /:id/reveal-password (gated on RSVP + reveal_event_passwords capability, decrypts server_password, writes an audit row). Public vs member serialization; a scheduled job advances status upcoming->ongoing->previous. Entities exist; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
       "area": "events",
+      "feature": "crud",
       "repo": "",
       "paths": [
         "src/events/"
@@ -767,7 +845,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -782,6 +860,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Post-MVP build: Events (CRUD/RSVP/attendees/reveal+scheduler) built, unit+e2e green, adversarially reviewed (archived-detail leak fixed), browser-verified in the dev stack. On feat/post-mvp-features (PR #4)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -789,11 +874,12 @@
       "id": "T-0016",
       "title": "GalleryModule — submit + moderation + likes",
       "summary": "POST /gallery submit (forces pending), public GET (approved only) + filters, approve/decline moderation (auto_approve_trusted honored), like toggle, tagged members, soft-delete. Stores file URLs/refs only in v1; enforces regiment_settings size/type limits. Entities exist; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "gallery",
+      "feature": "submissions",
       "repo": "",
       "paths": [
         "src/gallery/"
@@ -814,7 +900,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -829,6 +915,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Post-MVP build: Gallery (submit/moderation/likes) built + unit-tested + reviewed (findOnePublic scoping + like onlyApproved fixed). PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -836,11 +929,12 @@
       "id": "T-0017",
       "title": "AuditModule — read-only ledger",
       "summary": "GET /audit (filter severity/actor/action/date + search + pagination), GET /audit/:id (before/after drawer), GET /audit/export (CSV). Append-only, no write API (writes come from T-0007). Entities exist; read module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "audit",
+      "area": "platform",
+      "feature": "audit",
       "repo": "",
       "paths": [
         "src/audit/"
@@ -861,7 +955,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -876,6 +970,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Post-MVP build: Audit read added GET /audit/:id + GET /audit/export CSV (formula-injection neutralized in review; requestId+discordSyncStatus later exposed on the DTO). PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -883,11 +984,12 @@
       "id": "T-0018",
       "title": "NotificationsModule — field dispatches",
       "summary": "GET /notifications, POST /notifications (compose — admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "notifications",
+      "area": "discord-bot",
+      "feature": "notifications",
       "repo": "",
       "paths": [
         "src/notifications/"
@@ -908,7 +1010,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -923,6 +1025,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Post-MVP build: Notifications (per-member unread state, compose via new manage_notifications capability). PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -930,11 +1039,12 @@
       "id": "T-0019",
       "title": "SettingsModule — config + permissions matrix + hazardous ops",
       "summary": "GET/PATCH /settings (profile, visibility toggles, gallery/event defaults, Holdfast server, backups/retention), GET/PATCH /settings/permissions (edit the role_permissions matrix that CapabilitiesGuard reads), and hazardous ops: transfer-ownership, transfer-discord, dissolve. regiment_settings entity exists; module unbuilt.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "settings",
+      "area": "platform",
+      "feature": "settings",
       "repo": "",
       "paths": [
         "src/regiments/entities/regiment-settings.entity.ts",
@@ -965,7 +1075,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -980,6 +1090,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Post-MVP build: Settings (profile/toggles, permission-matrix editor with governance floor, hazardous transfer/dissolve). Floor guard + transactional matrix write added in review. PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -987,11 +1104,12 @@
       "id": "T-0020",
       "title": "Discord bot foundation (discord.js + new migration)",
       "summary": "Add discord.js; DiscordModule hosting an in-process gateway Client (login on init, graceful destroy) with a DiscordGateway provider (assign/remove role, list roles, send DM/message, fetch member). Onboarding: /discord/bind, /discord/verify-connection, /discord/bot-status. NEW migration for discord_bot_settings + discord_sync_jobs (outbox); the real bot now writes discord_connections + bot_operations. New env: DISCORD_BOT_TOKEN, DISCORD_APPLICATION_ID.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "XL",
       "sizeWeight": 8,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
       "repo": "",
       "paths": [
         "src/discord/",
@@ -1031,7 +1149,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1046,6 +1164,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built MOCK-first: DiscordGateway abstraction (Mock + discord.js Real), migration for discord_bot_settings + discord_sync_jobs outbox, config/env (BOT_TOKEN/APP_ID/BOT_MOCK), dormant seed, app.enableShutdownHooks. Mock active; real gateway inert until a token is provided. PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1053,11 +1178,12 @@
       "id": "T-0021",
       "title": "Bot core sync engine + control API",
       "summary": "Outbox worker draining discord_sync_jobs in batches (~25/min) with retry, recording to bot_operations + audit_log_entries.discord_sync_status. Enqueue on rank/role/medal change and Discord-role relink. Application-decision DMs, event reminders (from event_notify_offsets), announcement broadcast. Bot-control API: /discord/connection, /resync, /reinvite, /operations/:id/resolve, /settings, /announce.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "XL",
       "sizeWeight": 8,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
       "repo": "",
       "paths": [
         "src/discord/"
@@ -1081,7 +1207,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1096,6 +1222,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built MOCK-first: best-effort enqueuer + outbox worker (retry/backoff, bot_operations, resolvable terminal failures, orphaned-job reaper, sensitive kick re-check at execution time), control API (/discord connection/verify/settings/resync/announce/operations/bind). e2e (mock) green. PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1103,11 +1236,12 @@
       "id": "T-0022",
       "title": "Bot onboarding automation + slash commands",
       "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami — resolve against the same services, ephemeral responses.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
       "repo": "",
       "paths": [
         "src/discord/"
@@ -1136,7 +1270,7 @@
       ],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
-      "updatedAt": "2026-07-11T22:00:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:50:59Z",
@@ -1151,6 +1285,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built MOCK-first with REDUCED scope per owner (T-0027): NO slash commands — onboarding is welcome + auto-assign the Guest join role only. Real GuildMemberAdd wiring is in RealDiscordGateway; exercised via a mock simulate endpoint. PR #4."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1162,7 +1303,9 @@
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
-      "area": "infra",
+      "area": "platform",
+      "feature": "infra",
+      "subfeature": "go-live",
       "repo": "",
       "paths": [
         "docker-compose.prod.yml",
@@ -1187,11 +1330,7 @@
       "regressionRisk": [],
       "skippedByClaude": [
         "Live cross-stack bot E2E + prod re-deploy remain BLOCKED on T-0032 (owner must provision VPS/domain/TLS + run the prod deploy). The /security-review portion was run this session.",
-        {
-          "at": "2026-07-16T02:45:00Z",
-          "what": "Live production deploy + real-Discord post-deploy smoke",
-          "why": "No production environment / live Discord app in this session; depends on the blocked T-0032 (MVP prod deploy)."
-        }
+        "Live production deploy + real-Discord post-deploy smoke — No production environment / live Discord app in this session; depends on the blocked T-0032 (MVP prod deploy)."
       ],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
@@ -1256,7 +1395,8 @@
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "SCHEMA.md",
@@ -1339,7 +1479,8 @@
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
       "repo": "",
       "paths": [
         "project-plan/PLAN.md"
@@ -1423,7 +1564,8 @@
       "type": "question",
       "size": "S",
       "sizeWeight": 2,
-      "area": "infra",
+      "area": "platform",
+      "feature": "infra",
       "repo": "",
       "paths": [
         "project-plan/PLAN.md"
@@ -1519,11 +1661,12 @@
       "id": "T-0029",
       "title": "Containerize all config + purge XAMPP (zero-config `up`)",
       "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology — DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
-      "area": "config",
+      "area": "platform",
+      "feature": "config",
       "repo": "",
       "paths": [
         ".env.example",
@@ -1563,7 +1706,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1585,6 +1728,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1592,11 +1742,12 @@
       "id": "T-0030",
       "title": "Containerized DB bootstrap & migration workflow (dev + prod)",
       "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id — the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
       "repo": "",
       "paths": [
         "docker-compose.yml",
@@ -1628,7 +1779,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1650,6 +1801,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "MVP session: built, unit+e2e tested, and verified live in the full prod docker stack (nginx+api+MySQL8) via browser + curl."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1657,11 +1815,12 @@
       "id": "T-0031",
       "title": "Fully-containerized dev workflow (devcontainer + hot reload, api + web)",
       "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too — bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "infra",
+      "area": "platform",
+      "feature": "infra",
       "repo": "",
       "paths": [
         "docker-compose.override.yml",
@@ -1690,7 +1849,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "6be9bbde8861fedd476a0daefbd8831e402db607",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-12T17:39:21Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1719,6 +1878,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "bf-sync: .env.example now documents API_HOST_PORT (host-port override for the api container; the compose wiring `${API_HOST_PORT:-3000}:3000` already existed in docker-compose.override.yml since 192885f). Doc-only backfill for the port-3000-occupied gotcha; no status change (5e726f7)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1730,7 +1896,9 @@
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
-      "area": "infra",
+      "area": "platform",
+      "feature": "infra",
+      "subfeature": "go-live",
       "repo": "",
       "paths": [
         "docker-compose.prod.yml",
@@ -1805,11 +1973,12 @@
       "id": "T-0033",
       "title": "Real Discord bot go-live (mock → real gateway + creds)",
       "summary": "Swap the mock gateway/OAuth for the real Discord app when the owner provides credentials: set DISCORD_MOCK/DISCORD_BOT_MOCK=false + tokens, register the redirect URI, enable the GUILD_MEMBERS intent, position the bot role, wire channels/join-role from the admin UI, and RE-REVIEW the sensitive ban→kick (kickOnBan) with the owner before enabling it. Runbook: project-plan/DISCORD_GOLIVE.md. Then post-go-live smoke (real sign-in, one role sync, one announcement).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
       "repo": "",
       "paths": [
         ".env",
@@ -1846,7 +2015,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T22:00:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T22:00:00Z",
@@ -1861,6 +2030,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Real Discord bot go-live VERIFIED against the test guild: mock->real swap works; /auth/me resolves the Owner, a rank change syncs a real role (Recruit), an announcement posts to the configured channel, enlistment posts + audit mirror + ban-role all fire live. applyBanRoleOnBan stays DEFAULT OFF (owner: no kick). Remaining human-only step: click Discord's OAuth consent + register the PROD redirect URI. See project-plan/DISCORD_GOLIVE.md."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1868,11 +2044,13 @@
       "id": "T-0034",
       "title": "Add a 'Ban' role to Discord bot settings",
       "summary": "Add a nullable `banRoleId` (+`banRoleName`) column to discord_bot_settings, expose it through the settings DTO/control API, and let admins pick it from the existing verify-connection role picker (same wiring as `joinRoleId`). This is the role the owner creates with no access that the bot will apply on an app-side ban.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "moderation",
+      "subfeature": "ban-role",
       "repo": "",
       "paths": [
         "src/discord/entities/discord-bot-settings.entity.ts",
@@ -1910,7 +2088,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T00:00:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:00:00Z",
@@ -1925,6 +2103,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Ban-role settings (banRoleId/Name + migration + DTO + picker via verify-connection). Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -1932,11 +2117,13 @@
       "id": "T-0035",
       "title": "Replace ban→kick with strip-roles + apply Ban role",
       "summary": "Remove the KICK_MEMBERS-dependent `kickMember` path. On an app-side ban the bot instead removes the member's managed Discord roles and assigns the configured Ban role. Rename the `kickOnBan` gate to `applyBanRoleOnBan` (keep the enqueue-time + drain-time double gate), swap the `member.kick` job type/audit action for `member.ban_role`, and drop `kickMember` from the gateway abstraction and both implementations.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "moderation",
+      "subfeature": "ban-role",
       "repo": "",
       "paths": [
         "src/discord/gateway/discord-gateway.ts",
@@ -2002,7 +2189,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T00:00:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:00:00Z",
@@ -2017,6 +2204,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Replaced ban->kick with strip-managed-roles + apply Ban role; kickOnBan->applyBanRoleOnBan; member.kick->member.ban_role; kickMember removed from gateway+impls; Ban role required. Resolves T-0010#0. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2024,11 +2218,13 @@
       "id": "T-0036",
       "title": "Drop KICK_MEMBERS from bot invite + refresh go-live docs",
       "summary": "The bot now only needs Manage Roles + Send Messages, so remove Kick Members from the invite instructions and the permissions integer (268437506 → 268437504), and rewrite the 'ban → kick' section of the go-live runbook to describe the Ban-role flow and the renamed setting. Update README and .env.example bot comments to match.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
-      "area": "docs",
+      "area": "platform",
+      "feature": "infra",
+      "subfeature": "go-live",
       "repo": "",
       "paths": [
         "project-plan/DISCORD_GOLIVE.md",
@@ -2058,7 +2254,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T00:00:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T00:00:00Z",
@@ -2073,6 +2269,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Go-live runbook: perms 268437506->268437504, Kick Members dropped, ban->Ban-role section rewritten. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2085,6 +2288,8 @@
       "size": "XS",
       "sizeWeight": 1,
       "area": "applications",
+      "feature": "intake",
+      "subfeature": "age-requirement",
       "repo": "",
       "paths": [
         "src/applications/dto/create-application.dto.ts",
@@ -2149,11 +2354,13 @@
       "id": "T-0038",
       "title": "Sync apply-form age copy 16 → 18 (frontend companion)",
       "summary": "Cross-repo companion to T-0037 in the Angular app. Update the application-form age-confirmation checkbox label ('I confirm that I am 16 years of age or older …') to 18 in lords-regiment-dashboard so the client-facing requirement matches the API. Copy-only; ships with T-0037. Implementation lands in the frontend repo (src/app/features/onboarding/application-form/application-form.component.html); tracked here for coordination.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
       "area": "applications",
+      "feature": "intake",
+      "subfeature": "age-requirement",
       "repo": "",
       "paths": [
         "src/app/features/onboarding/application-form/application-form.component.html"
@@ -2175,7 +2382,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T22:30:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T22:30:00Z",
@@ -2190,6 +2397,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Apply-form age label 16->18 shipped as a client-only T&C checkbox (not sent to the API). No remaining '16' age copy in the frontend. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2197,11 +2411,13 @@
       "id": "T-0039",
       "title": "Reshape applications intake to the current enlistment-form fields",
       "summary": "Replace the generic application questions with the regiment's real 'Application for Enlistment' fields (per the live Discord form): keep inGameName; convert howFound from a constrained enum to the free-text 'How did you find/hear about the Lords of Holdfast?'; add currentRegiment, preferredClasses, skillsToImprove, an interest/enlist-in-game confirmation, and an optional representative/guest note; drop whyJoin and the fields the form no longer collects (platform, timezone, priorExperience, applicantType). Touches the entity, a new idempotent migration, CreateApplicationDto validation, the ApplicationDto projection, the service mapping + reapplication detection, SCHEMA.md §3.5, and the enum barrel. Unit + e2e specs updated.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
       "area": "applications",
+      "feature": "intake",
+      "subfeature": "enlistment-fields",
       "repo": "",
       "paths": [
         "src/applications/entities/application.entity.ts",
@@ -2261,7 +2477,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:15:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:15:00Z",
@@ -2276,6 +2492,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Reshaped applications intake to the enlistment form (dropped platform/applicantType/timezone/whyJoin/priorExperience/ageConfirmed; added currentRegiment/preferredClasses/skillsToImprove/interestConfirmed/representativeNote; howFound enum->free text; HowFound/ApplicantType retired). Approve enlists Member@Recruit. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2283,11 +2506,13 @@
       "id": "T-0040",
       "title": "Sync apply form + admin view to the new application fields (frontend companion)",
       "summary": "Cross-repo companion to T-0039 in the Angular app (lords-regiment-dashboard). Rebuild the application-form to collect the new enlistment questions (in-game name, current regiment, how-found free text, preferred classes, skills to improve, interest/enlist-in-game confirmation, optional representative/guest note), update application.model.ts to the new API shape, and update the admin applications detail view to render the new answers. Copy/shape follows the API contract from T-0039 and ships with it. Tracked here for coordination; implementation lands in the frontend repo.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "applications",
+      "feature": "intake",
+      "subfeature": "enlistment-fields",
       "repo": "",
       "paths": [
         "src/app/core/models/application.model.ts",
@@ -2320,7 +2545,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:15:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:15:00Z",
@@ -2335,6 +2560,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Apply form + admin applications view + models synced to the reshaped fields; admin view wired to the real API. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2342,11 +2574,12 @@
       "id": "T-0041",
       "title": "Per-purpose Discord channel routing (settings + channel picker)",
       "summary": "Extend discord_bot_settings with three configurable, admin-editable target channels — enlistments, audit log, and event announcements — alongside the existing announcement/welcome channels. Add a `listChannels()` gateway capability + a text-channel picker surfaced through verify-connection (mirroring the role picker), expose the new ids/names on the settings DTO GET/PATCH, and a new idempotent migration + seed that pre-fills the default channel names (#new-enlistments, #audit-logs, #event-announcements). This is the foundation the three producers (T-0042/T-0043/T-0044) route through.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "channel-routing",
       "repo": "",
       "paths": [
         "src/discord/entities/discord-bot-settings.entity.ts",
@@ -2399,7 +2632,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:45:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:45:00Z",
@@ -2414,6 +2647,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Per-purpose channels (enlistments/audit-log/event-announcement) on discord_bot_settings + migration/DTO + listChannels picker via verify-connection. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2421,11 +2661,12 @@
       "id": "T-0042",
       "title": "Post new enlistment applications to the enlistments channel",
       "summary": "On application submit, cross-post an enlistment embed to the configured enlistments channel (default #new-enlistments) via the outbox. Add an `application.submitted` JobType + an embed builder that renders the reshaped enlistment fields (T-0039), and wire ApplicationsService.submit to best-effort enqueue it (never fail the application if the bot is off or the enqueue errors; no-op when botEnabled is false).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "channel-routing",
       "repo": "",
       "paths": [
         "src/common/enums/index.ts",
@@ -2471,7 +2712,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:45:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:45:00Z",
@@ -2486,6 +2727,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "New enlistment applications cross-post to the enlistments channel (best-effort, never breaks intake). Verified real post to #new-enlistments. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2493,11 +2741,12 @@
       "id": "T-0043",
       "title": "Mirror audit-log entries to the audit-log channel",
       "summary": "Cross-post audit entries to the configured audit-log channel (default #audit-logs) via the outbox. Add an `audit.log` JobType + embed builder and enqueue from the AuditService write path, best-effort and no-op when the bot is off. Because audit is high-volume, gate which entries post (e.g. by severity/action) and respect the Discord rate limit.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "channel-routing",
       "repo": "",
       "paths": [
         "src/common/enums/index.ts",
@@ -2547,7 +2796,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:45:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:45:00Z",
@@ -2562,6 +2811,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Every audit entry mirrored to the audit-log channel (ModuleRef lazy resolve, fire-and-forget, skips discord.sync.failed to break the loop). Verified real posts to #audit-logs. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2569,11 +2825,12 @@
       "id": "T-0044",
       "title": "Route event announcements to the event-announcements channel",
       "summary": "Send event announcements/reminders to the configured event-announcements channel (default #event-announcements) instead of the single generic announcements channel. Add an event-scoped routing path in the announce/enqueue flow so event dispatches target eventAnnouncementChannelId while ad-hoc announcements keep using announcementChannelId.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "channel-routing",
       "repo": "",
       "paths": [
         "src/discord/discord-sync.service.ts",
@@ -2610,7 +2867,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:45:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:45:00Z",
@@ -2625,6 +2882,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Event announcements routed to the event-announcements channel (falls back to the general one); ad-hoc announcements unchanged. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2632,11 +2896,12 @@
       "id": "T-0045",
       "title": "Admin channel-picker UI for the three routed channels (frontend companion)",
       "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): add channel-picker dropdowns to the Discord/bot Settings page for the enlistments, audit-log, and event-announcements channels, populated from the verify-connection channel list and persisted via PATCH /discord/settings (T-0041). Tracked here for coordination; implementation lands in the frontend repo.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "channel-routing",
       "repo": "",
       "paths": [
         "src/app/core/models/discord.model.ts",
@@ -2667,7 +2932,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:45:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:45:00Z",
@@ -2682,6 +2947,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Admin channel-picker dropdowns for the three routed channels, populated from verify-connection and persisted via PATCH /discord/settings. Browser-verified. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2689,11 +2961,13 @@
       "id": "T-0046",
       "title": "Resolve role + regiment + member fresh from DB per request",
       "summary": "Stop trusting role/regiment/member claims baked into the JWT: given only the identity id (sub) from a validated token, resolve the caller's current member (by discordIdentityId), effective role, regimentId and memberId fresh from the DB on each protected request, populating request.user with those live values. Cache the identity->context lookup (following the AuthzService matrix-cache pattern) with an invalidate() hook so role/member changes take effect on the next request without a DB hit per call. This is the enabling layer that makes stale token claims unnecessary and fixes the acceptance-staleness bug (an approved applicant gains Member capabilities on their next request, no re-login).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "jwt-claims",
       "repo": "",
       "paths": [
         "src/auth/strategies/jwt.strategy.ts",
@@ -2743,7 +3017,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:55:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:55:00Z",
@@ -2758,6 +3032,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "SessionContextService resolves role/regiment/member fresh per request (cached 30s + invalidate); ban/suspend enforced at the resolver so a ban cannot be defeated by re-login. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2765,11 +3046,13 @@
       "id": "T-0047",
       "title": "Slim the JWT payload to stable claims (drop rid, role, mid; keep sub, did, iat)",
       "summary": "Now that role/regiment/member are resolved server-side (T-0046), remove the stale-prone claims from the token: drop rid and role (and mid, which goes stale the moment an applicant is approved) from JwtPayload, issueToken() and JwtStrategy.validate(); keep only sub (identity id), did (Discord snowflake) and the auto-issued iat. Update AuthenticatedUser and every consumer to read the freshly-resolved fields instead of token claims. Keeps the /auth/me CurrentUserDto contract identical.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "jwt-claims",
       "repo": "",
       "paths": [
         "src/auth/types/jwt-payload.interface.ts",
@@ -2821,7 +3104,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:55:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:55:00Z",
@@ -2836,6 +3119,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "JWT slimmed to {sub,did,iat}; role/rid/mid removed; consumers read the resolved context. /auth/me contract unchanged. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2843,11 +3133,13 @@
       "id": "T-0048",
       "title": "iat-based session invalidation (tokensValidAfter cutoff)",
       "summary": "Leverage the token's issued-at (iat) to validate a token cheaply without a revocation list: add a `sessionsValidFrom` cutoff on discord_identities (new idempotent migration) and reject any token whose iat predates it in JwtStrategy. Bump the cutoff on logout and on sensitive events (ban/suspend, ownership/Discord transfer) so outstanding tokens are invalidated instantly. Accounts for small clock skew.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "jwt-claims",
       "repo": "",
       "paths": [
         "src/auth/strategies/jwt.strategy.ts",
@@ -2899,7 +3191,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:55:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:55:00Z",
@@ -2914,6 +3206,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "iat-based session invalidation (sessions_valid_from cutoff) + migration; bumped on logout/ban/suspend; second-granularity comparison avoids skew mass-invalidation. Built + unit/e2e tested (212 unit + 28 e2e green), lint/build clean, adversarially reviewed, and verified end-to-end against a real Discord test guild. Frontend companion shipped in lockstep. On feat/post-mvp-hardening."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2921,11 +3220,13 @@
       "id": "T-0049",
       "title": "Frontend companion — treat /auth/me as the sole source of role/membership",
       "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): ensure no authorization decision decodes role/regiment/membership out of the raw JWT (those claims are being removed), and that the app re-hydrates from GET /auth/me as the single source of truth — including after an applicant is approved, so the promoted member sees Member access without a manual re-login. Tracked here for coordination; implementation lands in the frontend repo.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "jwt-claims",
       "repo": "",
       "paths": [
         "src/app/core/services/auth.service.ts",
@@ -2955,7 +3256,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "ae057a84269ec3284692aff95069a795c2bd76fd",
       "createdAt": "2026-07-11T23:55:00Z",
-      "updatedAt": "2026-07-12T02:35:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-11T23:55:00Z",
@@ -2970,6 +3271,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Confirmed no client-side JWT claim decoding exists; role/regiment/membership derive solely from GET /auth/me. No code change required."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -2977,11 +3285,13 @@
       "id": "T-0050",
       "title": "Derive guild membership from the bot, not the OAuth guilds scope",
       "summary": "At sign-in, stop calling isMemberOfGuild() (which reads the OAuth `guilds` scope via GET /users/@me/guilds) and instead resolve membership through the already-present bot: guildMember = (await discordGateway.fetchMember(discordUserId)) !== null. Wire DiscordGateway into AuthService/AuthModule and degrade to guildMember=false (never block login) if the bot is unavailable, matching today's fetchGuilds([]-on-failure) behaviour.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "guild-membership",
       "repo": "",
       "paths": [
         "src/auth/auth.service.ts",
@@ -3022,7 +3332,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3037,6 +3347,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3044,11 +3361,13 @@
       "id": "T-0051",
       "title": "Drop the `guilds` OAuth scope and retire the dead guilds fetch code",
       "summary": "Remove `guilds` from DISCORD_SCOPES everywhere it is defaulted (config/env.validation.ts, config/configuration.ts, .env, .env.example) so the consent screen only requests identify + email. Delete the now-unused fetchGuilds()/isMemberOfGuild() from DiscordOAuthService and its mock, and drop `guilds` from the dev-owner seed scopes string.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "guild-membership",
       "repo": "",
       "paths": [
         "src/config/env.validation.ts",
@@ -3095,7 +3414,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3110,6 +3429,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3117,11 +3443,13 @@
       "id": "T-0052",
       "title": "Mock-mode parity for bot-based membership",
       "summary": "Ensure DISCORD_MOCK / DISCORD_BOT_MOCK sign-in still yields a correct guildMember without the guilds scope: MockDiscordGateway.fetchMember must return a member (or null) consistent with the mock persona so the mocked auth flow sets guild_member the same way the real bot would.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "guild-membership",
       "repo": "",
       "paths": [
         "src/discord/gateway/mock-discord-gateway.ts",
@@ -3150,7 +3478,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3165,6 +3493,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3172,11 +3507,13 @@
       "id": "T-0053",
       "title": "Update specs + verify the scope removal end-to-end",
       "summary": "Adjust and extend coverage for the change: discord-oauth.service.spec (scope assertion no longer expects guilds), auth.service.spec (guildMember now sourced from the gateway), mock specs and any seed/e2e fixtures. Then verify against the real test guild that sign-in no longer requests the guilds consent yet guild_member is still set correctly.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "guild-membership",
       "repo": "",
       "paths": [
         "src/auth/discord-oauth.service.spec.ts",
@@ -3213,7 +3550,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T15:23:11Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T15:23:11Z",
@@ -3228,6 +3565,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3235,11 +3579,12 @@
       "id": "T-0054",
       "title": "Applicant self-service API (GET/PATCH /applications/mine)",
       "summary": "Applicant-facing read + edit of their own application: GET /applications/mine (the caller's current application or null, plus a blocked flag) and PATCH /applications/mine (edit a PENDING application; re-bumps it in the officer queue). Scoped to the caller's Discord identity, gated by apply_to_join. Backs the frontend status page + edit flow.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "applications",
+      "feature": "self-service",
       "repo": "",
       "paths": [
         "src/applications/applications.controller.ts",
@@ -3283,7 +3628,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T19:02:09Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T19:02:09Z",
@@ -3291,6 +3636,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built GET /applications/mine + PATCH /applications/mine (apply_to_join, scoped to the caller's Discord identity; edit only a PENDING app, re-bumps the officer queue). 226 unit + 35 e2e green; verified live via JWT smoke (submit→mine→edit round-trips). Frontend status page + edit form shipped in lockstep (lords-regiment-dashboard:T-0028/29/31)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3298,11 +3650,12 @@
       "id": "T-0055",
       "title": "Applicant blocklist (block / re-enable from applying)",
       "summary": "An officer can permanently bar a Discord identity from submitting further applications, and re-enable them (manage_applications). Stored as applications_blocked_at/by/reason columns on discord_identities (mirroring the member ban/suspend-as-columns convention); enforced first thing in submit(). Backs the frontend admin block action and the applicant reapply gating.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "applications",
+      "feature": "moderation",
       "repo": "",
       "paths": [
         "src/database/migrations/1782440000000-ApplicationBlocklist.ts",
@@ -3348,7 +3701,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T19:02:09Z",
-      "updatedAt": "2026-07-12T19:12:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T19:02:09Z",
@@ -3363,6 +3716,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Security-review hardening: blocking now also declines any open (Pending/Held) application by that identity and updateMine rejects a blocked identity — so a blocked applicant can no longer PATCH-spam the officer queue or be approved despite the block. e2e asserts block→declined + PATCH-while-blocked 403."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3370,11 +3730,12 @@
       "id": "T-0056",
       "title": "Regiment first-run setup flip (setupComplete write path)",
       "summary": "Expose + flip regiment.setupComplete so the Owner can be guided through first-run setup: POST /settings/complete-setup marks it done, SettingsDto surfaces it, and the seed starts a genuine greenfield deploy incomplete (dev fixture stays complete). Backs the frontend first-run routing.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "applications",
+      "feature": "setup",
       "repo": "",
       "paths": [
         "src/settings/settings.controller.ts",
@@ -3414,7 +3775,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "9ed1dc6790b90469e39fe7144d93f416caba18c4",
       "createdAt": "2026-07-12T19:02:09Z",
-      "updatedAt": "2026-07-12T19:02:09Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T19:02:09Z",
@@ -3422,6 +3783,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Added POST /settings/complete-setup (manage_settings) to flip regiment.setupComplete; SettingsDto now exposes setupComplete; the seed starts a real greenfield deploy (OWNER_DISCORD_ID set) with setup INCOMPLETE while the dev fixture stays complete. Enables the frontend Owner first-run routing. Unit-tested; audited as a settings change."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3429,11 +3797,12 @@
       "id": "T-0057",
       "title": "Drop OWNER_NAME env; default the seeded Owner display name to \"Admin\"",
       "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY — the non-member /auth/me fallback ('Recruit') is left unchanged.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
       "repo": "",
       "paths": [
         ".env.example",
@@ -3486,7 +3855,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T00:00:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T00:00:00Z",
@@ -3508,6 +3877,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + reviewed; 234 unit tests + tsc + eslint green."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3515,11 +3891,12 @@
       "id": "T-0058",
       "title": "Allow self-service editing of display name in profile PATCH",
       "summary": "Let an authenticated member (including the Owner) change their own display name via PATCH /members/:id. Add an optional `name` field to UpdateMemberDto and apply it in MembersService.updateSelf alongside the existing platform/timezone/inGameName/avatarUrl fields. This is what lets the Owner rename themselves off the default \"Admin\" after Discord sign-in.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "src/members/dto/update-member.dto.ts",
@@ -3564,7 +3941,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T00:00:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T00:00:00Z",
@@ -3579,6 +3956,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + reviewed; live-verified self-edit + ownership 403."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3586,11 +3970,12 @@
       "id": "T-0059",
       "title": "Applicant decision DM (custom Discord DM on approve/decline/hold)",
       "summary": "New DiscordSyncJobType.ApplicationDecision + enqueueApplicationDecision; approve/decline/hold accept an optional discordDmMessage and best-effort enqueue a DM to the applicant’s linked Discord identity (empty message -> per-decision default template). Never blocks or rolls back the decision. Frontend counterpart of lords-regiment-dashboard:T-0045.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "applications",
+      "feature": "moderation",
       "repo": "",
       "paths": [
         "src/applications/",
@@ -3628,7 +4013,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T22:20:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T22:20:00Z",
@@ -3636,6 +4021,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built + unit-tested; endpoint + skip-path live-verified. Best-effort DM via the outbox worker."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3643,11 +4035,12 @@
       "id": "T-0060",
       "title": "Audit actor/target name resolution on read",
       "summary": "GET /audit, GET /audit/:id and the CSV export left-join actorMember/targetMember so human actors render their member name instead of a null label / raw UUID (the frontend fallback previously degraded to the UUID). Frontend counterpart of lords-regiment-dashboard:T-0070.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "audit",
+      "area": "platform",
+      "feature": "audit",
       "repo": "",
       "paths": [
         "src/audit/audit.service.ts",
@@ -3679,7 +4072,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T22:20:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T22:20:00Z",
@@ -3687,6 +4080,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built + reviewed (CSV join added in review); live-verified actor names show instead of UUIDs."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3694,11 +4094,12 @@
       "id": "T-0061",
       "title": "Audit Discord-sync status write-back",
       "summary": "record() sets a truthful discordSyncStatus (pending when mirrored, not_applicable otherwise), threads the saved audit-entry id through mirrorToDiscord/enqueueAuditLog, and the outbox worker (plus the orphan reaper) writes back synced/failed. A guarded pending-write prevents a fast worker from clobbering a terminal status back to pending. Frontend counterpart of lords-regiment-dashboard:T-0072.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "audit",
+      "area": "platform",
+      "feature": "audit",
       "repo": "",
       "paths": [
         "src/audit/audit.service.ts",
@@ -3737,7 +4138,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T22:20:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T22:20:00Z",
@@ -3745,6 +4146,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built + reviewed (race guard + orphan-reaper write-back added in review); live-verified pending->synced on a real Discord audit post."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3752,11 +4160,12 @@
       "id": "T-0062",
       "title": "Medals reorder endpoint (POST /medals/reorder)",
       "summary": "Bulk medal precedence reorder mirroring POST /ranks/reorder: strict id-set validation, transactional precedence rewrite, a medal.reorder audit action. Lets the frontend medal cabinet persist a drag-reorder in one call instead of N writes. Frontend counterpart of lords-regiment-dashboard:T-0067.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "medals",
+      "area": "roster",
+      "feature": "medals",
       "repo": "",
       "paths": [
         "src/medals/medals.controller.ts",
@@ -3783,7 +4192,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T22:20:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T22:20:00Z",
@@ -3791,6 +4200,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built + unit-tested; live-verified reorder + validation. Route ordered before :id param routes."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3798,11 +4214,12 @@
       "id": "T-0063",
       "title": "Discord roles list endpoint (edit_ranks_medals) + rank/medal unlink",
       "summary": "GET /discord/roles returns the guild roles gated on edit_ranks_medals so rank/medal editors can populate the link picker without manage_settings. POST /ranks/:id/unlink-discord and POST /medals/:id/unlink-discord clear a linked role (discordRoleId/name null, linked=false, audited). Frontend counterpart of lords-regiment-dashboard:T-0065.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "role-sync",
       "repo": "",
       "paths": [
         "src/discord/discord.controller.ts",
@@ -3833,7 +4250,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T22:20:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T22:20:00Z",
@@ -3841,6 +4258,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built + unit-tested; live-verified the roles endpoint returns real guild roles and unlink clears state."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3848,11 +4272,12 @@
       "id": "T-0064",
       "title": "Apply medal-linked Discord roles on award/revoke",
       "summary": "The role reconcile now assigns the linked role of every medal a member holds and removes it when the medal is revoked, in addition to the rank role; managedRoleIds includes medal roles. Reconcile never strips the assign-only join/Guest role and skips banned members so it cannot undo a ban strip. Frontend counterpart of lords-regiment-dashboard:T-0065 (Q3).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "role-sync",
       "repo": "",
       "paths": [
         "src/discord/discord-sync.worker.ts",
@@ -3885,7 +4310,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "10438518a0aaaa488d47d51fc2e8aac9ea28034e",
       "createdAt": "2026-07-12T22:20:00Z",
-      "updatedAt": "2026-07-12T22:20:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T22:20:00Z",
@@ -3893,6 +4318,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Built + 3 new unit specs; live-verified award/revoke role.sync. Join-role-strip + ban-reconcile bugs caught in review and fixed."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3900,11 +4332,12 @@
       "id": "T-0065",
       "title": "MinIO S3-compatible storage service + bucket bootstrap + storage config/env",
       "summary": "Add a MinIO (S3-compatible) service to the Docker stack (base + override + prod) plus a one-shot bucket-bootstrap job (create bucket + public-read policy) mirroring the existing prod `migrate` one-shot. Introduce a typed StorageConfig (endpoint, region, accessKey, secretKey, bucket, publicBaseUrl, forcePathStyle) wired through configuration.ts, env.validation.ts (Joi) and .env.example with throwaway dev creds. Foundation the whole storage epic builds on.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "infra",
+      "area": "platform",
+      "feature": "storage",
       "repo": "",
       "paths": [
         "docker-compose.yml",
@@ -3943,7 +4376,7 @@
       ],
       "lastTouchedCommit": "2715aa2",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -3958,6 +4391,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -3965,11 +4405,12 @@
       "id": "T-0066",
       "title": "StorageModule + presigned upload API (aws-sdk v3, key namespacing, size/type validation)",
       "summary": "New StorageModule using @aws-sdk/client-s3 + @aws-sdk/s3-request-presigner (forcePathStyle for MinIO). StorageService issues a presigned PUT for direct-to-MinIO upload and resolves the final public GET URL; keys are namespaced per entity type (avatars/, banners/, events/, medals/, ranks/, gallery/). A StorageController exposes an authenticated request-upload endpoint that validates content-type + max size (gallery caps from regiment_settings, sane defaults elsewhere) and is gated by @RequireCapability per target resource. Registered in AppModule.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "storage",
+      "area": "platform",
+      "feature": "storage",
       "repo": "",
       "paths": [
         "src/storage/",
@@ -4013,7 +4454,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4028,6 +4469,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4035,11 +4483,12 @@
       "id": "T-0067",
       "title": "Wire member avatar + banner uploads through storage (retire TODO(storage))",
       "summary": "Replace the plain-URL avatarUrl/bannerUrl path on the member self-edit with the storage flow: accept a storage-produced object key/URL, validate it belongs to the member's own avatars/banners namespace, and persist to member.avatarUrl/bannerUrl. Remove the TODO(storage) marker in update-member.dto.ts. Self-service only via PATCH /members/:id (a member may set only their own).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "src/members/dto/update-member.dto.ts",
@@ -4075,7 +4524,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4090,6 +4539,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4097,11 +4553,12 @@
       "id": "T-0068",
       "title": "Wire event banner uploads through storage",
       "summary": "Let event create/update accept a storage-produced banner key/URL for RegimentEvent.bannerUrl (namespaced under events/{eventId}/) instead of a free-form external URL. Gated on ManageEvents (already required for event mutations). This is the backend half of the event-form banner wiring in the goal (item 6).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "events",
+      "feature": "banners",
       "repo": "",
       "paths": [
         "src/events/events.service.ts",
@@ -4128,7 +4585,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4143,6 +4600,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4150,11 +4614,12 @@
       "id": "T-0069",
       "title": "Add medal image column + wire medal image uploads",
       "summary": "Medals have NO image column today (glyph + ribbon only). Add a nullable medals.image_url (varchar 512) via an idempotent information_schema-guarded migration, expose imageUrl on the medal entity + create/update DTOs + medal projection DTO, and accept a storage-produced key namespaced under medals/{medalId}/. Gated on EditRanksMedals.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "medals",
+      "area": "roster",
+      "feature": "medals",
       "repo": "",
       "paths": [
         "src/medals/entities/medal.entity.ts",
@@ -4191,7 +4656,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4206,6 +4671,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4213,11 +4685,12 @@
       "id": "T-0070",
       "title": "Add rank image column + wire rank image uploads",
       "summary": "Ranks have NO image column today (chevrons only). Add a nullable ranks.image_url (varchar 512) via an idempotent migration, expose imageUrl on the rank entity + create/update DTOs + rank projection DTO, and accept a storage-produced key namespaced under ranks/{rankId}/. Gated on EditRanksMedals.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "ranks",
+      "area": "roster",
+      "feature": "ranks",
       "repo": "",
       "paths": [
         "src/ranks/entities/rank.entity.ts",
@@ -4254,7 +4727,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4269,6 +4742,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4276,11 +4756,12 @@
       "id": "T-0071",
       "title": "Wire gallery image/video uploads with regiment_settings enforcement",
       "summary": "Route gallery submissions through real storage uploads: accept storage-produced keys for GalleryFile.url and GalleryItem.thumbnailUrl (namespaced under gallery/{itemId}/), and enforce per-file size + allowed content-type + max-items caps from regiment_settings (galleryMax*SizeMb, galleryAllowed*Types, galleryMaxItemsPerSubmission) server-side at submit. Gated on SubmitToGallery; moderation flow unchanged.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
       "area": "gallery",
+      "feature": "submissions",
       "repo": "",
       "paths": [
         "src/gallery/gallery.service.ts",
@@ -4317,7 +4798,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4332,6 +4813,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4339,11 +4827,12 @@
       "id": "T-0072",
       "title": "Events: remove save-as-draft — creation publishes directly",
       "summary": "Eliminate the draft workflow: stop accepting isDraft on create (always published), retire the POST /events/:id/publish route, and make the public isDraft=false read filter a harmless no-op. Because create() already announces to Discord only for non-draft events, every create will now enqueue an event-announcement to the configured channel — intended per the direct-publish goal. Coordinated with the frontend removing the 'Save draft' button and the isDraft/publish() service calls.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "events",
+      "feature": "crud",
       "repo": "",
       "paths": [
         "src/events/events.controller.ts",
@@ -4380,7 +4869,7 @@
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4395,6 +4884,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4402,11 +4898,13 @@
       "id": "T-0073",
       "title": "Events: authenticated member read endpoint (member projection + myRsvp)",
       "summary": "Add an auth-guarded events read that returns the member projection (server binding, notifyOffsets, myRsvp, recurrence fields, timestamps) so normal members at /dashboard/events see their own RSVP and server details. Either add GET /events/mine (+ auth-aware detail) or make the existing @Public() GET / and GET /:id optionally-authenticated (detect JWT → include member fields when the caller is enrolled). Reads require no write capability; server_password is still never serialized (only reveal-password returns it).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "events",
+      "feature": "crud",
+      "subfeature": "member-view",
       "repo": "",
       "paths": [
         "src/events/events.controller.ts",
@@ -4442,7 +4940,7 @@
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4457,6 +4955,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4464,11 +4969,12 @@
       "id": "T-0074",
       "title": "Events: recurrence model + migration (cadence + template linkage + stop flag)",
       "summary": "Introduce a structured recurrence model on events so a recurring event acts as a series template: a cadence enum (daily / weekly / monthly), a self-referential recurrenceParentId linking generated occurrences back to the template, an isRecurringTemplate flag, a recurrenceActive flag (a moderator can permanently stop the series), and generation bookkeeping (e.g. lastOccurrenceAt / nextGenerationAt). Idempotent information_schema-guarded migration; replaces the inert free-string recurrenceRule usage.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "events",
+      "feature": "recurrence",
       "repo": "",
       "paths": [
         "src/events/entities/event.entity.ts",
@@ -4504,7 +5010,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4519,6 +5025,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4526,11 +5039,12 @@
       "id": "T-0075",
       "title": "Events: recurring-occurrence generation cron (materialize real rows, timezone-accurate)",
       "summary": "A scheduled generator (mirroring the existing guarded setInterval EventStatusScheduler pattern — no new dependency) that, per active recurring template, materializes each upcoming occurrence as its OWN real event row ahead of time on a rolling horizon, so each occurrence carries its own RSVP/attendance (no 'RSVP problem', no bulk pre-creation of X duplicates). Occurrence start times are computed in the template's IANA timezone (default EST/America/New_York) so DST and local wall-clock are correct in every timezone. Idempotent (never double-creates). Honors live template state on each run: recurrenceActive=false stops generation and cadence changes take effect going forward; optionally prunes future not-yet-passed generated occurrences on stop/cadence change.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
       "area": "events",
+      "feature": "recurrence",
       "repo": "",
       "paths": [
         "src/events/event-recurrence.scheduler.ts",
@@ -4581,7 +5095,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "1f94370",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4596,6 +5110,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4603,11 +5124,13 @@
       "id": "T-0076",
       "title": "Discord: extend bot-status DTO with live metrics (uptime, WS latency, memory, CPU)",
       "summary": "Extend the bot-status contract so the Quartermaster widget can show online/offline plus commonly-shown metrics. Add wsPing / uptimeMs / readyAt to DiscordGatewayStatus (sourced from the in-process discord.js Client: client.ws.ping, client.uptime, client.readyAt), and process-level memoryBytes + cpu at the service/DTO layer (gateway-agnostic; reuse the process.uptime() precedent from health.controller). Surface all on DiscordConnectionDto (and thus verify-connection). Give the MockDiscordGateway canned values for the new fields to keep type parity.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
+      "subfeature": "bot-status",
       "repo": "",
       "paths": [
         "src/discord/gateway/discord-gateway.ts",
@@ -4650,7 +5173,7 @@
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4665,6 +5188,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4672,11 +5202,13 @@
       "id": "T-0077",
       "title": "Discord: expose bot status to STAFF (Owner/Admin/Moderator) for the dashboard widget",
       "summary": "The only bot-status route today (GET /discord/connection) requires ManageSettings, which the seeded matrix grants to Owner ONLY — so Admins/Moderators cannot read it. The Quartermaster Bot widget is to be visible to admin+moderator (STAFF). Add a read-only STAFF-gated status route (e.g. GET /discord/status) returning the non-sensitive connection + metrics fields (online/offline, uptime, latency, memory, cpu, users) and excluding sensitive config (permissions/ban settings), so any STAFF member can drive the widget without owner-level manage_settings.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "XS",
       "sizeWeight": 1,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
+      "subfeature": "bot-status",
       "repo": "",
       "paths": [
         "src/discord/discord.controller.ts",
@@ -4708,7 +5240,7 @@
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4723,6 +5255,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4730,11 +5269,12 @@
       "id": "T-0078",
       "title": "Confirm Invite-Mercenary is frontend-only; retire the stale invite question",
       "summary": "Recon confirms there is NO backend endpoint, service method, DTO, entity, seed, migration, or Swagger doc implementing a member/mercenary invite — the roster '+ Invite Mercenary' button is a dead frontend affordance, so its removal needs ZERO backend code. This chore records that finding and retires the dangling 'what should Invite-Mercenary do' planning question (project-plan/PLAN.md, ROADMAP.md). IMPORTANT scope guard: the Mercenary MemberRole/rank and the onboarding applicant type are NOT being removed — only the individual-invite button goes (frontend).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "project-plan/PLAN.md",
@@ -4757,7 +5297,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
-      "updatedAt": "2026-07-13T05:15:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-12T23:45:00Z",
@@ -4772,6 +5312,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + unit-verified; migrations applied; adversarial review fixes folded in (1f94370)"
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4779,11 +5326,12 @@
       "id": "T-0079",
       "title": "Delete-whole-recurrence-series endpoint",
       "summary": "Add DELETE /events/:id/series (ManageEvents): resolve the template id (if :id is a generated occurrence use its recurrenceTemplateId; if a template use its own id; 400/404 for a non-recurring one-off) and soft-delete the template plus every occurrence sharing that recurrenceTemplateId in one transaction, then audit it. Soft-removing the template halts future generation automatically.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "events",
+      "feature": "recurrence",
       "repo": "",
       "paths": [
         "src/events/events.controller.ts",
@@ -4815,7 +5363,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -4830,6 +5378,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4837,11 +5392,12 @@
       "id": "T-0080",
       "title": "Enforce event tags hard limit of 10 in DTO",
       "summary": "Add @ArrayMaxSize(10) to CreateEventDto.tags so create and update (via PartialType inheritance) reject >10 tags with 400. The event_tags table/column already exist (InitialSchema); MySQL cannot cap per-event row count without a trigger, so the limit lives at the DTO + FE layers — no migration.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
       "area": "events",
+      "feature": "crud",
       "repo": "",
       "paths": [
         "src/events/dto/create-event.dto.ts"
@@ -4867,7 +5423,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -4882,6 +5438,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4889,11 +5452,13 @@
       "id": "T-0081",
       "title": "Spike: short-id scheme + generation strategy + uuid-retention list",
       "summary": "Decide the replacement for uuid v4 primary keys: id length + alphabet (e.g. 12-char base62 via nanoid), a collision-checked custom TypeORM id generator vs library, and the definitive list of columns that MUST stay uuid/opaque for security (MinIO object keys, auth/refresh tokens, session ids, discord-sync outbox + idempotency keys, self-deletion tokens). Output a short decision doc that T-0082/T-0083 implement against.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "spike",
       "size": "S",
       "sizeWeight": 2,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "short-id",
       "repo": "",
       "paths": [
         "src/common/crypto",
@@ -4930,7 +5495,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -4945,6 +5510,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -4952,11 +5524,13 @@
       "id": "T-0082",
       "title": "Add short-id generator and switch all entity PKs/FKs off uuid",
       "summary": "Introduce the chosen short-id generator and change every @PrimaryGeneratedColumn('uuid') (and its char(36) FK columns) to the short-id column type across all entities, EXCEPT the security-retained set from T-0081. Update relation join columns and any code that assumes 36-char ids. Security-sensitive tokens/keys keep their existing length.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "short-id",
       "repo": "",
       "paths": [
         "src/common/crypto/",
@@ -5005,7 +5579,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5020,6 +5594,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5027,11 +5608,13 @@
       "id": "T-0083",
       "title": "Rewrite migrations to short-id column lengths (DB rebuild)",
       "summary": "Rewrite InitialSchema (and reconcile follow-on migrations) so a clean db:setup builds the short-id schema directly — permitted because there is no production data. Ensure column lengths for retained-uuid columns are unchanged and the migration set still runs idempotently end to end.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "short-id",
       "repo": "",
       "paths": [
         "src/database/migrations/1782177187006-InitialSchema.ts",
@@ -5070,7 +5653,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5085,6 +5668,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5092,11 +5682,13 @@
       "id": "T-0084",
       "title": "Relax id DTO validators from IsUUID to short-id validator",
       "summary": "Replace @IsUUID() on path/body id fields across DTOs and controllers with a validator matching the short-id format (length + alphabet), so requests carrying the new ids are accepted. Leave validators on retained-uuid fields (tokens, keys) untouched.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "short-id",
       "repo": "",
       "paths": [
         "src/events/dto/",
@@ -5125,7 +5717,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5140,6 +5732,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5147,11 +5746,13 @@
       "id": "T-0085",
       "title": "Convert seed constants and fixtures to short ids",
       "summary": "Update seed data and any hardcoded id constants/fixtures to the short-id format so seeding and tests work against the new scheme.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
-      "area": "database",
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "short-id",
       "repo": "",
       "paths": [
         "src/database/seeds/"
@@ -5175,7 +5776,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5190,6 +5791,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5197,11 +5805,12 @@
       "id": "T-0086",
       "title": "Authenticated member gallery-archive list endpoint",
       "summary": "Add an authenticated gallery list read that returns approved items to any enrolled member/mercenary regardless of the regiment publicGallery flag, so the relocated /app/gallery list is populated for signed-in roster members even when the public archive is off. Keep the existing public list endpoint for the public /gallery surface.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "gallery",
+      "feature": "submissions",
       "repo": "",
       "paths": [
         "src/gallery/gallery.controller.ts",
@@ -5228,7 +5837,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5243,6 +5852,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5250,11 +5866,13 @@
       "id": "T-0087",
       "title": "DB migration: drop gallery↔event + member-tag, add gallery_tags",
       "summary": "Migration to remove the gallery→event association and the gallery member-tag junction/columns (never used going forward), and add a gallery tag store (mirroring event_tags) to back free-form + quick-chip tags. Clean rebuild acceptable (no production data).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
       "area": "gallery",
+      "feature": "submissions",
+      "subfeature": "tags",
       "repo": "",
       "paths": [
         "src/database/migrations/",
@@ -5286,7 +5904,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5301,6 +5919,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5308,11 +5933,13 @@
       "id": "T-0088",
       "title": "Gallery DTO/service/controller: tags (max 10), drop event + member-tag",
       "summary": "Rework the gallery submit/read contract: add tags with @ArrayMaxSize(10) validation, remove the linked-event field and the tagged-members field from DTOs/service/serialization, and stop persisting/returning them. Keep uploads (storage key) and moderation flow intact.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "gallery",
+      "feature": "submissions",
+      "subfeature": "tags",
       "repo": "",
       "paths": [
         "src/gallery/dto/",
@@ -5351,7 +5978,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5366,6 +5993,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5373,11 +6007,12 @@
       "id": "T-0089",
       "title": "Fix gallery moderation queue status filter (declined not listed)",
       "summary": "The moderation queue currently returns only pending items, so declined submissions never appear in the FE \"Declined\" section. Add a status filter (pending | approved | declined) to the moderation read so the FE can fetch each tab; ensure declined items (with their decline reason) are returned.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
       "area": "gallery",
+      "feature": "moderation",
       "repo": "",
       "paths": [
         "src/gallery/gallery.controller.ts",
@@ -5405,7 +6040,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5420,6 +6055,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5427,11 +6069,12 @@
       "id": "T-0090",
       "title": "DM the submitter on gallery decline (no DM on approve)",
       "summary": "On decline, enqueue a best-effort Discord DM to the submitter containing the decline reason via the shared discord-sync outbox (reuse the applications decision-DM pattern). Approve enqueues nothing. A DM-side error must never fail or roll back the moderation decision.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "gallery",
+      "feature": "moderation",
       "repo": "",
       "paths": [
         "src/gallery/gallery.service.ts",
@@ -5468,7 +6111,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5483,6 +6126,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5490,11 +6140,13 @@
       "id": "T-0091",
       "title": "Reconcile Capability enum + seed defaults with the epic permission decisions",
       "summary": "Update the capability catalog + role→permission seed defaults to match the epic: gallery archive view = members + mercenaries; gallery submit = members only (revoke from Mercenary); moderation queue = moderators + admins; dashboard \"Gallery submissions\" panel read = ManageEvents (see T-0094). This is the single source of truth the admin Permission Matrix renders.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "authz",
+      "area": "auth",
+      "feature": "authz",
+      "subfeature": "permission-defaults",
       "repo": "",
       "paths": [
         "src/authz/",
@@ -5530,7 +6182,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5545,6 +6197,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5552,11 +6211,13 @@
       "id": "T-0092",
       "title": "Data migration to align existing regiments' role_permissions with new defaults",
       "summary": "Migration to reconcile already-seeded regiments' role_permissions rows with the updated matrix defaults from T-0091 (grant/revoke the changed gallery + dashboard capabilities) so existing environments match new installs. Idempotent.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "S",
       "sizeWeight": 2,
-      "area": "authz",
+      "area": "auth",
+      "feature": "authz",
+      "subfeature": "permission-defaults",
       "repo": "",
       "paths": [
         "src/database/migrations/",
@@ -5581,7 +6242,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5596,6 +6257,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5603,11 +6271,12 @@
       "id": "T-0093",
       "title": "Fall back to Discord avatar in me + member projections",
       "summary": "When a member has no custom avatarUrl, project the linked Discord identity's avatarUrl instead. Load the discordIdentity relation in AuthService.getCurrentUser (member branch) and apply the fallback in AuthService.toMemberProjection and MemberDto.from, so every avatarUrl the API returns is populated. No new column/endpoint (all already exist).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "auth",
+      "feature": "auth",
       "repo": "",
       "paths": [
         "src/auth/auth.service.ts",
@@ -5634,7 +6303,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5649,6 +6318,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5656,11 +6332,12 @@
       "id": "T-0094",
       "title": "Expose pending gallery submissions read to the dashboard \"Gallery submissions\" panel",
       "summary": "Provide a read the dashboard \"Gallery submissions\" panel can call to list pending submissions (title + submitter username) for users with ManageEvents. Either widen the existing moderation-queue read's capability or add a lightweight pending-list endpoint — resolve the ManageEvents vs ModerateGallery gate question first.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "gallery",
+      "feature": "moderation",
       "repo": "",
       "paths": [
         "src/gallery/gallery.controller.ts",
@@ -5697,7 +6374,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3736f13432263844454e6cfe11bc7041fecd4c5c",
       "createdAt": "2026-07-14T23:55:03.452Z",
-      "updatedAt": "2026-07-15T03:10:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-14T23:55:03.452Z",
@@ -5712,6 +6389,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified this epic session: unit(294)+e2e(38) green, fresh db:setup idempotent, full-stack browser E2E against the short-id API."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5719,11 +6403,12 @@
       "id": "T-0095",
       "title": "Re-add applicant_type (Member/Mercenary) to applications",
       "summary": "Restore the applicant_type field retired in T-0039: a new migration re-adds the column (enum Member/Mercenary, default Member), add applicantType to the Application entity, CreateApplicationDto (IsEnum) — UpdateMyApplicationDto inherits — and ApplicationDto(.from); branch the approve-flow enlisted role on applicantType instead of the hardcoded MemberRole.Member.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
       "area": "applications",
+      "feature": "intake",
       "repo": "",
       "paths": [
         "src/applications/entities/application.entity.ts",
@@ -5761,7 +6446,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -5776,6 +6461,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5783,11 +6475,13 @@
       "id": "T-0096",
       "title": "Expose hasServerPassword on the member Event DTO",
       "summary": "Add a non-sensitive boolean hasServerPassword to EventDto, set in EventDto.from only under includeServer, computed as event.serverPassword != null — so the frontend can hide the password/reveal UI for passwordless events without exposing the password.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "XS",
       "sizeWeight": 1,
       "area": "events",
+      "feature": "crud",
+      "subfeature": "member-view",
       "repo": "",
       "paths": [
         "src/events/dto/event.dto.ts"
@@ -5809,7 +6503,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -5824,6 +6518,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5831,11 +6532,12 @@
       "id": "T-0097",
       "title": "Add POST /events/:id/unarchive and allow archived-event fetch",
       "summary": "Mirror the existing archive endpoint with POST /events/:id/unarchive (set isArchived=false, audit action event.unarchive) and loosen getForMember so a capability holder can still fetch/deep-link an archived event's detail (otherwise pressing Unarchive 404s).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "events",
+      "feature": "archive",
       "repo": "",
       "paths": [
         "src/events/events.controller.ts",
@@ -5862,7 +6564,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -5877,6 +6579,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5884,11 +6593,12 @@
       "id": "T-0098",
       "title": "Support listing archived events via a query flag",
       "summary": "Add an optional archived/includeArchived flag to EventQueryDto and branch the isArchived filter in listForMember so archived events can be listed; gate archived visibility to ManageEvents (moderators+) so ordinary members cannot list them.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
       "area": "events",
+      "feature": "archive",
       "repo": "",
       "paths": [
         "src/events/dto/event-query.dto.ts",
@@ -5915,7 +6625,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -5930,6 +6640,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -5937,11 +6654,13 @@
       "id": "T-0099",
       "title": "Drop platform + timezone columns; retire attendance metric",
       "summary": "Per the profile-particulars cleanup, drop the members.platform and members.timezone columns (migration), remove them from the Member entity, MemberDto, UpdateMemberDto and MembersService.updateSelf, and stop exposing the derived attendanceRate metric.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "profile-fields",
       "repo": "",
       "paths": [
         "src/members/entities/member.entity.ts",
@@ -5987,7 +6706,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6002,6 +6721,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6009,11 +6735,12 @@
       "id": "T-0100",
       "title": "Add per-member events + RSVPs endpoints",
       "summary": "Add GET /members/:id/events (the member's attended past events via the event_attendee join, regiment-scoped) and GET /members/:id/rsvps (the member's RSVPs), returning EventDto/AttendeeDto-shaped rows, so the profile Event History + RSVPs tabs can be populated for any member.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "src/members/members.controller.ts",
@@ -6042,7 +6769,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6057,6 +6784,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6064,11 +6798,12 @@
       "id": "T-0101",
       "title": "Gate service-record reads to self/admin; record only real role changes",
       "summary": "Add self-OR-admin gating to getServiceRecord (allow when the requester is the member, else require view_audit_log) instead of open-to-any-member, and in changeRole only write a service-record/audit entry when dto.role !== member.role (so a no-op change is skipped).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "src/members/members.service.ts",
@@ -6095,7 +6830,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6110,6 +6845,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6117,11 +6859,13 @@
       "id": "T-0102",
       "title": "Add an established month/date to the regiment identity",
       "summary": "The regiment stores only establishedYear (a bare YEAR); add an established month/date (e.g. establishedAt date or establishedMonth) via a migration, surface it on RegimentStatsDto + RegimentProfileDto, make it editable through settings (update-settings.dto + REGIMENT_KEYS), and seed it (e.g. 2023-11). Optionally add an enrolled-excluding-mercenaries convenience count to RegimentStatsDto.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
-      "area": "regiments",
+      "area": "roster",
+      "feature": "regiments",
+      "subfeature": "profile-fields",
       "repo": "",
       "paths": [
         "src/regiments/entities/regiment.entity.ts",
@@ -6161,7 +6905,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6176,6 +6920,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6183,11 +6934,12 @@
       "id": "T-0103",
       "title": "Tear down announcements (Field Dispatch) across backend + bot",
       "summary": "Remove the ad-hoc regiment-announcement path: delete POST /discord/announce (controller + AnnounceDto + discord.service.announce + discord-sync.enqueueAnnounce), remove NotificationsModule from app.module, and drop the notifications + notification_reads tables and discord_bot_settings.announcement_channel_id (migration); repoint enqueueEventAnnounce off the announcementChannelId fallback to eventAnnouncementChannelId. Keep DiscordSyncJobType.Announce (still used by event announcements + enlistment posts).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "L",
       "sizeWeight": 5,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "channel-routing",
       "repo": "",
       "paths": [
         "src/notifications/",
@@ -6230,7 +6982,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6245,6 +6997,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6252,11 +7011,12 @@
       "id": "T-0104",
       "title": "Rename Quartermaster to Lord Adjutant in the backend/bot",
       "summary": "Rename the audit actor label \"Quartermaster bot\" → \"Lord Adjutant bot\" in discord-sync.worker (2 places) and the mock gateway role name, and update comments in config/discord entities/dtos/module for consistency. String-only, no schema change.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
-      "area": "discord",
+      "area": "discord-bot",
+      "feature": "discord",
       "repo": "",
       "paths": [
         "src/discord/discord-sync.worker.ts",
@@ -6283,7 +7043,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6298,6 +7058,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6305,11 +7072,13 @@
       "id": "T-0105",
       "title": "Drop regiment short_tag (+unique) and public_roster",
       "summary": "Drop regiments.short_tag (and its UNIQUE index) and regiment_settings.public_roster (migration), and remove them from the Regiment/RegimentSettings entities, SettingsDto/UpdateSettingsDto, RegimentProfileDto, REGIMENT_KEYS/SETTINGS_KEYS/defaultSettings and the regiment seed.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
-      "area": "regiments",
+      "area": "roster",
+      "feature": "regiments",
+      "subfeature": "profile-fields",
       "repo": "",
       "paths": [
         "src/regiments/entities/regiment.entity.ts",
@@ -6342,7 +7111,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6357,6 +7126,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6364,11 +7140,13 @@
       "id": "T-0106",
       "title": "Drop the member display name; make in-game name the sole identity",
       "summary": "Collapse the two member name fields: backfill in_game_name from name where null, ALTER in_game_name to NOT NULL, DROP the members.name column (migration). Remove name from the Member entity + MemberDto(.from) + UpdateMemberDto (add required inGameName), and repoint every name reference (audit actor/target label fallback, event attendee display, discord-sync, member-query search, self-edit, dev-owner seed) to inGameName.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "L",
       "sizeWeight": 5,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "profile-fields",
       "repo": "",
       "paths": [
         "src/members/entities/member.entity.ts",
@@ -6419,7 +7197,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6434,6 +7212,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6441,11 +7226,12 @@
       "id": "T-0107",
       "title": "Standardize the oversize-upload error message",
       "summary": "Reword the StorageService size-cap BadRequestException to the user-facing copy \"Your file size exceeds the limit of <N> MB\" (including the computed cap), consistently across all upload targets, so the frontend can surface it verbatim.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
-      "area": "storage",
+      "area": "platform",
+      "feature": "storage",
       "repo": "",
       "paths": [
         "src/storage/storage.service.ts",
@@ -6468,7 +7254,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "0f93cbb51eb9fd5d14d550957ca8f3d3c0686a5e",
       "createdAt": "2026-07-15T20:30:00Z",
-      "updatedAt": "2026-07-16T02:45:00Z",
+      "updatedAt": "2026-07-17T00:00:00.000Z",
       "history": [
         {
           "at": "2026-07-15T20:30:00Z",
@@ -6483,6 +7269,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified (lint/build/db:setup/298 unit/36 e2e green; contract verified live over HTTP)."
+        },
+        {
+          "at": "2026-07-17T00:00:00.000Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged to default branch (blueframe merged=deployed rule)"
         }
       ]
     },
@@ -6495,6 +7288,8 @@
       "size": "S",
       "sizeWeight": 2,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "last-seen",
       "repo": "",
       "paths": [
         "src/auth/session-context.service.ts",
@@ -6510,17 +7305,35 @@
         }
       ],
       "testPlan": [
-        { "desc": "First authenticated request by a member updates last_seen_at to ~now", "status": "pending" },
-        { "desc": "A second request inside the throttle window does NOT issue another DB write (throttle map short-circuits)", "status": "pending" },
-        { "desc": "A request after the throttle window elapses writes a fresh last_seen_at", "status": "pending" },
-        { "desc": "Identity-only / Applicant sessions (no member row) are skipped — no write, no error", "status": "pending" },
-        { "desc": "The bump uses a targeted column update (does not modify updated_at or bust the session cache) and never fails/blocks the request on DB error", "status": "pending" }
+        {
+          "desc": "First authenticated request by a member updates last_seen_at to ~now",
+          "status": "pending"
+        },
+        {
+          "desc": "A second request inside the throttle window does NOT issue another DB write (throttle map short-circuits)",
+          "status": "pending"
+        },
+        {
+          "desc": "A request after the throttle window elapses writes a fresh last_seen_at",
+          "status": "pending"
+        },
+        {
+          "desc": "Identity-only / Applicant sessions (no member row) are skipped — no write, no error",
+          "status": "pending"
+        },
+        {
+          "desc": "The bump uses a targeted column update (does not modify updated_at or bust the session cache) and never fails/blocks the request on DB error",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [
         {
           "desc": "SessionContextService.resolve is the single authorization choke point for every protected route; adding a write side-effect there must not add latency to or fail an authenticated request.",
           "status": "resolved",
-          "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
+          "notedAt": "2026-07-17T00:00:00Z",
+          "resolvedAt": "2026-07-18T02:02:30Z",
+          "resolvedBy": "claude",
+          "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
         }
       ],
       "skippedByClaude": [],
@@ -6535,7 +7348,13 @@
           "by": "claude",
           "note": "created during bf-plan: make last_seen_at reflect last site access (throttled bump on authenticated request)"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     },
     {
@@ -6547,18 +7366,31 @@
       "size": "XS",
       "sizeWeight": 1,
       "area": "auth",
+      "feature": "auth",
+      "subfeature": "last-seen",
       "repo": "",
       "paths": [
         "src/auth/session-context.service.spec.ts",
         "test"
       ],
-      "dependsOn": ["T-0108"],
+      "dependsOn": [
+        "T-0108"
+      ],
       "blocks": [],
       "questions": [],
       "testPlan": [
-        { "desc": "Unit: throttle map allows one write per window and short-circuits within it", "status": "pending" },
-        { "desc": "Unit: no write attempted when resolve returns an Applicant/identity-only context", "status": "pending" },
-        { "desc": "e2e: authenticated request advances last_seen_at beyond the login timestamp", "status": "pending" }
+        {
+          "desc": "Unit: throttle map allows one write per window and short-circuits within it",
+          "status": "pending"
+        },
+        {
+          "desc": "Unit: no write attempted when resolve returns an Applicant/identity-only context",
+          "status": "pending"
+        },
+        {
+          "desc": "e2e: authenticated request advances last_seen_at beyond the login timestamp",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
@@ -6573,7 +7405,13 @@
           "by": "claude",
           "note": "created during bf-plan: test coverage for last-seen-on-request"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     },
     {
@@ -6585,6 +7423,7 @@
       "size": "L",
       "sizeWeight": 5,
       "area": "gallery",
+      "feature": "media-links",
       "repo": "",
       "paths": [
         "src/gallery/gallery.controller.ts",
@@ -6598,17 +7437,43 @@
       "dependsOn": [],
       "blocks": [],
       "questions": [
-        { "q": "Serve Medal thumbnails as a cached image-bytes proxy (stable URL that survives signed-URL expiry) or return a freshly-scraped signed CDN URL per request?", "answer": null, "askedAt": "2026-07-17T00:00:00Z" }
+        {
+          "q": "Serve Medal thumbnails as a cached image-bytes proxy (stable URL that survives signed-URL expiry) or return a freshly-scraped signed CDN URL per request?",
+          "answer": null,
+          "askedAt": "2026-07-17T00:00:00Z"
+        }
       ],
       "testPlan": [
-        { "desc": "Resolve endpoint returns provider=youtube with an i.ytimg hqdefault thumbnail and a nocookie embed for watch?v= / youtu.be / shorts URLs", "status": "pending" },
-        { "desc": "Resolve endpoint returns provider=medaltv with embed https://medal.tv/clip/:id for /clips/:id and /clip/:id/:hash URLs", "status": "pending" },
-        { "desc": "Medal thumbnail proxy returns a valid image for a real clip id and a graceful fallback for an unknown id", "status": "pending" },
-        { "desc": "Medal thumbnail is cached and re-served without re-scraping within TTL and refreshes after the signed URL expires", "status": "pending" },
-        { "desc": "Unit: clip-id and video-id extraction handles every documented medal.tv and youtube URL shape", "status": "pending" }
+        {
+          "desc": "Resolve endpoint returns provider=youtube with an i.ytimg hqdefault thumbnail and a nocookie embed for watch?v= / youtu.be / shorts URLs",
+          "status": "pending"
+        },
+        {
+          "desc": "Resolve endpoint returns provider=medaltv with embed https://medal.tv/clip/:id for /clips/:id and /clip/:id/:hash URLs",
+          "status": "pending"
+        },
+        {
+          "desc": "Medal thumbnail proxy returns a valid image for a real clip id and a graceful fallback for an unknown id",
+          "status": "pending"
+        },
+        {
+          "desc": "Medal thumbnail is cached and re-served without re-scraping within TTL and refreshes after the signed URL expires",
+          "status": "pending"
+        },
+        {
+          "desc": "Unit: clip-id and video-id extraction handles every documented medal.tv and youtube URL shape",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [
-        { "desc": "New outbound server-side fetch of medal.tv (SSRF/timeout surface); synchronous resolution could add latency to gallery submit/list.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
+        {
+          "desc": "New outbound server-side fetch of medal.tv (SSRF/timeout surface); synchronous resolution could add latency to gallery submit/list.",
+          "status": "resolved",
+          "notedAt": "2026-07-17T00:00:00Z",
+          "resolvedAt": "2026-07-18T02:02:30Z",
+          "resolvedBy": "claude",
+          "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
+        }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6622,7 +7487,13 @@
           "by": "claude",
           "note": "created during bf-plan: server-side media resolver + Medal.tv thumbnail proxy (CORS forces this server-side)"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     },
     {
@@ -6633,7 +7504,8 @@
       "type": "infra",
       "size": "S",
       "sizeWeight": 2,
-      "area": "config",
+      "area": "platform",
+      "feature": "config",
       "repo": "",
       "paths": [
         "src/config/env.validation.ts",
@@ -6647,12 +7519,28 @@
       "blocks": [],
       "questions": [],
       "testPlan": [
-        { "desc": "App boots with YOUTUBE_API_KEY unset (Joi allows empty, defaults to '')", "status": "pending" },
-        { "desc": "ConfigService exposes the key via the typed AppConfig accessor", "status": "pending" },
-        { "desc": ".env.example documents the key under an external-integrations section", "status": "pending" }
+        {
+          "desc": "App boots with YOUTUBE_API_KEY unset (Joi allows empty, defaults to '')",
+          "status": "pending"
+        },
+        {
+          "desc": "ConfigService exposes the key via the typed AppConfig accessor",
+          "status": "pending"
+        },
+        {
+          "desc": ".env.example documents the key under an external-integrations section",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [
-        { "desc": "Touches the Joi env schema that gates app boot for every environment; a malformed rule could block startup.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
+        {
+          "desc": "Touches the Joi env schema that gates app boot for every environment; a malformed rule could block startup.",
+          "status": "resolved",
+          "notedAt": "2026-07-17T00:00:00Z",
+          "resolvedAt": "2026-07-18T02:02:30Z",
+          "resolvedBy": "claude",
+          "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
+        }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6666,7 +7554,13 @@
           "by": "claude",
           "note": "created during bf-plan: YOUTUBE_API_KEY env/config plumbing"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     },
     {
@@ -6678,21 +7572,38 @@
       "size": "M",
       "sizeWeight": 3,
       "area": "gallery",
+      "feature": "media-links",
       "repo": "",
       "paths": [
         "src/gallery/media/media-embed.service.ts",
         "src/gallery/gallery.service.ts",
         "src/gallery/dto/resolve-link.dto.ts"
       ],
-      "dependsOn": ["T-0110", "T-0111"],
+      "dependsOn": [
+        "T-0110",
+        "T-0111"
+      ],
       "blocks": [],
       "questions": [
-        { "q": "Enrich at submit-time (persist title/duration on the gallery item, needs a column) or on-demand in the resolver (no schema change but some repeat quota)?", "answer": null, "askedAt": "2026-07-17T00:00:00Z" }
+        {
+          "q": "Enrich at submit-time (persist title/duration on the gallery item, needs a column) or on-demand in the resolver (no schema change but some repeat quota)?",
+          "answer": null,
+          "askedAt": "2026-07-17T00:00:00Z"
+        }
       ],
       "testPlan": [
-        { "desc": "With the key set, resolving a YouTube URL returns a real title and ISO-8601 duration", "status": "pending" },
-        { "desc": "With the key unset, the resolver still returns the static hqdefault thumbnail and nocookie embed with no error", "status": "pending" },
-        { "desc": "videos.list is called at most once per video id (cached) to stay quota-safe", "status": "pending" }
+        {
+          "desc": "With the key set, resolving a YouTube URL returns a real title and ISO-8601 duration",
+          "status": "pending"
+        },
+        {
+          "desc": "With the key unset, the resolver still returns the static hqdefault thumbnail and nocookie embed with no error",
+          "status": "pending"
+        },
+        {
+          "desc": "videos.list is called at most once per video id (cached) to stay quota-safe",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [],
       "skippedByClaude": [],
@@ -6707,7 +7618,13 @@
           "by": "claude",
           "note": "created during bf-plan: optional YouTube Data API enrichment gated on YOUTUBE_API_KEY"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     },
     {
@@ -6718,7 +7635,8 @@
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
-      "area": "members",
+      "area": "roster",
+      "feature": "members",
       "repo": "",
       "paths": [
         "src/members/members.controller.ts",
@@ -6731,16 +7649,39 @@
       "dependsOn": [],
       "blocks": [],
       "questions": [
-        { "q": "Hard-delete the member row or soft-delete + anonymise PII (retain the audit trail), and should there be a grace/undo window before execution?", "answer": null, "askedAt": "2026-07-17T00:00:00Z" }
+        {
+          "q": "Hard-delete the member row or soft-delete + anonymise PII (retain the audit trail), and should there be a grace/undo window before execution?",
+          "answer": null,
+          "askedAt": "2026-07-17T00:00:00Z"
+        }
       ],
       "testPlan": [
-        { "desc": "Confirming a deletion request transitions status to Executed and soft-deletes/anonymises the member", "status": "pending" },
-        { "desc": "A member can cancel a pending or confirmed request (status -> Cancelled) before execution", "status": "pending" },
-        { "desc": "A deleted member no longer appears in roster/auth and an audit entry is recorded", "status": "pending" },
-        { "desc": "e2e: full request -> confirm -> execute path via /api/members/me/deletion-request*", "status": "pending" }
+        {
+          "desc": "Confirming a deletion request transitions status to Executed and soft-deletes/anonymises the member",
+          "status": "pending"
+        },
+        {
+          "desc": "A member can cancel a pending or confirmed request (status -> Cancelled) before execution",
+          "status": "pending"
+        },
+        {
+          "desc": "A deleted member no longer appears in roster/auth and an audit entry is recorded",
+          "status": "pending"
+        },
+        {
+          "desc": "e2e: full request -> confirm -> execute path via /api/members/me/deletion-request*",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [
-        { "desc": "Deletion/anonymisation touches the shared Member entity and roster/auth reads; a cascade or soft-delete-scope error could hide live members.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
+        {
+          "desc": "Deletion/anonymisation touches the shared Member entity and roster/auth reads; a cascade or soft-delete-scope error could hide live members.",
+          "status": "resolved",
+          "notedAt": "2026-07-17T00:00:00Z",
+          "resolvedAt": "2026-07-18T02:02:30Z",
+          "resolvedBy": "claude",
+          "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
+        }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6754,7 +7695,13 @@
           "by": "claude",
           "note": "created during bf-plan: finalize account-deletion execution + cancel (surfaced during planning; unblocks FE deletion page)"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     },
     {
@@ -6766,6 +7713,7 @@
       "size": "S",
       "sizeWeight": 2,
       "area": "gallery",
+      "feature": "submissions",
       "repo": "",
       "paths": [
         "src/gallery/dto/gallery-item.dto.ts",
@@ -6776,14 +7724,36 @@
       "blocks": [],
       "questions": [],
       "testPlan": [
-        { "desc": "GET gallery archive returns author.avatarUrl for an item whose submitter has a custom avatar", "status": "pending" },
-        { "desc": "author.avatarUrl falls back to the submitter's Discord avatar when no custom avatar is set", "status": "pending" },
-        { "desc": "author.avatarUrl is null when the submitter has neither a custom nor a Discord avatar", "status": "pending" },
-        { "desc": "Gallery list, detail, and moderation reads still return files/likesCount/tags/author with no regression from the added discordIdentity join", "status": "pending" },
-        { "desc": "gallery.service.spec passes with the new avatarUrl field asserted on the author projection", "status": "pending" }
+        {
+          "desc": "GET gallery archive returns author.avatarUrl for an item whose submitter has a custom avatar",
+          "status": "pending"
+        },
+        {
+          "desc": "author.avatarUrl falls back to the submitter's Discord avatar when no custom avatar is set",
+          "status": "pending"
+        },
+        {
+          "desc": "author.avatarUrl is null when the submitter has neither a custom nor a Discord avatar",
+          "status": "pending"
+        },
+        {
+          "desc": "Gallery list, detail, and moderation reads still return files/likesCount/tags/author with no regression from the added discordIdentity join",
+          "status": "pending"
+        },
+        {
+          "desc": "gallery.service.spec passes with the new avatarUrl field asserted on the author projection",
+          "status": "pending"
+        }
       ],
       "regressionRisk": [
-        { "desc": "Adds an author.discordIdentity join + avatarUrl to the shared gallery projection (projectMany/projectOne) consumed by list, detail, and moderation reads; an extra relation load could change query results or add latency across all gallery endpoints.", "status": "resolved", "notedAt": "2026-07-17T00:00:00Z", "resolvedAt": "2026-07-18T02:02:30Z", "resolvedBy": "claude", "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified." }
+        {
+          "desc": "Adds an author.discordIdentity join + avatarUrl to the shared gallery projection (projectMany/projectOne) consumed by list, detail, and moderation reads; an extra relation load could change query results or add latency across all gallery endpoints.",
+          "status": "resolved",
+          "notedAt": "2026-07-17T00:00:00Z",
+          "resolvedAt": "2026-07-18T02:02:30Z",
+          "resolvedBy": "claude",
+          "note": "Mitigated + verified this session (see commit 6af4c096); CI green (unit/e2e), browser-verified."
+        }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": null,
@@ -6797,7 +7767,13 @@
           "by": "claude",
           "note": "created during bf-plan: add submitter avatarUrl to the gallery author projection (unblocks FE gallery avatar rendering lords-regiment-dashboard:T-0174)"
         },
-        { "at": "2026-07-18T02:02:30Z", "from": "planned", "to": "deploy_ready", "by": "claude", "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified." }
+        {
+          "at": "2026-07-18T02:02:30Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
       ]
     }
   ]
