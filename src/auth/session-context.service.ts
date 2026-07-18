@@ -29,6 +29,13 @@ interface CacheEntry {
 const CACHE_TTL_MS = 30_000;
 
 /**
+ * Minimum gap between `last_seen_at` bumps for a given member. Writing on every
+ * authenticated request would add a DB write per request at the choke point, so
+ * a resolved member's last-seen is advanced at most once per this window.
+ */
+const LAST_SEEN_THROTTLE_MS = 5 * 60_000;
+
+/**
  * Resolves a request's authorization context from ONLY the identity id in a
  * validated JWT (T-0046). Given `sub`, it looks up the identity, its current
  * roster member (by discordIdentityId), and derives the live role/regiment/
@@ -45,6 +52,8 @@ const CACHE_TTL_MS = 30_000;
 export class SessionContextService {
   private readonly logger = new Logger(SessionContextService.name);
   private readonly cache = new Map<string, CacheEntry>();
+  /** memberId → epoch ms of the last `last_seen_at` bump (throttle map). */
+  private readonly lastSeenBumpedAt = new Map<string, number>();
   private defaultRegimentId: string | null = null;
 
   constructor(
@@ -64,6 +73,9 @@ export class SessionContextService {
     const now = Date.now();
     const cached = this.cache.get(identityId);
     if (cached && cached.expiresAt > now) {
+      // Bump on the cache-hit path too, else last-seen would only advance once
+      // per cache TTL rather than reflecting continued site access.
+      this.bumpLastSeen(cached.context.memberId, now);
       return cached.context;
     }
 
@@ -100,7 +112,35 @@ export class SessionContextService {
     };
 
     this.cache.set(identityId, { context, expiresAt: now + CACHE_TTL_MS });
+    this.bumpLastSeen(context.memberId, now);
     return context;
+  }
+
+  /**
+   * Advance a resolved member's `last_seen_at` to "now" so it reflects last site
+   * ACCESS, not just last sign-in. Throttled per member (once per
+   * {@link LAST_SEEN_THROTTLE_MS}) and fire-and-forget: a failed or slow write
+   * must never add latency to, or fail, an authenticated request. Skipped for
+   * identity-only / Applicant sessions (no member row to stamp). Every writer
+   * uses "now", so the value is monotonic — this only ever advances it, keeping
+   * the login stamp as a floor.
+   */
+  private bumpLastSeen(memberId: string | null, now: number): void {
+    if (!memberId) return;
+    const last = this.lastSeenBumpedAt.get(memberId);
+    if (last !== undefined && now - last < LAST_SEEN_THROTTLE_MS) {
+      return;
+    }
+    // Stamp the throttle BEFORE the async write so concurrent requests in the
+    // window short-circuit; a transient DB error simply defers the next bump.
+    this.lastSeenBumpedAt.set(memberId, now);
+    // Targeted column update (no SELECT, no entity hydration) — does not bust the
+    // in-memory session cache, which is time-keyed and independent of the row.
+    void this.members.update({ id: memberId }, { lastSeenAt: new Date() }).catch((error) => {
+      this.logger.warn(
+        `Failed to bump last_seen_at for member ${memberId}: ${(error as Error).message}`,
+      );
+    });
   }
 
   /**

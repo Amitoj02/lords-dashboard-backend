@@ -77,6 +77,20 @@ export class MembersController {
     return this.membersService.confirmSelfDeletion(user, dto);
   }
 
+  @Post('me/deletion-request/execute')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Execute a confirmed deletion (soft-delete + anonymise, irreversible)' })
+  executeDeletion(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
+    return this.membersService.executeSelfDeletion(user, req.ip ?? null);
+  }
+
+  @Post('me/deletion-request/cancel')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancel a pending or confirmed deletion request' })
+  cancelDeletion(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
+    return this.membersService.cancelSelfDeletion(user, req.ip ?? null);
+  }
+
   @Get('me/export')
   @ApiOperation({ summary: 'Export your own data (GDPR data download)' })
   exportSelf(@CurrentUser() user: AuthenticatedUser) {

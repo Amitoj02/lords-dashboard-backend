@@ -8,11 +8,14 @@ import { SessionContextService } from './session-context.service';
 describe('SessionContextService', () => {
   let service: SessionContextService;
   const identities = { findOne: jest.fn(), update: jest.fn() };
-  const members = { findOne: jest.fn() };
+  const members = { findOne: jest.fn(), update: jest.fn() };
   const regiments = { findOne: jest.fn() };
 
   beforeEach(() => {
     jest.clearAllMocks();
+    // The last_seen_at bump issues a targeted members.update — default it to a
+    // resolved no-op so the fire-and-forget write never rejects unexpectedly.
+    members.update.mockReset().mockResolvedValue(undefined);
     service = new SessionContextService(
       identities as unknown as Repository<DiscordIdentity>,
       members as unknown as Repository<Member>,
@@ -165,5 +168,77 @@ describe('SessionContextService', () => {
   it('invalidateSessions() no-ops for a null identity id', async () => {
     await service.invalidateSessions(null);
     expect(identities.update).not.toHaveBeenCalled();
+  });
+
+  // ── last_seen_at bump on authenticated request (T-0108 / T-0109) ────────────
+  describe('last_seen_at bump', () => {
+    const memberIdentity = { id: 'id-1', discordUserId: 'd-1', sessionsValidFrom: null };
+    const member = { id: 'm-1', role: MemberRole.Member, regimentId: 'r-1' };
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('advances last_seen_at (targeted column update) on the first authenticated request', async () => {
+      identities.findOne.mockResolvedValue(memberIdentity);
+      members.findOne.mockResolvedValue(member);
+
+      await service.resolve('id-1');
+
+      expect(members.update).toHaveBeenCalledTimes(1);
+      expect(members.update).toHaveBeenCalledWith(
+        { id: 'm-1' },
+        expect.objectContaining({ lastSeenAt: expect.any(Date) }),
+      );
+    });
+
+    it('does NOT write again on a second request inside the throttle window', async () => {
+      jest.useFakeTimers();
+      identities.findOne.mockResolvedValue(memberIdentity);
+      members.findOne.mockResolvedValue(member);
+
+      await service.resolve('id-1');
+      // A cache hit a second later still routes through the throttle → no write.
+      jest.advanceTimersByTime(1_000);
+      await service.resolve('id-1');
+
+      expect(members.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('writes a fresh last_seen_at after the throttle window elapses', async () => {
+      jest.useFakeTimers();
+      identities.findOne.mockResolvedValue(memberIdentity);
+      members.findOne.mockResolvedValue(member);
+
+      await service.resolve('id-1');
+      jest.advanceTimersByTime(5 * 60_000 + 1);
+      await service.resolve('id-1');
+
+      expect(members.update).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not attempt a write for an identity-only / Applicant session', async () => {
+      identities.findOne.mockResolvedValue(memberIdentity);
+      members.findOne.mockResolvedValue(null);
+      regiments.findOne.mockResolvedValue({ id: 'default-r' });
+
+      const ctx = await service.resolve('id-1');
+
+      expect(ctx?.memberId).toBeNull();
+      expect(members.update).not.toHaveBeenCalled();
+    });
+
+    it('tolerates a DB error on the bump — the request still resolves', async () => {
+      identities.findOne.mockResolvedValue(memberIdentity);
+      members.findOne.mockResolvedValue(member);
+      members.update.mockRejectedValue(new Error('db down'));
+
+      const ctx = await service.resolve('id-1');
+      // Let the fire-and-forget rejection settle through its .catch handler.
+      await Promise.resolve();
+
+      expect(ctx?.memberId).toBe('m-1');
+      expect(members.update).toHaveBeenCalledTimes(1);
+    });
   });
 });

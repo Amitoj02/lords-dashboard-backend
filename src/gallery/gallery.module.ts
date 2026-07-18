@@ -6,6 +6,8 @@ import { RegimentSettings } from '../regiments/entities/regiment-settings.entity
 import { StorageModule } from '../storage/storage.module';
 import { GalleryController } from './gallery.controller';
 import { GalleryService } from './gallery.service';
+import { MediaController } from './media/media.controller';
+import { MediaEmbedService } from './media/media-embed.service';
 import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
@@ -33,8 +35,8 @@ import { GalleryTag } from './entities/gallery-tag.entity';
     // Best-effort decline DMs to submitters via the discord-sync outbox.
     DiscordModule,
   ],
-  controllers: [GalleryController],
-  providers: [GalleryService],
+  controllers: [GalleryController, MediaController],
+  providers: [GalleryService, MediaEmbedService],
   exports: [GalleryService],
 })
 export class GalleryModule {}

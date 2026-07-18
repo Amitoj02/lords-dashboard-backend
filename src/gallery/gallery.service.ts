@@ -113,7 +113,10 @@ export class GalleryService {
       status: GalleryStatus.Approved,
       isDraft: false,
     };
-    const item = await this.items.findOne({ where, relations: { author: true } });
+    const item = await this.items.findOne({
+      where,
+      relations: { author: { discordIdentity: true } },
+    });
     if (!item) {
       throw new NotFoundException('Gallery item not found');
     }
@@ -385,6 +388,8 @@ export class GalleryService {
     const qb = this.items
       .createQueryBuilder('item')
       .leftJoinAndSelect('item.author', 'author')
+      // Nested identity so the author avatar can fall back to the Discord avatar.
+      .leftJoinAndSelect('author.discordIdentity', 'authorIdentity')
       .where('item.regimentId = :regimentId', { regimentId })
       .andWhere('item.status = :status', { status })
       .andWhere('item.isDraft = :isDraft', { isDraft: false })
@@ -414,7 +419,10 @@ export class GalleryService {
     if (opts.onlyApproved) {
       where.status = GalleryStatus.Approved;
     }
-    const item = await this.items.findOne({ where, relations: { author: true } });
+    const item = await this.items.findOne({
+      where,
+      relations: { author: { discordIdentity: true } },
+    });
     if (!item) {
       throw new NotFoundException('Gallery item not found');
     }
@@ -455,7 +463,14 @@ export class GalleryService {
         files: filesByItem.get(item.id) ?? [],
         likesCount: likeCounts.get(item.id) ?? 0,
         tags: tagsByItem.get(item.id) ?? [],
-        author: item.author ? { memberId: item.author.id, name: item.author.inGameName } : null,
+        author: item.author
+          ? {
+              memberId: item.author.id,
+              name: item.author.inGameName,
+              // Custom avatar first, then the linked Discord avatar (mirrors member.dto).
+              avatarUrl: item.author.avatarUrl ?? item.author.discordIdentity?.avatarUrl ?? null,
+            }
+          : null,
         liked: likedSet ? likedSet.has(item.id) : undefined,
       }),
     );

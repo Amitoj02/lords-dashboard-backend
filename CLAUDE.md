@@ -38,10 +38,13 @@ items, and `notesForNextSession`.
 **Before ending any session,** reconcile `.blueframe/state.json`:
 - Advance task `status` values to reflect what actually happened
   (`planned → in_progress → questionnaire → review → test → deploy_ready → deployed`;
-  use `blocked`/`archived` as off-ramps).
+  use `blocked`/`archived` as off-ramps). Work that has landed on the default
+  branch is `deployed` (the Orbit Sun only absorbs `deployed` — don't leave
+  merged work parked at `deploy_ready`).
 - Add newly discovered work as new tasks. **Never reuse or collide task ids**
   (`T-####`); allocate the next unused number.
-- Record anything you deliberately did NOT do in `skippedByClaude`.
+- Record anything you deliberately did NOT do in `skippedByClaude` (short
+  plain-string notes — never objects).
 - Update `testPlan` items and add `regressionRisk` entries (status `open`)
   for any shared code you touched.
 - Re-check open `regressionRisk` entries: if new commits show a risk was
@@ -53,9 +56,12 @@ items, and `notesForNextSession`.
 - Write a concise `notesForNextSession` handoff to your future self.
 - Append a `history` entry for each status change.
 
-In a monorepo, set each task `area` to the package name (`packages/web` →
-`web`). Cross-repo dependencies use `"<repoKey>:T-####"` in `dependsOn`;
-bare ids are local to this repo.
+Give each task a Project-Manager hierarchy so the Orbit PM lens shows one
+node per *feature*, not per task: `area` = module / bounded context (~3–8
+per repo, never one repo-wide area; a monorepo package name is a fine
+module), `feature` = the durable capability (reused across every task on it),
+`subfeature` = a specific control. Cross-repo dependencies use
+`"<repoKey>:T-####"` in `dependsOn`; bare ids are local to this repo.
 
 Keep diffs **minimal** and preserve existing key order. Do not touch content
 in CLAUDE.md outside these markers.

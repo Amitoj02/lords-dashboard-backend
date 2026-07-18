@@ -85,6 +85,15 @@ export enum GalleryMediaType {
   Video = 'video',
 }
 
+/** Resolved provider of an external gallery media link (server-side resolver). */
+export enum MediaProvider {
+  YouTube = 'youtube',
+  MedalTv = 'medaltv',
+  Image = 'image',
+  Video = 'video',
+  Link = 'link',
+}
+
 export enum ApplicationStatus {
   Pending = 'pending',
   Approved = 'approved',

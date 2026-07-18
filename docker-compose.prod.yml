@@ -74,6 +74,8 @@ services:
       DISCORD_CALLBACK_URL: ${WEB_ORIGIN}/api/auth/discord/callback
       FRONTEND_AUTH_SUCCESS_REDIRECT: ${WEB_ORIGIN}/auth/callback
       FRONTEND_AUTH_FAILURE_REDIRECT: ${WEB_ORIGIN}/login
+      # Optional YouTube Data API key for gallery link enrichment.
+      YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
 
   web:
     build:

@@ -48,7 +48,12 @@ const buildItem = (overrides: Partial<GalleryItem> = {}): GalleryItem => ({
   id: 'gallery-1',
   regimentId: REGIMENT,
   authorMemberId: 'member-1',
-  author: { id: 'member-1', inGameName: 'Jane Doe' } as unknown as Member,
+  author: {
+    id: 'member-1',
+    inGameName: 'Jane Doe',
+    avatarUrl: null,
+    discordIdentity: { avatarUrl: 'https://cdn.discordapp.com/avatars/1/hash.png' },
+  } as unknown as Member,
   moderatedByMemberId: null,
   title: 'The charge at dawn',
   caption: null,
@@ -400,7 +405,39 @@ describe('GalleryService', () => {
       expect(result.data).toHaveLength(1);
       expect(result.meta.total).toBe(1);
       expect(result.data[0].liked).toBeUndefined();
-      expect(result.data[0].author).toEqual({ memberId: 'member-1', name: 'Jane Doe' });
+      // Author falls back to the linked Discord avatar when no custom one is set.
+      expect(result.data[0].author).toEqual({
+        memberId: 'member-1',
+        name: 'Jane Doe',
+        avatarUrl: 'https://cdn.discordapp.com/avatars/1/hash.png',
+      });
+    });
+
+    it('prefers a custom author avatar over the Discord fallback, and is null when neither exists', async () => {
+      settings.find!.mockResolvedValue([buildSettings()]);
+      const customAuthor = buildItem({
+        author: {
+          id: 'member-1',
+          inGameName: 'Jane Doe',
+          avatarUrl: 'https://cdn.example/custom.png',
+          discordIdentity: { avatarUrl: 'https://cdn.discordapp.com/avatars/1/hash.png' },
+        } as unknown as Member,
+      });
+      const noAvatarAuthor = buildItem({
+        id: 'gallery-2',
+        author: {
+          id: 'member-2',
+          inGameName: 'No Avatar',
+          avatarUrl: null,
+          discordIdentity: null,
+        } as unknown as Member,
+      });
+      items.createQueryBuilder!.mockReturnValue(makeListQb([customAuthor, noAvatarAuthor], 2));
+
+      const result = await service.findPublic(query);
+
+      expect(result.data[0].author?.avatarUrl).toBe('https://cdn.example/custom.png');
+      expect(result.data[1].author?.avatarUrl).toBeNull();
     });
   });
 

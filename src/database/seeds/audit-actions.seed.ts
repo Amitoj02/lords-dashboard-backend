@@ -47,6 +47,16 @@ const ACTIONS = [
     defaultSeverity: AuditSeverity.Warn,
   },
   {
+    code: 'member.deletion.execute',
+    label: 'Account deletion executed',
+    defaultSeverity: AuditSeverity.Warn,
+  },
+  {
+    code: 'member.deletion.cancel',
+    label: 'Account deletion cancelled',
+    defaultSeverity: AuditSeverity.Info,
+  },
+  {
     code: 'member.status.auto_inactive',
     label: 'Member auto-marked inactive',
     defaultSeverity: AuditSeverity.Info,
