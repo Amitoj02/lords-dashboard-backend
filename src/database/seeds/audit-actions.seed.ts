@@ -41,6 +41,7 @@ const ACTIONS = [
   { code: 'member.suspend', label: 'Member suspended', defaultSeverity: AuditSeverity.Warn },
   { code: 'member.ban', label: 'Member banned', defaultSeverity: AuditSeverity.Warn },
   { code: 'member.unban', label: 'Member unbanned', defaultSeverity: AuditSeverity.Info },
+  { code: 'member.unsuspend', label: 'Member unsuspended', defaultSeverity: AuditSeverity.Info },
   {
     code: 'member.deletion.request',
     label: 'Account deletion requested',

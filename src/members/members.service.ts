@@ -435,6 +435,41 @@ export class MembersService {
     return this.project(member);
   }
 
+  /**
+   * Lift an active suspension: clear suspendedUntil. Mirrors {@link unban} but for
+   * the time-boxed suspension. "Currently suspended" means a suspendedUntil in the
+   * FUTURE (matching the roster's derived status + the frontend's Unsuspend gate);
+   * an already-elapsed timestamp is a no-op suspension, so it Conflicts like an
+   * unban of a non-banned member. The owner is protected consistent with suspend
+   * (assertNotOwner) even though an owner can never be suspended in the first place.
+   * Unlike suspend, no session invalidation is needed — lifting a suspension only
+   * restores access. Status is left untouched (suspend never changed it; the
+   * derived Suspended pill clears once suspendedUntil is null).
+   */
+  async unsuspend(id: string, user: AuthenticatedUser, ip: string | null): Promise<MemberDto> {
+    const member = await this.loadMember(id, user.regimentId);
+    await this.assertNotOwner(member, user.regimentId);
+    if (!member.suspendedUntil || member.suspendedUntil.getTime() <= Date.now()) {
+      throw new ConflictException('Member is not currently suspended');
+    }
+
+    const before = { suspendedUntil: member.suspendedUntil.toISOString() };
+    member.suspendedUntil = null;
+    await this.members.save(member);
+
+    await this.addServiceRecord(member, 'suspension', 'Suspension lifted', null);
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'member.unsuspend',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
+      before,
+      after: { suspendedUntil: null },
+    });
+
+    return this.project(member);
+  }
+
   /** Lift a ban: clear bannedAt + reactivate. */
   async unban(id: string, user: AuthenticatedUser, ip: string | null): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);

@@ -176,6 +176,30 @@ describe('Post-MVP feature modules (e2e)', () => {
     });
   });
 
+  // ── Storage upload policy (T-0119) ─────────────────────────────────────────
+  describe('storage policy: per-target caps + accepted types for client hints', () => {
+    it('exposes each target’s size caps and accepted types to an authenticated caller', async () => {
+      const res = await request(server())
+        .get('/api/storage/policy')
+        .set(bearer(ownerToken))
+        .expect(200);
+
+      expect(typeof res.body.maxUploadMb).toBe('number');
+      expect(res.body.image.extensions).toEqual(['png', 'jpg', 'webp']);
+      const byTarget = Object.fromEntries(
+        res.body.targets.map((t: { target: string }) => [t.target, t]),
+      );
+      expect(byTarget['member-avatar'].maxImageMb).toBe(8);
+      expect(byTarget['member-banner'].maxImageMb).toBe(12);
+      expect(byTarget['event-banner'].maxImageMb).toBe(12);
+      expect(byTarget['gallery'].maxVideoMb).toBe(80);
+    });
+
+    it('rejects an unauthenticated caller', async () => {
+      await request(server()).get('/api/storage/policy').expect(401);
+    });
+  });
+
   // ── Events (T-0015) ────────────────────────────────────────────────────────
   describe('events: create, public redaction, RSVP + reveal gating, audit', () => {
     const PASSWORD = 'holdfast-e2e-secret';
