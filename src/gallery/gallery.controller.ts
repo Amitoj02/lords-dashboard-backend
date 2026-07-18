@@ -6,6 +6,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -31,6 +32,7 @@ import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
 import { DeclineGalleryDto } from './dto/decline-gallery.dto';
 import { GalleryItemDto, GallerySubmissionSummaryDto } from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
+import { UpdateGalleryItemDto } from './dto/update-gallery-item.dto';
 import { GalleryLikeState, GalleryService } from './gallery.service';
 
 /**
@@ -158,6 +160,19 @@ export class GalleryController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<GalleryLikeState> {
     return this.galleryService.unlike(user, id);
+  }
+
+  @Patch(':id')
+  @RequireCapability(Capability.ModerateGallery)
+  @ApiOperation({ summary: 'Edit a gallery item caption + tags (media is not editable)' })
+  @ApiOkResponse({ type: GalleryItemDto, description: 'The updated gallery item.' })
+  update(
+    @Param('id', ParseShortIdPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateGalleryItemDto,
+    @Req() req: Request,
+  ): Promise<GalleryItemDto> {
+    return this.galleryService.update(user, id, dto, req.ip ?? null);
   }
 
   @Delete(':id')

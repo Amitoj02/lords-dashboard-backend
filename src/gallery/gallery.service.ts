@@ -23,6 +23,7 @@ import {
   GallerySubmissionSummaryDto,
 } from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
+import { UpdateGalleryItemDto } from './dto/update-gallery-item.dto';
 import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
@@ -329,6 +330,54 @@ export class GalleryService {
     return this.projectOne(saved, user.memberId);
   }
 
+  /**
+   * Moderator edit of an item's caption and/or tags (ModerateGallery). The media
+   * itself (title, type, files, links) is not editable here. Only the fields
+   * present on the DTO are touched; `tags`, when provided, replaces the whole tag
+   * set (deduped/trimmed/capped, mirroring submit()). Runs the caption write and
+   * the tag replacement in one transaction, then audits. Audited.
+   */
+  async update(
+    user: AuthenticatedUser,
+    id: string,
+    dto: UpdateGalleryItemDto,
+    ip: string | null,
+  ): Promise<GalleryItemDto> {
+    const item = await this.loadItem(id, user.regimentId, {});
+
+    await this.dataSource.transaction(async (manager) => {
+      const itemRepo = manager.getRepository(GalleryItem);
+      const tagRepo = manager.getRepository(GalleryTag);
+
+      if (dto.caption !== undefined) {
+        const trimmed = dto.caption.trim();
+        item.caption = trimmed.length > 0 ? trimmed : null;
+        await itemRepo.save(item);
+      }
+
+      if (dto.tags !== undefined) {
+        // Wholesale replace: gallery_tags has a composite PK (galleryItemId, tag),
+        // so delete-then-insert (never bare insert) avoids duplicate-key collisions.
+        await tagRepo.delete({ galleryItemId: item.id });
+        const unique = [...new Set(dto.tags.map((t) => t.trim()).filter(Boolean))].slice(0, 10);
+        if (unique.length > 0) {
+          await tagRepo.insert(unique.map((tag) => ({ galleryItemId: item.id, tag })));
+        }
+      }
+    });
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'gallery.update',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'gallery', id: item.id, label: item.title },
+    });
+
+    // `item` carries the freshly-saved caption + author relation; projectOne
+    // re-queries the replaced tags via tagsFor(), so no reload is needed.
+    return this.projectOne(item, user.memberId);
+  }
+
   /** Idempotently like an item for the caller. Returns the fresh like state. */
   async like(user: AuthenticatedUser, id: string): Promise<GalleryLikeState> {
     const memberId = this.requireMember(user);
@@ -359,10 +408,24 @@ export class GalleryService {
     return { likesCount, liked: false };
   }
 
-  /** Soft-delete an item. Audited. */
+  /**
+   * Soft-delete an item and purge its stored media objects. The row is
+   * soft-removed (recoverable) but the backing MinIO/S3 objects are deleted
+   * best-effort so orphaned bytes don't outlive the item; a storage outage can
+   * never block the softRemove or the audit row. Audited.
+   */
   async remove(user: AuthenticatedUser, id: string, ip: string | null): Promise<void> {
     const item = await this.loadItem(id, user.regimentId, {});
+    // GalleryFile has no soft-delete column, so its rows remain readable after
+    // softRemove — load them first to know which objects to purge.
+    const files = await this.files.find({ where: { galleryItemId: item.id } });
     await this.items.softRemove(item);
+
+    for (const file of files) {
+      if (file.url) {
+        await this.storage.deleteObject(file.url);
+      }
+    }
 
     await this.audit.record({
       regimentId: user.regimentId,

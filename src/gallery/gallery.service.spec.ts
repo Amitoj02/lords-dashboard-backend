@@ -134,6 +134,7 @@ describe('GalleryService', () => {
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
   let discordSync: { enqueueApplicationDecision: jest.Mock };
+  let storage: { resolveKeyToPublicUrl: jest.Mock; deleteObject: jest.Mock };
 
   // Per-test transaction manager repositories.
   let txItems: MockRepo<GalleryItem>;
@@ -167,6 +168,10 @@ describe('GalleryService', () => {
     settings = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn() };
     audit = { record: jest.fn() };
     discordSync = { enqueueApplicationDecision: jest.fn().mockResolvedValue(null) };
+    storage = {
+      resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+      deleteObject: jest.fn().mockResolvedValue(undefined),
+    };
 
     txItems = {
       create: jest.fn((x: unknown) => x),
@@ -178,6 +183,7 @@ describe('GalleryService', () => {
     };
     txTags = {
       insert: jest.fn((x: unknown) => Promise.resolve(x)),
+      delete: jest.fn().mockResolvedValue({ affected: 0 }),
     };
 
     const manager = {
@@ -203,14 +209,7 @@ describe('GalleryService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
-        {
-          provide: StorageService,
-          useValue: {
-            resolveKeyToPublicUrl: jest.fn(
-              (_u: unknown, key: string) => `https://cdn.example/${key}`,
-            ),
-          },
-        },
+        { provide: StorageService, useValue: storage },
         { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
@@ -657,13 +656,105 @@ describe('GalleryService', () => {
     });
   });
 
+  describe('update (T-0115)', () => {
+    it('throws NotFound for a missing/wrong-regiment item', async () => {
+      items.findOne!.mockResolvedValue(null);
+      await expect(
+        service.update(ADMIN_USER, 'missing', { caption: 'x' }, null),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('updates the caption (trimmed) and audits gallery.update', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ caption: 'old' }));
+
+      const result = await service.update(
+        ADMIN_USER,
+        'gallery-1',
+        { caption: '  Edited caption  ' },
+        '2.2.2.2',
+      );
+
+      const saved = txItems.save!.mock.calls[0][0] as GalleryItem;
+      expect(saved.caption).toBe('Edited caption');
+      expect(result.caption).toBe('Edited caption');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'gallery.update', regimentId: REGIMENT }),
+      );
+    });
+
+    it('normalises an all-whitespace caption to null', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ caption: 'old' }));
+      await service.update(ADMIN_USER, 'gallery-1', { caption: '   ' }, null);
+      const saved = txItems.save!.mock.calls[0][0] as GalleryItem;
+      expect(saved.caption).toBeNull();
+    });
+
+    it('replaces tags wholesale — deleted first, then deduped/trimmed/capped insert', async () => {
+      items.findOne!.mockResolvedValue(buildItem());
+
+      await service.update(
+        ADMIN_USER,
+        'gallery-1',
+        { tags: [' siege ', 'siege', 'melee', ''] },
+        null,
+      );
+
+      expect(txTags.delete).toHaveBeenCalledWith({ galleryItemId: 'gallery-1' });
+      const rows = txTags.insert!.mock.calls[0][0] as Array<{ galleryItemId: string; tag: string }>;
+      expect(rows.map((r) => r.tag)).toEqual(['siege', 'melee']);
+      expect(rows.every((r) => r.galleryItemId === 'gallery-1')).toBe(true);
+    });
+
+    it('clears all tags when given an empty array (delete, no insert)', async () => {
+      items.findOne!.mockResolvedValue(buildItem());
+      await service.update(ADMIN_USER, 'gallery-1', { tags: [] }, null);
+      expect(txTags.delete).toHaveBeenCalledWith({ galleryItemId: 'gallery-1' });
+      expect(txTags.insert).not.toHaveBeenCalled();
+    });
+
+    it('leaves caption and tags untouched when neither is provided (still audits)', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ caption: 'keep' }));
+      await service.update(ADMIN_USER, 'gallery-1', {}, null);
+      expect(txItems.save).not.toHaveBeenCalled();
+      expect(txTags.delete).not.toHaveBeenCalled();
+      expect(txTags.insert).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'gallery.update' }),
+      );
+    });
+  });
+
   describe('remove', () => {
-    it('soft-deletes the item and audits the deletion', async () => {
+    it('soft-deletes the item, purges its stored objects, and audits the deletion', async () => {
       const item = buildItem();
       items.findOne!.mockResolvedValue(item);
+      files.find!.mockResolvedValue([
+        { url: 'https://cdn.example/gallery/regiment-1/member-1/a.png' },
+        { url: null },
+      ]);
 
       await service.remove(ADMIN_USER, 'gallery-1', null);
 
+      expect(items.softRemove).toHaveBeenCalledWith(item);
+      // Only the non-null url is purged from storage.
+      expect(storage.deleteObject).toHaveBeenCalledTimes(1);
+      expect(storage.deleteObject).toHaveBeenCalledWith(
+        'https://cdn.example/gallery/regiment-1/member-1/a.png',
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'gallery.delete' }),
+      );
+    });
+
+    it('still soft-deletes + audits when the item has no stored files', async () => {
+      const item = buildItem();
+      items.findOne!.mockResolvedValue(item);
+      files.find!.mockResolvedValue([]);
+
+      await service.remove(ADMIN_USER, 'gallery-1', null);
+
+      expect(storage.deleteObject).not.toHaveBeenCalled();
       expect(items.softRemove).toHaveBeenCalledWith(item);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'gallery.delete' }),

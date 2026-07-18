@@ -85,6 +85,7 @@ const ACTIONS = [
   },
   { code: 'gallery.submit', label: 'Gallery item submitted', defaultSeverity: AuditSeverity.Info },
   { code: 'gallery.approve', label: 'Gallery item approved', defaultSeverity: AuditSeverity.Info },
+  { code: 'gallery.update', label: 'Gallery item updated', defaultSeverity: AuditSeverity.Info },
   { code: 'gallery.decline', label: 'Gallery item declined', defaultSeverity: AuditSeverity.Info },
   { code: 'gallery.delete', label: 'Gallery item deleted', defaultSeverity: AuditSeverity.Warn },
   {

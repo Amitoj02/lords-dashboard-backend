@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "6af4c096b3ac4870b8c9d8df9fc9fdeae824e08a",
-  "lastSyncedAt": "2026-07-18T02:02:30Z",
-  "notesForNextSession": "Planned-tasks epic T-0108..T-0114 implemented + verified -> deploy_ready. last_seen_at now bumps on every authenticated request (throttled 5min at the SessionContext.resolve choke point, fire-and-forget). New server-side media resolver + Medal.tv thumbnail proxy (cached bytes behind a stable URL, SSRF host-allowlist, bounded read + cache eviction) at /api/gallery/media/{resolve, medal/:id/thumbnail}; optional key-gated YouTube enrichment (YOUTUBE_API_KEY). Account deletion finalized: execute (soft-delete member + anonymise PII + HARD-DELETE the Discord identity for durable GDPR erasure) + cancel; audit actions seeded; NO migration needed (enum/columns already present). Gallery author projection now returns avatarUrl (custom -> Discord fallback). lint/build/334 unit/39 e2e green; browser-verified end-to-end. Ship WITH the frontend PR feat/gallery-profile-admin-polish (media proxy + author.avatarUrl + deletion contracts change in lockstep). No planned tasks remain; T-0025 still blocked on prod deploy (T-0032) + live Discord.",
-  "nextIdCounter": 114,
+  "lastSyncedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
+  "lastSyncedAt": "2026-07-18T04:56:34Z",
+  "notesForNextSession": "Gallery moderation + audit avatars T-0115..T-0117 implemented -> deploy_ready (BE 2e082cb). T-0115 PATCH /gallery/:id (ModerateGallery) edits caption + replaces tags via bespoke UpdateGalleryItemDto (media immutable) + gallery.update audit; T-0116 StorageService.deleteObject purges MinIO objects on gallery delete (best-effort); T-0117 actorAvatarUrl+targetAvatarUrl on the audit list/findOne/CSV projection (custom>Discord>null). Seeded gallery.update action. lint/build/346 unit/39 e2e green. Local e2e gotcha: the dev .env sets a real OWNER_DISCORD_ID + DISCORD_MOCK=false — run e2e against a fresh DB with OWNER_DISCORD_ID= + DISCORD_MOCK=true (see the frontend repo memory reference-local-e2e-env). SHIP WITH frontend PR feat/gallery-profile-roster-audit-polish (72c9585): its T-0183 + T-0185 consume these endpoints. No planned tasks remain (2 blocked deferred per user).",
+  "nextIdCounter": 118,
   "connections": [],
   "tasks": [
     {
@@ -7773,6 +7773,215 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        }
+      ]
+    },
+    {
+      "id": "T-0115",
+      "title": "Add PATCH /gallery/:id to edit caption and tags (moderator)",
+      "summary": "The gallery controller has no update route. Add PATCH /gallery/:id guarded by @RequireCapability(ModerateGallery) with a new UpdateGalleryItemDto (optional caption <=512 chars, optional tags[] deduped/capped at 10) that updates the caption column and replaces the gallery_tags rows, writes a gallery.update audit entry, and returns the projected GalleryItemDto. The stored media files are not editable via this endpoint.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "feature": "moderation",
+      "subfeature": "edit",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/dto/update-gallery-item.dto.ts",
+        "src/gallery/dto/gallery-item.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0183"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PATCH updates caption and tags for a moderator and returns the new projection",
+          "status": "passed"
+        },
+        {
+          "desc": "Tags are deduped and capped at 10",
+          "status": "passed"
+        },
+        {
+          "desc": "A non-moderator (no moderate_gallery) receives 403",
+          "status": "passed"
+        },
+        {
+          "desc": "A gallery.update audit row is written",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "New PATCH /gallery/:id + UpdateGalleryItemDto + GalleryService.update touch the shared gallery controller/service (also used by submit/approve/decline/remove) and add the gallery.update seed action.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T04:56:34Z",
+          "resolvedAt": "2026-07-18T04:56:34Z",
+          "resolvedBy": "claude",
+          "note": "No existing signature changed; UpdateGalleryItemDto is bespoke (not PartialType) so only caption+tags are editable. gallery.service.spec covers caption trim/null, wholesale tag replace (delete-then-insert), no-op-when-omitted, and NotFound. Consumed by frontend T-0183. e2e green."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
+      "createdAt": "2026-07-18T03:48:15Z",
+      "updatedAt": "2026-07-18T04:56:34Z",
+      "history": [
+        {
+          "at": "2026-07-18T03:48:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-18T04:56:34Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        }
+      ]
+    },
+    {
+      "id": "T-0116",
+      "title": "Delete the MinIO object(s) when a gallery item is removed",
+      "summary": "DELETE /gallery/:id currently soft-removes the row only, and StorageService has no delete capability (it only imports PutObjectCommand for presigned uploads). Add StorageService.deleteObject (S3 DeleteObjectCommand, resolving the object key from GalleryFile.url via the publicBaseUrl prefix) and call it from gallery.service.remove() to purge every gallery_files object from MinIO alongside the softRemove, tolerating already-missing objects. Keeps the existing gallery.delete audit row.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "feature": "moderation",
+      "subfeature": "hard-delete",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.controller.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0183"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "Deleting a gallery item removes its stored object(s) from MinIO",
+          "status": "passed"
+        },
+        {
+          "desc": "An already-missing object does not error the delete request",
+          "status": "passed"
+        },
+        {
+          "desc": "The presigned upload/put flow is unaffected by the new delete method",
+          "status": "passed"
+        },
+        {
+          "desc": "The gallery.delete audit row is still written",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "StorageService is shared by member avatar/banner uploads and gallery uploads; adding object deletion must not disturb the presigned-upload path.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T03:48:15Z",
+          "resolvedAt": "2026-07-18T04:56:34Z",
+          "resolvedBy": "claude",
+          "note": "StorageService.deleteObject added without touching the presigned-upload path (guards a URL outside the public base, swallows already-missing / transient errors). storage.service.spec covers delete + missing-object tolerance + out-of-base no-op; gallery.service.spec covers the remove() purge (only non-null file urls). 346 unit + 39 e2e green."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
+      "createdAt": "2026-07-18T03:48:15Z",
+      "updatedAt": "2026-07-18T04:56:34Z",
+      "history": [
+        {
+          "at": "2026-07-18T03:48:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-18T04:56:34Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        }
+      ]
+    },
+    {
+      "id": "T-0117",
+      "title": "Add actor (and target) avatar URLs to the audit read projection",
+      "summary": "AuditLogEntryDto returns no avatar for the actor. Load the nested actorMember.discordIdentity (and targetMember.discordIdentity) relation on the audit list / findOne / CSV read paths and add actorAvatarUrl (= actorMember.avatarUrl ?? actorMember.discordIdentity?.avatarUrl ?? null) to the DTO, so the frontend audit page can render real actor avatars with a Discord fallback.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "audit",
+      "subfeature": "actor-avatar",
+      "repo": "",
+      "paths": [
+        "src/audit/audit.service.ts",
+        "src/audit/dto/audit-log-entry.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0185"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /audit returns actorAvatarUrl for member actors (custom avatar, else Discord fallback, else null)",
+          "status": "passed"
+        },
+        {
+          "desc": "System/bot actors return null actorAvatarUrl",
+          "status": "passed"
+        },
+        {
+          "desc": "List, detail and CSV read paths are consistent and the nested relation is eager-loaded (no N+1)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Audit read path (findEntries/findOne/exportCsv) now eager-loads actorMember/targetMember.discordIdentity and the DTO/CSV emit actor/target avatar fields — shared by every audit consumer.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T04:56:34Z",
+          "resolvedAt": "2026-07-18T04:56:34Z",
+          "resolvedBy": "claude",
+          "note": "Query-shape change pinned by audit.service.spec (nested-relations assertion + new CSV header + avatar fallback: custom>Discord>null) and post-mvp e2e (CSV export toContain unchanged). Consumed by frontend T-0185."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
+      "createdAt": "2026-07-18T03:48:15Z",
+      "updatedAt": "2026-07-18T04:56:34Z",
+      "history": [
+        {
+          "at": "2026-07-18T03:48:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-18T04:56:34Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
         }
       ]
     }
