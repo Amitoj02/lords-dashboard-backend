@@ -262,4 +262,16 @@ export class MembersController {
   ): Promise<MemberDto> {
     return this.membersService.unban(id, user, req.ip ?? null);
   }
+
+  @Post(':id/unsuspend')
+  @RequireCapability(Capability.ManageRoles)
+  @ApiOperation({ summary: 'Lift an active member suspension' })
+  @ApiOkResponse({ type: MemberDto })
+  unsuspend(
+    @Param('id', ParseShortIdPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ): Promise<MemberDto> {
+    return this.membersService.unsuspend(id, user, req.ip ?? null);
+  }
 }

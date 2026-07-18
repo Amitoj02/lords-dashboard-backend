@@ -229,4 +229,47 @@ describe('StorageService', () => {
       expect(send).not.toHaveBeenCalled();
     });
   });
+
+  describe('getPolicy (T-0119)', () => {
+    it('exposes each target’s size caps + accepted types with the global ceiling', () => {
+      const policy = service.getPolicy();
+
+      expect(policy.maxUploadMb).toBe(STORAGE_CFG.maxUploadMb);
+      expect(policy.image.mimeTypes).toEqual(['image/png', 'image/jpeg', 'image/webp']);
+      expect(policy.image.extensions).toEqual(['png', 'jpg', 'webp']);
+      expect(policy.video.mimeTypes).toEqual(['video/mp4', 'video/webm', 'video/quicktime']);
+
+      const byTarget = Object.fromEntries(policy.targets.map((t) => [t.target, t]));
+
+      // Static image-only targets: cap matches TARGET_POLICY, no video cap.
+      expect(byTarget[StorageTarget.MemberAvatar].maxImageMb).toBe(8);
+      expect(byTarget[StorageTarget.MemberAvatar].maxVideoMb).toBeNull();
+      expect(byTarget[StorageTarget.MemberBanner].maxImageMb).toBe(12);
+      expect(byTarget[StorageTarget.EventBanner].maxImageMb).toBe(12);
+      expect(byTarget[StorageTarget.MedalImage].maxImageMb).toBe(4);
+      expect(byTarget[StorageTarget.RankImage].maxImageMb).toBe(4);
+
+      // Gallery accepts image + video and carries the default video cap.
+      const gallery = byTarget[StorageTarget.Gallery];
+      expect(gallery.kinds).toEqual(['image', 'video']);
+      expect(gallery.maxImageMb).toBe(12);
+      expect(gallery.maxVideoMb).toBe(80);
+      expect(gallery.acceptedMimeTypes).toContain('image/png');
+      expect(gallery.acceptedMimeTypes).toContain('video/mp4');
+      expect(gallery.acceptedExtensions).toEqual(['png', 'jpg', 'webp', 'mp4', 'webm', 'mov']);
+    });
+
+    it('caps every target at the global S3 ceiling when it is lower than a target policy', () => {
+      // Rebuild the service with a 5 MB global ceiling: caps above 5 collapse to 5.
+      const capped = new StorageService(
+        { get: jest.fn().mockReturnValue({ ...STORAGE_CFG, maxUploadMb: 5 }) } as never,
+        authz as never,
+        settings as never,
+      );
+      const byTarget = Object.fromEntries(capped.getPolicy().targets.map((t) => [t.target, t]));
+      expect(byTarget[StorageTarget.MemberBanner].maxImageMb).toBe(5); // 12 → 5
+      expect(byTarget[StorageTarget.MedalImage].maxImageMb).toBe(4); // 4 stays (below ceiling)
+      expect(byTarget[StorageTarget.Gallery].maxVideoMb).toBe(5); // 80 → 5
+    });
+  });
 });

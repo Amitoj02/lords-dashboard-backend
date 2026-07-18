@@ -12,6 +12,7 @@ import { AppConfig, StorageConfig } from '../config/configuration';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { PresignedUploadDto } from './dto/presigned-upload.dto';
 import { RequestUploadDto } from './dto/request-upload.dto';
+import { AcceptedTypeDto, StoragePolicyDto } from './dto/storage-policy.dto';
 
 /** A file kind for the content-type / size policy. */
 type AssetKind = 'image' | 'video';
@@ -186,6 +187,47 @@ export class StorageService {
   /** The stable, query-string-free public URL an object is served from. */
   publicUrlForKey(key: string): string {
     return `${this.cfg.publicBaseUrl.replace(/\/$/, '')}/${key}`;
+  }
+
+  /**
+   * The static per-target upload policy (T-0119): size caps + accepted types, so
+   * the frontend derives its upload hints from a single source of truth. Every
+   * cap is the target's own limit capped by the global S3 ceiling (the same
+   * `min(maxMb, maxUploadMb)` {@link createUploadTicket} enforces). Gallery caps
+   * here are the static defaults — the live, admin-configurable gallery caps come
+   * from GET /api/settings; the frontend reads gallery limits from there.
+   */
+  getPolicy(): StoragePolicyDto {
+    const cap = (mb: number): number => Math.min(mb, this.cfg.maxUploadMb);
+    const image: AcceptedTypeDto = {
+      mimeTypes: Object.keys(IMAGE_TYPES),
+      extensions: Object.values(IMAGE_TYPES),
+    };
+    const video: AcceptedTypeDto = {
+      mimeTypes: Object.keys(VIDEO_TYPES),
+      extensions: Object.values(VIDEO_TYPES),
+    };
+
+    const targets = (Object.keys(TARGET_POLICY) as StorageTarget[]).map((target) => {
+      const policy = TARGET_POLICY[target];
+      const acceptsVideo = policy.kinds.includes('video');
+      return {
+        target,
+        kinds: policy.kinds,
+        maxImageMb: cap(policy.maxImageMb),
+        // Only gallery accepts video today; its default video cap is the static
+        // fallback (the live cap is admin-configurable via settings).
+        maxVideoMb: acceptsVideo ? cap(DEFAULT_MAX_VIDEO_MB) : null,
+        acceptedMimeTypes: policy.kinds.flatMap((kind) =>
+          kind === 'image' ? image.mimeTypes : video.mimeTypes,
+        ),
+        acceptedExtensions: policy.kinds.flatMap((kind) =>
+          kind === 'image' ? image.extensions : video.extensions,
+        ),
+      };
+    });
+
+    return { maxUploadMb: this.cfg.maxUploadMb, image, video, targets };
   }
 
   /**
