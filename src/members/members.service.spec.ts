@@ -501,6 +501,42 @@ describe('MembersService', () => {
         ConflictException,
       );
     });
+
+    it('unsuspend refuses the regiment owner', async () => {
+      memberRepo.findOne.mockResolvedValue(buildMember({ id: 'owner-member' }));
+      await expect(service.unsuspend('owner-member', user(), null)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+
+    it('unsuspend conflicts when the member is not currently suspended', async () => {
+      memberRepo.findOne.mockResolvedValue(buildMember({ suspendedUntil: null }));
+      await expect(service.unsuspend('member-1', user(), null)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('unsuspend conflicts when the suspension has already elapsed', async () => {
+      memberRepo.findOne.mockResolvedValue(
+        buildMember({ suspendedUntil: new Date(Date.now() - 86_400_000) }),
+      );
+      await expect(service.unsuspend('member-1', user(), null)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+    });
+
+    it('unsuspend clears suspendedUntil + records service/audit when actively suspended', async () => {
+      memberRepo.findOne.mockResolvedValue(
+        buildMember({ suspendedUntil: new Date(Date.now() + 86_400_000) }),
+      );
+      const dto = await service.unsuspend('member-1', user(), '9.9.9.9');
+      expect(dto.suspendedUntil).toBeNull();
+      expect(memberRepo.save).toHaveBeenCalledTimes(1);
+      expect(serviceRecordRepo.save).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'member.unsuspend', regimentId: REGIMENT }),
+      );
+    });
   });
 
   describe('getServiceRecord (self-OR-admin gate, T-0101)', () => {

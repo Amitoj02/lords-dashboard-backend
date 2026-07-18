@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
-  "lastSyncedAt": "2026-07-18T04:56:34Z",
-  "notesForNextSession": "Gallery moderation + audit avatars T-0115..T-0117 implemented -> deploy_ready (BE 2e082cb). T-0115 PATCH /gallery/:id (ModerateGallery) edits caption + replaces tags via bespoke UpdateGalleryItemDto (media immutable) + gallery.update audit; T-0116 StorageService.deleteObject purges MinIO objects on gallery delete (best-effort); T-0117 actorAvatarUrl+targetAvatarUrl on the audit list/findOne/CSV projection (custom>Discord>null). Seeded gallery.update action. lint/build/346 unit/39 e2e green. Local e2e gotcha: the dev .env sets a real OWNER_DISCORD_ID + DISCORD_MOCK=false — run e2e against a fresh DB with OWNER_DISCORD_ID= + DISCORD_MOCK=true (see the frontend repo memory reference-local-e2e-env). SHIP WITH frontend PR feat/gallery-profile-roster-audit-polish (72c9585): its T-0183 + T-0185 consume these endpoints. No planned tasks remain (2 blocked deferred per user).",
-  "nextIdCounter": 118,
+  "lastSyncedCommit": "00a1b2beac404891342a287bc6bdd1328af027a5",
+  "lastSyncedAt": "2026-07-18T18:00:00Z",
+  "notesForNextSession": "T-0118 (POST /members/:id/unsuspend) + T-0119 (GET /storage/policy) implemented → deploy_ready (feat commit 00a1b2b, branch feat/member-unsuspend-storage-policy, STACKED on PR #12 branch feat/gallery-moderation-audit-avatars). member.unsuspend audit action seeded. Ships COUPLED with FE PR (T-0187 consumes /storage/policy; T-0188 consumes /unsuspend). CI green locally: lint/typecheck/352 unit/42 e2e. Browser-verified end-to-end (owner minted-JWT). No backend planned tasks remain (2 blocked stay blocked).",
+  "nextIdCounter": 120,
   "connections": [],
   "tasks": [
     {
@@ -7982,6 +7982,168 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        }
+      ]
+    },
+    {
+      "id": "T-0118",
+      "title": "Add POST /members/:id/unsuspend to lift an active suspension",
+      "summary": "Add an unsuspend endpoint mirroring the existing unban: clear members.suspendedUntil, write a service-record entry, and emit a new member.unsuspend audit action (seeded in audit-actions.seed.ts). Gated by Capability.ManageRoles like suspend/ban/unban, and rejects with Conflict when the member is not currently suspended. This is the backend counterpart the frontend Unsuspend button consumes.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "unsuspend",
+      "repo": "",
+      "paths": [
+        "src/members/members.controller.ts (add unsuspend route; mirror unban ~254-264, suspend ~228-239)",
+        "src/members/members.service.ts (add unsuspend(); mirror unban() ~438-456, suspend() ~348-388)",
+        "src/database/seeds/audit-actions.seed.ts (add 'member.unsuspend' beside member.suspend/ban/unban ~41-43)",
+        "src/common/enums/index.ts (Capability.ManageRoles gate ~185)",
+        "reference: src/members/entities/member.entity.ts suspendedUntil ~77-78"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0188"
+      ],
+      "questions": [
+        {
+          "q": "Should unsuspend throw ConflictException when the member is not currently suspended (mirroring unban's 'not banned' guard), and should an expired suspendedUntil (past date) count as 'not suspended' or still be clearable?",
+          "answer": "Yes — returns 409 Conflict when there is no ACTIVE suspension (suspendedUntil null OR in the past), mirroring unban's not-banned guard and matching deriveMemberStatus + the FE Unsuspend gate. An elapsed suspension counts as 'not suspended' (already lapsed → nothing to lift). assertNotOwner also runs first so the owner (never suspendable) is protected consistently with suspend/ban.",
+          "askedAt": "2026-07-18T05:30:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "POST /members/:id/unsuspend clears suspendedUntil and returns the updated member",
+          "status": "passed"
+        },
+        {
+          "desc": "Requires Capability.ManageRoles; 403 without it",
+          "status": "passed"
+        },
+        {
+          "desc": "Returns 409/Conflict when the member is not currently suspended",
+          "status": "passed"
+        },
+        {
+          "desc": "Writes a service-record entry and a member.unsuspend audit entry",
+          "status": "passed"
+        },
+        {
+          "desc": "member.unsuspend action code is seeded idempotently (re-running the seed does not duplicate or collide)",
+          "status": "passed"
+        },
+        {
+          "desc": "Owner is protected consistent with suspend/ban (assertNotOwner)",
+          "status": "passed"
+        },
+        {
+          "desc": "Unit + e2e specs mirror the unban coverage",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "audit-actions.seed.ts is shared seed data; adding member.unsuspend must be idempotent and must not collide with existing action codes",
+          "status": "resolved",
+          "notedAt": "2026-07-18T05:30:00Z",
+          "resolvedAt": "2026-07-18T18:00:00Z",
+          "resolvedBy": "claude",
+          "note": "Resolved: member.unsuspend is added through the same idempotent ensure({code}, ...) upsert as every other action code — no collision, and re-running the seed is a no-op (verified via the e2e migrate+seed run, 42 e2e green)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "00a1b2b",
+      "createdAt": "2026-07-18T05:30:00Z",
+      "updatedAt": "2026-07-18T18:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-18T05:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-18T18:00:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "implemented + verified; unit specs mirror unban (owner/conflict/elapsed/active) + e2e suspend→unsuspend→409; CI green (lint/typecheck/352 unit/42 e2e); browser-verified end-to-end. deploy_ready — ships coupled with FE T-0188."
+        }
+      ]
+    },
+    {
+      "id": "T-0119",
+      "title": "Expose the per-target storage upload policy (max size + accepted types) via API",
+      "summary": "Optional enhancement supporting the frontend upload-hints work: expose the hardcoded per-target policy in storage.service.ts TARGET_POLICY (avatar 8 MB, member/event banner 12 MB, medal/rank 4 MB, accepted MIME types) through a read endpoint (e.g. GET /api/storage/policy) so the frontend derives hints from a single source of truth instead of hardcoding. Gallery caps are already exposed via GET /api/settings. Contingent on the sourcing decision in lords-regiment-dashboard:T-0187 - only needed if the team prefers an API over hardcoded FE constants.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "platform",
+      "feature": "storage",
+      "subfeature": "policy-api",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.controller.ts (add GET /storage/policy)",
+        "src/storage/storage.service.ts (expose TARGET_POLICY ~44-67, accepted MIME ~20-29, S3_MAX_UPLOAD_MB ceiling ~124)",
+        "src/storage/dto/ (new policy response DTO)"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Is this endpoint wanted at all? The FE can hardcode the 3 stable static caps and already reads gallery caps from GET /api/settings, so this is drift-proofing, not a requirement. Build it or close as won't-do?",
+          "answer": "Built (not closed) — it is the single source of truth for the FE static upload-size/type hints, per the mandate to leave no planned task behind. The FE consumes GET /storage/policy for the avatar/banner/event caps (with a hardcoded fallback for graceful degradation) and keeps reading the admin-configurable gallery caps from GET /settings.",
+          "askedAt": "2026-07-18T05:30:00Z"
+        },
+        {
+          "q": "If built: public read or authenticated-only, and one GET /storage/policy vs folding the policy into an existing config endpoint?",
+          "answer": "Authenticated (consistent with the rest of the storage controller; every upload surface is behind auth), exposed as a dedicated GET /storage/policy rather than folded into another config endpoint.",
+          "askedAt": "2026-07-18T05:30:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "GET /api/storage/policy returns each target's max size (bytes + MB) and accepted MIME types/extensions",
+          "status": "passed"
+        },
+        {
+          "desc": "Values match TARGET_POLICY and the global accepted-MIME list in storage.service.ts",
+          "status": "passed"
+        },
+        {
+          "desc": "Response reflects the S3_MAX_UPLOAD_MB global ceiling",
+          "status": "passed"
+        },
+        {
+          "desc": "Auth/permission gating decided and enforced (public read vs authenticated)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "00a1b2b",
+      "createdAt": "2026-07-18T05:30:00Z",
+      "updatedAt": "2026-07-18T18:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-18T05:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-18T18:00:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "implemented + verified; getPolicy() returns per-target caps (min with the S3 ceiling) + accepted types; unit + e2e (shape + 401) green; FE T-0187 consumes it. deploy_ready."
         }
       ]
     }
