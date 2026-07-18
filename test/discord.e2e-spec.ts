@@ -246,6 +246,27 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .expect(201);
   });
 
+  it('suspends then unsuspends a member; a repeat unsuspend conflicts (T-0118)', async () => {
+    const until = new Date(Date.now() + 86_400_000).toISOString();
+    await request(server())
+      .post(`/api/members/${memberId}/suspend`)
+      .set(bearer(ownerToken))
+      .send({ until, reason: 'e2e cooldown' })
+      .expect(201);
+
+    const lifted = await request(server())
+      .post(`/api/members/${memberId}/unsuspend`)
+      .set(bearer(ownerToken))
+      .expect(201);
+    expect(lifted.body.suspendedUntil).toBeNull();
+
+    // No longer suspended → a second unsuspend is a 409 Conflict (mirrors unban).
+    await request(server())
+      .post(`/api/members/${memberId}/unsuspend`)
+      .set(bearer(ownerToken))
+      .expect(409);
+  });
+
   it('enqueues a role sync on rank change and drains it successfully', async () => {
     const ranks = await request(server()).get('/api/ranks').set(bearer(ownerToken)).expect(200);
     const targetRank =
