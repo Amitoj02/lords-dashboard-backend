@@ -35,6 +35,7 @@ import { EventQueryDto } from './dto/event-query.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { RevealedPasswordDto } from './dto/revealed-password.dto';
 import { RsvpDto } from './dto/rsvp.dto';
+import { RsvpRosterEntryDto } from './dto/rsvp-roster-entry.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventsService } from './events.service';
 
@@ -251,8 +252,18 @@ export class EventsController {
   revealPassword(
     @CurrentUser() user: AuthenticatedUser,
     @Param('id', ParseShortIdPipe) id: string,
-    @Req() req: Request,
   ): Promise<RevealedPasswordDto> {
-    return this.eventsService.revealPassword(user, id, req.ip ?? null);
+    return this.eventsService.revealPassword(user, id);
+  }
+
+  @Get(':id/rsvps')
+  @RequireCapability(Capability.ViewMembersDirectory)
+  @ApiOperation({ summary: "List an event's RSVP roster (member, avatar, RSVP choice)" })
+  @ApiOkResponse({ type: [RsvpRosterEntryDto], description: 'Everyone who has RSVP’d.' })
+  listRsvpRoster(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseShortIdPipe) id: string,
+  ): Promise<RsvpRosterEntryDto[]> {
+    return this.eventsService.listRsvpRoster(user, id);
   }
 }

@@ -417,6 +417,25 @@ describe('ApplicationsService', () => {
       const result = await service.findOne(STAFF, 'app-1');
       expect(result.id).toBe('app-1');
       expect(result.submittedAt).toBe('2026-06-22T18:00:00.000Z');
+      // No identity loaded → not blocked.
+      expect(result.blocked).toBe(false);
+    });
+
+    it('derives the blocked flag from the loaded identity relation (T-0128)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          discordIdentity: {
+            id: 'identity-applicant',
+            applicationsBlockedAt: new Date('2026-06-23T00:00:00.000Z'),
+          } as DiscordIdentity,
+        }),
+      );
+      // loadOrFail must eager-load the identity relation for the flag to resolve.
+      const result = await service.findOne(STAFF, 'app-1');
+      expect(applications.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ relations: { discordIdentity: true } }),
+      );
+      expect(result.blocked).toBe(true);
     });
   });
 
@@ -561,15 +580,22 @@ describe('ApplicationsService', () => {
   });
 
   describe('findAll', () => {
-    it('builds a regiment-scoped, non-draft, status-filtered, paginated query', async () => {
+    /** Chainable query-builder stub mirroring the findAll fluent chain. */
+    const findAllQb = (rows: Application[], total = rows.length) => {
       const qb: Record<string, jest.Mock> = {
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
         where: jest.fn().mockReturnThis(),
         andWhere: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         skip: jest.fn().mockReturnThis(),
         take: jest.fn().mockReturnThis(),
-        getManyAndCount: jest.fn().mockResolvedValue([[baseApplication()], 1]),
+        getManyAndCount: jest.fn().mockResolvedValue([rows, total]),
       };
+      return qb;
+    };
+
+    it('builds a regiment-scoped, non-draft, status-filtered, paginated query', async () => {
+      const qb = findAllQb([baseApplication()], 1);
       applications.createQueryBuilder!.mockReturnValue(qb);
 
       const result = await service.findAll(STAFF, {
@@ -579,6 +605,8 @@ describe('ApplicationsService', () => {
         status: ApplicationStatus.Pending,
       });
 
+      // The block flag is loaded via a single join before any filtering (T-0128).
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.discordIdentity', 'identity');
       expect(qb.where).toHaveBeenCalledWith('a.regimentId = :regimentId', {
         regimentId: 'regiment-1',
       });
@@ -589,6 +617,28 @@ describe('ApplicationsService', () => {
       expect(qb.orderBy).toHaveBeenCalledWith('a.submittedAt', 'DESC');
       expect(result.data).toHaveLength(1);
       expect(result.meta.total).toBe(1);
+    });
+
+    it('maps blocked from the joined discordIdentity relation (T-0128)', async () => {
+      const blockedRow = baseApplication({
+        id: 'app-blocked',
+        discordIdentity: {
+          id: 'identity-applicant',
+          applicationsBlockedAt: new Date('2026-06-23T00:00:00.000Z'),
+        } as DiscordIdentity,
+      });
+      // A row whose identity is present but never blocked, and one with no identity at all.
+      const clearedRow = baseApplication({
+        id: 'app-cleared',
+        discordIdentity: { id: 'identity-other', applicationsBlockedAt: null } as DiscordIdentity,
+      });
+      const orphanRow = baseApplication({ id: 'app-orphan', discordIdentity: null });
+      const qb = findAllQb([blockedRow, clearedRow, orphanRow], 3);
+      applications.createQueryBuilder!.mockReturnValue(qb);
+
+      const result = await service.findAll(STAFF, { page: 1, limit: 20, skip: 0 });
+
+      expect(result.data.map((a) => a.blocked)).toEqual([true, false, false]);
     });
   });
 });

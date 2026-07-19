@@ -1,5 +1,4 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { MedalRibbon } from '../../common/enums';
 import { Medal } from '../entities/medal.entity';
 
 /**
@@ -16,11 +15,8 @@ export class MedalDto {
   @ApiProperty()
   title: string;
 
-  @ApiProperty({ description: 'Short glyph/abbreviation (1..4 chars)' })
+  @ApiProperty({ description: 'Short glyph/abbreviation (1..4 chars), used as the fallback label' })
   glyph: string;
-
-  @ApiProperty({ enum: MedalRibbon })
-  ribbon: MedalRibbon;
 
   @ApiProperty({ nullable: true })
   description: string | null;
@@ -62,7 +58,6 @@ export class MedalDto {
     dto.id = medal.id;
     dto.title = medal.title;
     dto.glyph = medal.glyph;
-    dto.ribbon = medal.ribbon;
     dto.description = medal.description;
     dto.imageUrl = medal.imageUrl;
     dto.precedence = medal.precedence;

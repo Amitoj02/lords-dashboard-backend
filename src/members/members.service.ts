@@ -50,7 +50,7 @@ import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 /**
  * Roster read/profile + admin actions. Every query is scoped to the caller's
  * regiment (single-tenant) and excludes soft-deleted rows. Derived fields —
- * rank, chevrons, medals and confirmed attendance count — are computed
+ * rank, rank image, medals and confirmed attendance count — are computed
  * server-side; the client is never trusted for them. List lookups (attendance,
  * medals) are batched into grouped queries to avoid N+1. Every admin mutation
  * writes a service-record entry and an audit row.
@@ -835,7 +835,7 @@ export class MembersService {
         medalId: award.medalId,
         title: award.medal.title,
         glyph: award.medal.glyph,
-        ribbon: award.medal.ribbon,
+        imageUrl: award.medal.imageUrl,
         detail: award.detail,
         awardedAt: award.awardedAt.toISOString(),
       };

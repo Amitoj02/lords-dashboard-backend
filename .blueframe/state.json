@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
-  "lastSyncedAt": "2026-07-18T04:56:34Z",
-  "notesForNextSession": "Gallery moderation + audit avatars T-0115..T-0117 implemented -> deploy_ready (BE 2e082cb). T-0115 PATCH /gallery/:id (ModerateGallery) edits caption + replaces tags via bespoke UpdateGalleryItemDto (media immutable) + gallery.update audit; T-0116 StorageService.deleteObject purges MinIO objects on gallery delete (best-effort); T-0117 actorAvatarUrl+targetAvatarUrl on the audit list/findOne/CSV projection (custom>Discord>null). Seeded gallery.update action. lint/build/346 unit/39 e2e green. Local e2e gotcha: the dev .env sets a real OWNER_DISCORD_ID + DISCORD_MOCK=false — run e2e against a fresh DB with OWNER_DISCORD_ID= + DISCORD_MOCK=true (see the frontend repo memory reference-local-e2e-env). SHIP WITH frontend PR feat/gallery-profile-roster-audit-polish (72c9585): its T-0183 + T-0185 consume these endpoints. No planned tasks remain (2 blocked deferred per user).",
-  "nextIdCounter": 118,
+  "lastSyncedCommit": "400e1cc1f6ef8f8b83c4aa37d1fdcf2201ca8df8",
+  "lastSyncedAt": "2026-07-19T00:18:56Z",
+  "notesForNextSession": "Planned-tasks T-0120..T-0128 implemented -> deploy_ready (BE 400e1cc). Gallery editable title on PATCH + author-or-moderator delete; dropped ranks.chevrons + medals.ribbon (+MedalRibbon enum) via idempotent migration, member projection now exposes rankImageUrl+medal imageUrl; rank/medal icon uploads restricted to PNG+SVG (safe <img> serving + separate storage origin) with a server-authoritative 250px cap read from the stored PNG IHDR (SVG exempt); reveal-password no longer audited (historical rows retained); new GET /events/:id/rsvps roster gated on ViewMembersDirectory; applications admin projection gains a joined blocked flag (no N+1). SHIP WITH frontend branch feat/rank-medal-icons-events-polish (6da2aae). BE CI green (lint/format/build/384 unit/43 e2e); migration verified on the throwaway e2e DB + dev DB. No planned tasks remain.",
+  "nextIdCounter": 130,
   "connections": [],
   "tasks": [
     {
@@ -516,7 +516,7 @@
     },
     {
       "id": "T-0010",
-      "title": "MembersModule — roster + admin actions + GDPR",
+      "title": "MembersModule \u2014 roster + admin actions + GDPR",
       "summary": "GET /members (filter + pagination), GET/PATCH /members/:id, admin actions (change rank/role, award/remove medal, suspend, ban, unban), service-record and command-info reads, and GDPR (deletion-request + confirm + export). Derived values (chevrons, events_attended, attendance_percent) computed server-side. Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -542,7 +542,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Members admin actions now enqueue Discord sync jobs — ban→kick (gated by kickOnBan, DEFAULT OFF and re-checked at execution time) and rank/role/medal→role-sync. All best-effort (never throw to the caller) and no-op when the bot is disabled; but any change to the enqueuer/gating affects moderation + role sync.",
+          "desc": "Members admin actions now enqueue Discord sync jobs \u2014 ban\u2192kick (gated by kickOnBan, DEFAULT OFF and re-checked at execution time) and rank/role/medal\u2192role-sync. All best-effort (never throw to the caller) and no-op when the bot is disabled; but any change to the enqueuer/gating affects moderation + role sync.",
           "status": "resolved",
           "notedAt": "2026-07-11T22:00:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -580,7 +580,7 @@
     },
     {
       "id": "T-0011",
-      "title": "RanksModule — CRUD + reorder + link-discord",
+      "title": "RanksModule \u2014 CRUD + reorder + link-discord",
       "summary": "Ranks CRUD, precedence reorder, and Discord-role link fields (the sync itself lands with the bot). Entity + seed exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -642,7 +642,7 @@
     },
     {
       "id": "T-0012",
-      "title": "MedalsModule — CRUD + link-discord",
+      "title": "MedalsModule \u2014 CRUD + link-discord",
       "summary": "Medals catalog CRUD and Discord-role link fields; holders_count derived server-side. Entity + seed exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -760,7 +760,7 @@
     },
     {
       "id": "T-0014",
-      "title": "ApplicationsModule — intake + decisions + promote",
+      "title": "ApplicationsModule \u2014 intake + decisions + promote",
       "summary": "Public POST /applications intake, admin list/detail, approve/decline/hold with moderator_note + discord_dm_message. Approve promotes to a members row (link identity, default rank, role=Member, set promoted_member_id, service-record + audit). Honors open_recruitment and reapplication detection. Entity exists; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -817,7 +817,7 @@
     },
     {
       "id": "T-0015",
-      "title": "EventsModule — CRUD + RSVP + attendees + password reveal",
+      "title": "EventsModule \u2014 CRUD + RSVP + attendees + password reveal",
       "summary": "Events CRUD (+ draft/archive), child writes for platforms/tags/notify_offsets, RSVP, attendee check-in, and the sensitive POST /:id/reveal-password (gated on RSVP + reveal_event_passwords capability, decrypts server_password, writes an audit row). Public vs member serialization; a scheduled job advances status upcoming->ongoing->previous. Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -872,7 +872,7 @@
     },
     {
       "id": "T-0016",
-      "title": "GalleryModule — submit + moderation + likes",
+      "title": "GalleryModule \u2014 submit + moderation + likes",
       "summary": "POST /gallery submit (forces pending), public GET (approved only) + filters, approve/decline moderation (auto_approve_trusted honored), like toggle, tagged members, soft-delete. Stores file URLs/refs only in v1; enforces regiment_settings size/type limits. Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -927,7 +927,7 @@
     },
     {
       "id": "T-0017",
-      "title": "AuditModule — read-only ledger",
+      "title": "AuditModule \u2014 read-only ledger",
       "summary": "GET /audit (filter severity/actor/action/date + search + pagination), GET /audit/:id (before/after drawer), GET /audit/export (CSV). Append-only, no write API (writes come from T-0007). Entities exist; read module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -982,8 +982,8 @@
     },
     {
       "id": "T-0018",
-      "title": "NotificationsModule — field dispatches",
-      "summary": "GET /notifications, POST /notifications (compose — admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
+      "title": "NotificationsModule \u2014 field dispatches",
+      "summary": "GET /notifications, POST /notifications (compose \u2014 admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -1037,7 +1037,7 @@
     },
     {
       "id": "T-0019",
-      "title": "SettingsModule — config + permissions matrix + hazardous ops",
+      "title": "SettingsModule \u2014 config + permissions matrix + hazardous ops",
       "summary": "GET/PATCH /settings (profile, visibility toggles, gallery/event defaults, Holdfast server, backups/retention), GET/PATCH /settings/permissions (edit the role_permissions matrix that CapabilitiesGuard reads), and hazardous ops: transfer-ownership, transfer-discord, dissolve. regiment_settings entity exists; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -1156,7 +1156,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created during bf-init; Phase 07 — new schema + net-new bot runtime"
+          "note": "created during bf-init; Phase 07 \u2014 new schema + net-new bot runtime"
         },
         {
           "at": "2026-07-11T22:00:00Z",
@@ -1235,7 +1235,7 @@
     {
       "id": "T-0022",
       "title": "Bot onboarding automation + slash commands",
-      "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami — resolve against the same services, ephemeral responses.",
+      "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami \u2014 resolve against the same services, ephemeral responses.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -1266,7 +1266,7 @@
       ],
       "regressionRisk": [],
       "skippedByClaude": [
-        "Slash commands (/roster /event /apply /whoami) — owner decided (T-0027) the bot is role-sync + announcements only; members use the webapp. Reaction-roles also deferred (T-0027 Q3)."
+        "Slash commands (/roster /event /apply /whoami) \u2014 owner decided (T-0027) the bot is role-sync + announcements only; members use the webapp. Reaction-roles also deferred (T-0027 Q3)."
       ],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
@@ -1284,7 +1284,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Built MOCK-first with REDUCED scope per owner (T-0027): NO slash commands — onboarding is welcome + auto-assign the Guest join role only. Real GuildMemberAdd wiring is in RealDiscordGateway; exercised via a mock simulate endpoint. PR #4."
+          "note": "Built MOCK-first with REDUCED scope per owner (T-0027): NO slash commands \u2014 onboarding is welcome + auto-assign the Guest join role only. Real GuildMemberAdd wiring is in RealDiscordGateway; exercised via a mock simulate endpoint. PR #4."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -1330,7 +1330,7 @@
       "regressionRisk": [],
       "skippedByClaude": [
         "Live cross-stack bot E2E + prod re-deploy remain BLOCKED on T-0032 (owner must provision VPS/domain/TLS + run the prod deploy). The /security-review portion was run this session.",
-        "Live production deploy + real-Discord post-deploy smoke — No production environment / live Discord app in this session; depends on the blocked T-0032 (MVP prod deploy)."
+        "Live production deploy + real-Discord post-deploy smoke \u2014 No production environment / live Discord app in this session; depends on the blocked T-0032 (MVP prod deploy)."
       ],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T00:50:59Z",
@@ -1383,13 +1383,13 @@
           "from": "planned",
           "to": "blocked",
           "by": "claude",
-          "note": "Go-live task: code-side prerequisites complete (all planned feature tasks deploy_ready; cross-stack API contract verified live). Remaining work — production deploy (blocked T-0032), live Discord production app config, and post-deploy smoke against a live guild — requires the production environment and cannot be done in a code session."
+          "note": "Go-live task: code-side prerequisites complete (all planned feature tasks deploy_ready; cross-stack API contract verified live). Remaining work \u2014 production deploy (blocked T-0032), live Discord production app config, and post-deploy smoke against a live guild \u2014 requires the production environment and cannot be done in a code session."
         }
       ]
     },
     {
       "id": "T-0026",
-      "title": "Questionnaire — domain model decisions",
+      "title": "Questionnaire \u2014 domain model decisions",
       "summary": "Open product decisions that shape seeding and validation before Phase 02 builds on them.",
       "status": "archived",
       "type": "question",
@@ -1467,13 +1467,13 @@
           "from": "in_progress",
           "to": "archived",
           "by": "claude",
-          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action — archived as a completed questionnaire."
+          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action \u2014 archived as a completed questionnaire."
         }
       ]
     },
     {
       "id": "T-0027",
-      "title": "Questionnaire — Discord / bot decisions",
+      "title": "Questionnaire \u2014 Discord / bot decisions",
       "summary": "Open decisions that shape the Discord bot phases (07-09) and the new migration.",
       "status": "archived",
       "type": "question",
@@ -1495,7 +1495,7 @@
           "answeredAt": "2026-07-11T02:42:39.092Z"
         },
         {
-          "q": "Join role: which Discord role does the bot auto-assign on join — Applicant, a 'Guest', or none?",
+          "q": "Join role: which Discord role does the bot auto-assign on join \u2014 Applicant, a 'Guest', or none?",
           "answer": "Guest",
           "askedAt": "2026-07-11T00:50:59Z",
           "answeredAt": "2026-07-11T02:42:44.752Z"
@@ -1552,13 +1552,13 @@
           "from": "in_progress",
           "to": "archived",
           "by": "claude",
-          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action — archived as a completed questionnaire."
+          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action \u2014 archived as a completed questionnaire."
         }
       ]
     },
     {
       "id": "T-0028",
-      "title": "Questionnaire — product flows & ops/deploy",
+      "title": "Questionnaire \u2014 product flows & ops/deploy",
       "summary": "Open product-flow and deployment decisions needed before Phase 12 (and some feature phases).",
       "status": "archived",
       "type": "question",
@@ -1653,14 +1653,14 @@
           "from": "in_progress",
           "to": "archived",
           "by": "claude",
-          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action — archived as a completed questionnaire."
+          "note": "Resolved: every question is answered and its answer has been consumed by shipped builds (MVP + post-MVP hardening + the guilds-scope removal + the applicant self-service epic). No further action \u2014 archived as a completed questionnaire."
         }
       ]
     },
     {
       "id": "T-0029",
       "title": "Containerize all config + purge XAMPP (zero-config `up`)",
-      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology — DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
+      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology \u2014 DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
       "status": "deployed",
       "type": "chore",
       "size": "M",
@@ -1684,7 +1684,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` — no XAMPP, no host MySQL/Node, no hand-edited secrets",
+          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` \u2014 no XAMPP, no host MySQL/Node, no hand-edited secrets",
           "status": "passed"
         },
         {
@@ -1741,7 +1741,7 @@
     {
       "id": "T-0030",
       "title": "Containerized DB bootstrap & migration workflow (dev + prod)",
-      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id — the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
+      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id \u2014 the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
       "status": "deployed",
       "type": "infra",
       "size": "L",
@@ -1814,7 +1814,7 @@
     {
       "id": "T-0031",
       "title": "Fully-containerized dev workflow (devcontainer + hot reload, api + web)",
-      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too — bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
+      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too \u2014 bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -1891,7 +1891,7 @@
     {
       "id": "T-0032",
       "title": "MVP production deploy (unified prod compose)",
-      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs — register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost — a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025).",
+      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs \u2014 register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost \u2014 a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025).",
       "status": "blocked",
       "type": "infra",
       "size": "L",
@@ -1971,8 +1971,8 @@
     },
     {
       "id": "T-0033",
-      "title": "Real Discord bot go-live (mock → real gateway + creds)",
-      "summary": "Swap the mock gateway/OAuth for the real Discord app when the owner provides credentials: set DISCORD_MOCK/DISCORD_BOT_MOCK=false + tokens, register the redirect URI, enable the GUILD_MEMBERS intent, position the bot role, wire channels/join-role from the admin UI, and RE-REVIEW the sensitive ban→kick (kickOnBan) with the owner before enabling it. Runbook: project-plan/DISCORD_GOLIVE.md. Then post-go-live smoke (real sign-in, one role sync, one announcement).",
+      "title": "Real Discord bot go-live (mock \u2192 real gateway + creds)",
+      "summary": "Swap the mock gateway/OAuth for the real Discord app when the owner provides credentials: set DISCORD_MOCK/DISCORD_BOT_MOCK=false + tokens, register the redirect URI, enable the GUILD_MEMBERS intent, position the bot role, wire channels/join-role from the admin UI, and RE-REVIEW the sensitive ban\u2192kick (kickOnBan) with the owner before enabling it. Runbook: project-plan/DISCORD_GOLIVE.md. Then post-go-live smoke (real sign-in, one role sync, one announcement).",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -1999,7 +1999,7 @@
           "answeredAt": "2026-07-12T00:54:54.294Z"
         },
         {
-          "q": "Confirm (re-review) whether to enable kickOnBan in production — an app ban would then also kick the member from the Discord guild.",
+          "q": "Confirm (re-review) whether to enable kickOnBan in production \u2014 an app ban would then also kick the member from the Discord guild.",
           "answer": "no, check latest tasks on blueframe",
           "askedAt": "2026-07-11T22:00:00Z",
           "answeredAt": "2026-07-12T00:55:18.808Z"
@@ -2115,7 +2115,7 @@
     },
     {
       "id": "T-0035",
-      "title": "Replace ban→kick with strip-roles + apply Ban role",
+      "title": "Replace ban\u2192kick with strip-roles + apply Ban role",
       "summary": "Remove the KICK_MEMBERS-dependent `kickMember` path. On an app-side ban the bot instead removes the member's managed Discord roles and assigns the configured Ban role. Rename the `kickOnBan` gate to `applyBanRoleOnBan` (keep the enqueue-time + drain-time double gate), swap the `member.kick` job type/audit action for `member.ban_role`, and drop `kickMember` from the gateway abstraction and both implementations.",
       "status": "deployed",
       "type": "feature",
@@ -2148,7 +2148,7 @@
       ],
       "questions": [
         {
-          "q": "Rename kickOnBan → applyBanRoleOnBan (breaking DTO field change), or keep the field name and only change behaviour?",
+          "q": "Rename kickOnBan \u2192 applyBanRoleOnBan (breaking DTO field change), or keep the field name and only change behaviour?",
           "answer": "Yes, replace it.",
           "askedAt": "2026-07-11T00:00:00Z",
           "answeredAt": "2026-07-12T00:49:50.594Z"
@@ -2178,7 +2178,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "settings DTO contract changes (kickOnBan field removed/renamed, member.kick job+audit retired) — the Angular Settings page and any consumers of the audit action string must be updated in lockstep",
+          "desc": "settings DTO contract changes (kickOnBan field removed/renamed, member.kick job+audit retired) \u2014 the Angular Settings page and any consumers of the audit action string must be updated in lockstep",
           "status": "resolved",
           "notedAt": "2026-07-11T00:00:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -2217,7 +2217,7 @@
     {
       "id": "T-0036",
       "title": "Drop KICK_MEMBERS from bot invite + refresh go-live docs",
-      "summary": "The bot now only needs Manage Roles + Send Messages, so remove Kick Members from the invite instructions and the permissions integer (268437506 → 268437504), and rewrite the 'ban → kick' section of the go-live runbook to describe the Ban-role flow and the renamed setting. Update README and .env.example bot comments to match.",
+      "summary": "The bot now only needs Manage Roles + Send Messages, so remove Kick Members from the invite instructions and the permissions integer (268437506 \u2192 268437504), and rewrite the 'ban \u2192 kick' section of the go-live runbook to describe the Ban-role flow and the renamed setting. Update README and .env.example bot comments to match.",
       "status": "deployed",
       "type": "chore",
       "size": "S",
@@ -2281,8 +2281,8 @@
     },
     {
       "id": "T-0037",
-      "title": "Raise minimum-age requirement 16 → 18 (API copy + schema doc)",
-      "summary": "Applications intake gates only on a boolean `ageConfirmed` self-attestation (@Equals(true)) — there is no stored birthdate or numeric age check. Update every backend statement of the '16' requirement to 18: the create-application DTO's `ageConfirmed` ApiProperty/description and the SCHEMA.md `age_confirmed` note (≥16 consent → ≥18). No migration or logic change.",
+      "title": "Raise minimum-age requirement 16 \u2192 18 (API copy + schema doc)",
+      "summary": "Applications intake gates only on a boolean `ageConfirmed` self-attestation (@Equals(true)) \u2014 there is no stored birthdate or numeric age check. Update every backend statement of the '16' requirement to 18: the create-application DTO's `ageConfirmed` ApiProperty/description and the SCHEMA.md `age_confirmed` note (\u226516 consent \u2192 \u226518). No migration or logic change.",
       "status": "archived",
       "type": "chore",
       "size": "XS",
@@ -2299,7 +2299,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "The backend enforces no numeric age — `ageConfirmed` is an attestation-only boolean. Is updating the stated requirement to 18 sufficient, or should we also add a real age/DOB gate (new field + validation + migration)?",
+          "q": "The backend enforces no numeric age \u2014 `ageConfirmed` is an attestation-only boolean. Is updating the stated requirement to 18 sufficient, or should we also add a real age/DOB gate (new field + validation + migration)?",
           "answer": "No need of real age check, it is mere terms and conditions and regiment rule that states the user should be 18+",
           "askedAt": "2026-07-11T22:30:00Z",
           "answeredAt": "2026-07-12T00:50:28.014Z"
@@ -2315,13 +2315,13 @@
           "status": "passed"
         },
         {
-          "desc": "grep across src + docs shows no remaining '16'/'≥16' age wording (SCHEMA.md age_confirmed reads ≥18)",
+          "desc": "grep across src + docs shows no remaining '16'/'\u226516' age wording (SCHEMA.md age_confirmed reads \u226518)",
           "status": "passed"
         }
       ],
       "regressionRisk": [
         {
-          "desc": "the frontend apply-form label still displays '16 years of age or older' until the companion T-0038 ships — client/API copy drift; the two must ship together",
+          "desc": "the frontend apply-form label still displays '16 years of age or older' until the companion T-0038 ships \u2014 client/API copy drift; the two must ship together",
           "status": "resolved",
           "notedAt": "2026-07-11T22:30:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -2339,7 +2339,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created via bf-plan: change minimum age requirement 16 → 18 (backend copy + schema doc)"
+          "note": "created via bf-plan: change minimum age requirement 16 \u2192 18 (backend copy + schema doc)"
         },
         {
           "at": "2026-07-12T02:35:00Z",
@@ -2352,8 +2352,8 @@
     },
     {
       "id": "T-0038",
-      "title": "Sync apply-form age copy 16 → 18 (frontend companion)",
-      "summary": "Cross-repo companion to T-0037 in the Angular app. Update the application-form age-confirmation checkbox label ('I confirm that I am 16 years of age or older …') to 18 in lords-regiment-dashboard so the client-facing requirement matches the API. Copy-only; ships with T-0037. Implementation lands in the frontend repo (src/app/features/onboarding/application-form/application-form.component.html); tracked here for coordination.",
+      "title": "Sync apply-form age copy 16 \u2192 18 (frontend companion)",
+      "summary": "Cross-repo companion to T-0037 in the Angular app. Update the application-form age-confirmation checkbox label ('I confirm that I am 16 years of age or older \u2026') to 18 in lords-regiment-dashboard so the client-facing requirement matches the API. Copy-only; ships with T-0037. Implementation lands in the frontend repo (src/app/features/onboarding/application-form/application-form.component.html); tracked here for coordination.",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -2389,7 +2389,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created via bf-plan: frontend companion to T-0037 (apply-form age label 16 → 18)"
+          "note": "created via bf-plan: frontend companion to T-0037 (apply-form age label 16 \u2192 18)"
         },
         {
           "at": "2026-07-12T02:35:00Z",
@@ -2410,7 +2410,7 @@
     {
       "id": "T-0039",
       "title": "Reshape applications intake to the current enlistment-form fields",
-      "summary": "Replace the generic application questions with the regiment's real 'Application for Enlistment' fields (per the live Discord form): keep inGameName; convert howFound from a constrained enum to the free-text 'How did you find/hear about the Lords of Holdfast?'; add currentRegiment, preferredClasses, skillsToImprove, an interest/enlist-in-game confirmation, and an optional representative/guest note; drop whyJoin and the fields the form no longer collects (platform, timezone, priorExperience, applicantType). Touches the entity, a new idempotent migration, CreateApplicationDto validation, the ApplicationDto projection, the service mapping + reapplication detection, SCHEMA.md §3.5, and the enum barrel. Unit + e2e specs updated.",
+      "summary": "Replace the generic application questions with the regiment's real 'Application for Enlistment' fields (per the live Discord form): keep inGameName; convert howFound from a constrained enum to the free-text 'How did you find/hear about the Lords of Holdfast?'; add currentRegiment, preferredClasses, skillsToImprove, an interest/enlist-in-game confirmation, and an optional representative/guest note; drop whyJoin and the fields the form no longer collects (platform, timezone, priorExperience, applicantType). Touches the entity, a new idempotent migration, CreateApplicationDto validation, the ApplicationDto projection, the service mapping + reapplication detection, SCHEMA.md \u00a73.5, and the enum barrel. Unit + e2e specs updated.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -2434,13 +2434,13 @@
       "blocks": [],
       "questions": [
         {
-          "q": "The live form (Discord embed) drops platform, timezone, priorExperience, whyJoin and age confirmation, and asks howFound as free text. Confirm the exact final field set: (a) hard-drop those columns vs keep them nullable/hidden; (b) convert howFound enum → free text (retires the how_found enum + derived label); (c) keep or drop applicantType (Applicant/Mercenary) given the new 'representative/guest note' question.",
+          "q": "The live form (Discord embed) drops platform, timezone, priorExperience, whyJoin and age confirmation, and asks howFound as free text. Confirm the exact final field set: (a) hard-drop those columns vs keep them nullable/hidden; (b) convert howFound enum \u2192 free text (retires the how_found enum + derived label); (c) keep or drop applicantType (Applicant/Mercenary) given the new 'representative/guest note' question.",
           "answer": "You are free to do anything with database since it is not deployed. we dont have production data so do whatever you want.",
           "askedAt": "2026-07-11T23:15:00Z",
           "answeredAt": "2026-07-12T00:51:09.982Z"
         },
         {
-          "q": "The new form has no age gate, but T-0037/T-0038 are raising the stated minimum age 16 → 18. Should ageConfirmed be removed entirely (superseding T-0037/T-0038), kept as a separate checkbox alongside the new questions, or handled some other way?",
+          "q": "The new form has no age gate, but T-0037/T-0038 are raising the stated minimum age 16 \u2192 18. Should ageConfirmed be removed entirely (superseding T-0037/T-0038), kept as a separate checkbox alongside the new questions, or handled some other way?",
           "answer": "it is frontend concern, backend should not be invovled for this",
           "askedAt": "2026-07-11T23:15:00Z",
           "answeredAt": "2026-07-12T00:51:36.911Z"
@@ -2573,7 +2573,7 @@
     {
       "id": "T-0041",
       "title": "Per-purpose Discord channel routing (settings + channel picker)",
-      "summary": "Extend discord_bot_settings with three configurable, admin-editable target channels — enlistments, audit log, and event announcements — alongside the existing announcement/welcome channels. Add a `listChannels()` gateway capability + a text-channel picker surfaced through verify-connection (mirroring the role picker), expose the new ids/names on the settings DTO GET/PATCH, and a new idempotent migration + seed that pre-fills the default channel names (#new-enlistments, #audit-logs, #event-announcements). This is the foundation the three producers (T-0042/T-0043/T-0044) route through.",
+      "summary": "Extend discord_bot_settings with three configurable, admin-editable target channels \u2014 enlistments, audit log, and event announcements \u2014 alongside the existing announcement/welcome channels. Add a `listChannels()` gateway capability + a text-channel picker surfaced through verify-connection (mirroring the role picker), expose the new ids/names on the settings DTO GET/PATCH, and a new idempotent migration + seed that pre-fills the default channel names (#new-enlistments, #audit-logs, #event-announcements). This is the foundation the three producers (T-0042/T-0043/T-0044) route through.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -2691,7 +2691,7 @@
           "status": "passed"
         },
         {
-          "desc": "with botEnabled=false (or enqueue failure) submit still succeeds and enqueues nothing — best-effort, never throws to the applicant",
+          "desc": "with botEnabled=false (or enqueue failure) submit still succeeds and enqueues nothing \u2014 best-effort, never throws to the applicant",
           "status": "passed"
         },
         {
@@ -2701,12 +2701,12 @@
       ],
       "regressionRisk": [
         {
-          "desc": "ApplicationsService gains a new dependency on the Discord sync service — the public POST /applications path must stay best-effort so a bot/enqueue failure can never break intake",
+          "desc": "ApplicationsService gains a new dependency on the Discord sync service \u2014 the public POST /applications path must stay best-effort so a bot/enqueue failure can never break intake",
           "status": "resolved",
           "notedAt": "2026-07-11T23:45:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
           "resolvedBy": "claude",
-          "note": "ApplicationsService enqueue is guarded/best-effort (never throws, no-ops when the bot is off) — public POST /applications intake cannot be broken by a bot/enqueue failure. Verified."
+          "note": "ApplicationsService enqueue is guarded/best-effort (never throws, no-ops when the bot is off) \u2014 public POST /applications intake cannot be broken by a bot/enqueue failure. Verified."
         }
       ],
       "skippedByClaude": [],
@@ -2763,7 +2763,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "Audit is high-volume: which entries should cross-post to #audit-logs — every entry, or only a filtered set (e.g. warning/critical severity + key moderation/settings actions)? And should posts be batched/throttled to stay within the Discord channel rate limit?",
+          "q": "Audit is high-volume: which entries should cross-post to #audit-logs \u2014 every entry, or only a filtered set (e.g. warning/critical severity + key moderation/settings actions)? And should posts be batched/throttled to stay within the Discord channel rate limit?",
           "answer": "every entry",
           "askedAt": "2026-07-11T23:45:00Z",
           "answeredAt": "2026-07-12T00:53:19.374Z"
@@ -3006,7 +3006,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "every protected route depends on this resolver — a bug breaks all authorization, and an uncached lookup adds a DB round-trip to every authenticated request (perf).",
+          "desc": "every protected route depends on this resolver \u2014 a bug breaks all authorization, and an uncached lookup adds a DB round-trip to every authenticated request (perf).",
           "status": "resolved",
           "notedAt": "2026-07-11T23:55:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -3075,7 +3075,7 @@
       ],
       "testPlan": [
         {
-          "desc": "a freshly issued JWT decodes to exactly { sub, did, iat, exp } — rid, role and mid are absent",
+          "desc": "a freshly issued JWT decodes to exactly { sub, did, iat, exp } \u2014 rid, role and mid are absent",
           "status": "passed"
         },
         {
@@ -3093,7 +3093,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "the JWT payload is a public contract — any code (or the frontend) that decodes role/rid/mid out of the raw token will break; must confirm no consumer reads token claims directly.",
+          "desc": "the JWT payload is a public contract \u2014 any code (or the frontend) that decodes role/rid/mid out of the raw token will break; must confirm no consumer reads token claims directly.",
           "status": "resolved",
           "notedAt": "2026-07-11T23:55:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -3218,8 +3218,8 @@
     },
     {
       "id": "T-0049",
-      "title": "Frontend companion — treat /auth/me as the sole source of role/membership",
-      "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): ensure no authorization decision decodes role/regiment/membership out of the raw JWT (those claims are being removed), and that the app re-hydrates from GET /auth/me as the single source of truth — including after an applicant is approved, so the promoted member sees Member access without a manual re-login. Tracked here for coordination; implementation lands in the frontend repo.",
+      "title": "Frontend companion \u2014 treat /auth/me as the sole source of role/membership",
+      "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): ensure no authorization decision decodes role/regiment/membership out of the raw JWT (those claims are being removed), and that the app re-hydrates from GET /auth/me as the single source of truth \u2014 including after an applicant is approved, so the promoted member sees Member access without a manual re-login. Tracked here for coordination; implementation lands in the frontend repo.",
       "status": "deployed",
       "type": "chore",
       "size": "S",
@@ -3346,7 +3346,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3408,7 +3408,7 @@
           "notedAt": "2026-07-12T15:23:11Z",
           "resolvedAt": "2026-07-12T19:02:09Z",
           "resolvedBy": "claude",
-          "note": "Resolved: no code branches on the stored `scopes` string value (grep-confirmed — only writes). Existing `identify email guilds` rows are inert; the next sign-in overwrites with `identify email`. dev-owner seed updated."
+          "note": "Resolved: no code branches on the stored `scopes` string value (grep-confirmed \u2014 only writes). Existing `identify email guilds` rows are inert; the next sign-in overwrites with `identify email`. dev-owner seed updated."
         }
       ],
       "skippedByClaude": [],
@@ -3428,7 +3428,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3492,7 +3492,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3564,7 +3564,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3611,7 +3611,7 @@
           "status": "passed"
         },
         {
-          "desc": "full unit + e2e suite green; verified live end-to-end (submit → mine → edit)",
+          "desc": "full unit + e2e suite green; verified live end-to-end (submit \u2192 mine \u2192 edit)",
           "status": "passed"
         }
       ],
@@ -3635,7 +3635,7 @@
           "from": null,
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Built GET /applications/mine + PATCH /applications/mine (apply_to_join, scoped to the caller's Discord identity; edit only a PENDING app, re-bumps the officer queue). 226 unit + 35 e2e green; verified live via JWT smoke (submit→mine→edit round-trips). Frontend status page + edit form shipped in lockstep (lords-regiment-dashboard:T-0028/29/31)."
+          "note": "Built GET /applications/mine + PATCH /applications/mine (apply_to_join, scoped to the caller's Discord identity; edit only a PENDING app, re-bumps the officer queue). 226 unit + 35 e2e green; verified live via JWT smoke (submit\u2192mine\u2192edit round-trips). Frontend status page + edit form shipped in lockstep (lords-regiment-dashboard:T-0028/29/31)."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3680,7 +3680,7 @@
           "status": "passed"
         },
         {
-          "desc": "a blocked identity is refused a new submit (403) — checked before recruitment/priors",
+          "desc": "a blocked identity is refused a new submit (403) \u2014 checked before recruitment/priors",
           "status": "passed"
         },
         {
@@ -3708,14 +3708,14 @@
           "from": null,
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Built the applicant blocklist: POST /applications/:id/{block,unblock} (manage_applications) set/clear applications_blocked_* on discord_identities (idempotent migration), and submit() rejects a blocked identity FIRST. Audited (application.block/unblock seeded). Verified live: block → applicant sees blocked + resubmit 403; applicant-block 403; unblock clears. Frontend admin block UI shipped in lockstep."
+          "note": "Built the applicant blocklist: POST /applications/:id/{block,unblock} (manage_applications) set/clear applications_blocked_* on discord_identities (idempotent migration), and submit() rejects a blocked identity FIRST. Audited (application.block/unblock seeded). Verified live: block \u2192 applicant sees blocked + resubmit 403; applicant-block 403; unblock clears. Frontend admin block UI shipped in lockstep."
         },
         {
           "at": "2026-07-12T19:12:00Z",
           "from": "deploy_ready",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Security-review hardening: blocking now also declines any open (Pending/Held) application by that identity and updateMine rejects a blocked identity — so a blocked applicant can no longer PATCH-spam the officer queue or be approved despite the block. e2e asserts block→declined + PATCH-while-blocked 403."
+          "note": "Security-review hardening: blocking now also declines any open (Pending/Held) application by that identity and updateMine rejects a blocked identity \u2014 so a blocked applicant can no longer PATCH-spam the officer queue or be approved despite the block. e2e asserts block\u2192declined + PATCH-while-blocked 403."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3764,12 +3764,12 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Settings contract gains setupComplete + a flip endpoint; the frontend first-run routing (Owner → admin settings) must consume it.",
+          "desc": "Settings contract gains setupComplete + a flip endpoint; the frontend first-run routing (Owner \u2192 admin settings) must consume it.",
           "status": "resolved",
           "notedAt": "2026-07-12T19:02:09Z",
           "resolvedAt": "2026-07-12T19:02:09Z",
           "resolvedBy": "claude",
-          "note": "Frontend first-run routing (routeAfterLogin: Owner + setupComplete=false → /admin/settings) shipped in lockstep on lords-regiment-dashboard:T-0037."
+          "note": "Frontend first-run routing (routeAfterLogin: Owner + setupComplete=false \u2192 /admin/settings) shipped in lockstep on lords-regiment-dashboard:T-0037."
         }
       ],
       "skippedByClaude": [],
@@ -3796,7 +3796,7 @@
     {
       "id": "T-0057",
       "title": "Drop OWNER_NAME env; default the seeded Owner display name to \"Admin\"",
-      "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY — the non-member /auth/me fallback ('Recruit') is left unchanged.",
+      "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY \u2014 the non-member /auth/me fallback ('Recruit') is left unchanged.",
       "status": "deployed",
       "type": "chore",
       "size": "S",
@@ -3814,7 +3814,7 @@
       ],
       "questions": [
         {
-          "q": "\"Default name Admin for all\" — does this also change the non-member /auth/me identity fallback (currently 'Recruit' in auth.service.toIdentityProjection), or only seeded member/owner names? Assuming member/owner names only.",
+          "q": "\"Default name Admin for all\" \u2014 does this also change the non-member /auth/me identity fallback (currently 'Recruit' in auth.service.toIdentityProjection), or only seeded member/owner names? Assuming member/owner names only.",
           "answer": "Seeded Owner only. Do NOT change the 'Recruit' identity fallback in auth.service.toIdentityProjection; 'Admin' applies solely to the seeded Owner's member.name / identity.globalName.",
           "askedAt": "2026-07-12T00:00:00Z",
           "answeredAt": "2026-07-12T00:00:00Z"
@@ -3838,7 +3838,7 @@
           "status": "passed"
         },
         {
-          "desc": "non-member /auth/me still falls back to 'Recruit' (unchanged) — no regression to the applicant projection",
+          "desc": "non-member /auth/me still falls back to 'Recruit' (unchanged) \u2014 no regression to the applicant projection",
           "status": "passed"
         }
       ],
@@ -3969,7 +3969,7 @@
     {
       "id": "T-0059",
       "title": "Applicant decision DM (custom Discord DM on approve/decline/hold)",
-      "summary": "New DiscordSyncJobType.ApplicationDecision + enqueueApplicationDecision; approve/decline/hold accept an optional discordDmMessage and best-effort enqueue a DM to the applicant’s linked Discord identity (empty message -> per-decision default template). Never blocks or rolls back the decision. Frontend counterpart of lords-regiment-dashboard:T-0045.",
+      "summary": "New DiscordSyncJobType.ApplicationDecision + enqueueApplicationDecision; approve/decline/hold accept an optional discordDmMessage and best-effort enqueue a DM to the applicant\u2019s linked Discord identity (empty message -> per-decision default template). Never blocks or rolls back the decision. Frontend counterpart of lords-regiment-dashboard:T-0045.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -4825,8 +4825,8 @@
     },
     {
       "id": "T-0072",
-      "title": "Events: remove save-as-draft — creation publishes directly",
-      "summary": "Eliminate the draft workflow: stop accepting isDraft on create (always published), retire the POST /events/:id/publish route, and make the public isDraft=false read filter a harmless no-op. Because create() already announces to Discord only for non-draft events, every create will now enqueue an event-announcement to the configured channel — intended per the direct-publish goal. Coordinated with the frontend removing the 'Save draft' button and the isDraft/publish() service calls.",
+      "title": "Events: remove save-as-draft \u2014 creation publishes directly",
+      "summary": "Eliminate the draft workflow: stop accepting isDraft on create (always published), retire the POST /events/:id/publish route, and make the public isDraft=false read filter a harmless no-op. Because create() already announces to Discord only for non-draft events, every create will now enqueue an event-announcement to the configured channel \u2014 intended per the direct-publish goal. Coordinated with the frontend removing the 'Save draft' button and the isDraft/publish() service calls.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -4865,7 +4865,7 @@
         }
       ],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -4897,7 +4897,7 @@
     {
       "id": "T-0073",
       "title": "Events: authenticated member read endpoint (member projection + myRsvp)",
-      "summary": "Add an auth-guarded events read that returns the member projection (server binding, notifyOffsets, myRsvp, recurrence fields, timestamps) so normal members at /dashboard/events see their own RSVP and server details. Either add GET /events/mine (+ auth-aware detail) or make the existing @Public() GET / and GET /:id optionally-authenticated (detect JWT → include member fields when the caller is enrolled). Reads require no write capability; server_password is still never serialized (only reveal-password returns it).",
+      "summary": "Add an auth-guarded events read that returns the member projection (server binding, notifyOffsets, myRsvp, recurrence fields, timestamps) so normal members at /dashboard/events see their own RSVP and server details. Either add GET /events/mine (+ auth-aware detail) or make the existing @Public() GET / and GET /:id optionally-authenticated (detect JWT \u2192 include member fields when the caller is enrolled). Reads require no write capability; server_password is still never serialized (only reveal-password returns it).",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -4936,7 +4936,7 @@
         }
       ],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -5038,7 +5038,7 @@
     {
       "id": "T-0075",
       "title": "Events: recurring-occurrence generation cron (materialize real rows, timezone-accurate)",
-      "summary": "A scheduled generator (mirroring the existing guarded setInterval EventStatusScheduler pattern — no new dependency) that, per active recurring template, materializes each upcoming occurrence as its OWN real event row ahead of time on a rolling horizon, so each occurrence carries its own RSVP/attendance (no 'RSVP problem', no bulk pre-creation of X duplicates). Occurrence start times are computed in the template's IANA timezone (default EST/America/New_York) so DST and local wall-clock are correct in every timezone. Idempotent (never double-creates). Honors live template state on each run: recurrenceActive=false stops generation and cadence changes take effect going forward; optionally prunes future not-yet-passed generated occurrences on stop/cadence change.",
+      "summary": "A scheduled generator (mirroring the existing guarded setInterval EventStatusScheduler pattern \u2014 no new dependency) that, per active recurring template, materializes each upcoming occurrence as its OWN real event row ahead of time on a rolling horizon, so each occurrence carries its own RSVP/attendance (no 'RSVP problem', no bulk pre-creation of X duplicates). Occurrence start times are computed in the template's IANA timezone (default EST/America/New_York) so DST and local wall-clock are correct in every timezone. Idempotent (never double-creates). Honors live template state on each run: recurrenceActive=false stops generation and cadence changes take effect going forward; optionally prunes future not-yet-passed generated occurrences on stop/cadence change.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -5072,7 +5072,7 @@
           "status": "passed"
         },
         {
-          "desc": "setting recurrenceActive=false stops further generation; changing cadence daily→monthly is reflected on the next run",
+          "desc": "setting recurrenceActive=false stops further generation; changing cadence daily\u2192monthly is reflected on the next run",
           "status": "passed"
         },
         {
@@ -5169,7 +5169,7 @@
         }
       ],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -5201,7 +5201,7 @@
     {
       "id": "T-0077",
       "title": "Discord: expose bot status to STAFF (Owner/Admin/Moderator) for the dashboard widget",
-      "summary": "The only bot-status route today (GET /discord/connection) requires ManageSettings, which the seeded matrix grants to Owner ONLY — so Admins/Moderators cannot read it. The Quartermaster Bot widget is to be visible to admin+moderator (STAFF). Add a read-only STAFF-gated status route (e.g. GET /discord/status) returning the non-sensitive connection + metrics fields (online/offline, uptime, latency, memory, cpu, users) and excluding sensitive config (permissions/ban settings), so any STAFF member can drive the widget without owner-level manage_settings.",
+      "summary": "The only bot-status route today (GET /discord/connection) requires ManageSettings, which the seeded matrix grants to Owner ONLY \u2014 so Admins/Moderators cannot read it. The Quartermaster Bot widget is to be visible to admin+moderator (STAFF). Add a read-only STAFF-gated status route (e.g. GET /discord/status) returning the non-sensitive connection + metrics fields (online/offline, uptime, latency, memory, cpu, users) and excluding sensitive config (permissions/ban settings), so any STAFF member can drive the widget without owner-level manage_settings.",
       "status": "deployed",
       "type": "feature",
       "size": "XS",
@@ -5230,13 +5230,13 @@
           "status": "passed"
         },
         {
-          "desc": "a plain enrolled member without STAFF is denied (403) — widget stays STAFF-only",
+          "desc": "a plain enrolled member without STAFF is denied (403) \u2014 widget stays STAFF-only",
           "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -5268,7 +5268,7 @@
     {
       "id": "T-0078",
       "title": "Confirm Invite-Mercenary is frontend-only; retire the stale invite question",
-      "summary": "Recon confirms there is NO backend endpoint, service method, DTO, entity, seed, migration, or Swagger doc implementing a member/mercenary invite — the roster '+ Invite Mercenary' button is a dead frontend affordance, so its removal needs ZERO backend code. This chore records that finding and retires the dangling 'what should Invite-Mercenary do' planning question (project-plan/PLAN.md, ROADMAP.md). IMPORTANT scope guard: the Mercenary MemberRole/rank and the onboarding applicant type are NOT being removed — only the individual-invite button goes (frontend).",
+      "summary": "Recon confirms there is NO backend endpoint, service method, DTO, entity, seed, migration, or Swagger doc implementing a member/mercenary invite \u2014 the roster '+ Invite Mercenary' button is a dead frontend affordance, so its removal needs ZERO backend code. This chore records that finding and retires the dangling 'what should Invite-Mercenary do' planning question (project-plan/PLAN.md, ROADMAP.md). IMPORTANT scope guard: the Mercenary MemberRole/rank and the onboarding applicant type are NOT being removed \u2014 only the individual-invite button goes (frontend).",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -5391,7 +5391,7 @@
     {
       "id": "T-0080",
       "title": "Enforce event tags hard limit of 10 in DTO",
-      "summary": "Add @ArrayMaxSize(10) to CreateEventDto.tags so create and update (via PartialType inheritance) reject >10 tags with 400. The event_tags table/column already exist (InitialSchema); MySQL cannot cap per-event row count without a trigger, so the limit lives at the DTO + FE layers — no migration.",
+      "summary": "Add @ArrayMaxSize(10) to CreateEventDto.tags so create and update (via PartialType inheritance) reject >10 tags with 400. The event_tags table/column already exist (InitialSchema); MySQL cannot cap per-event row count without a trigger, so the limit lives at the DTO + FE layers \u2014 no migration.",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -5475,7 +5475,7 @@
           "answeredAt": "2026-07-15T03:10:00Z"
         },
         {
-          "q": "Confirm the uuid/opaque retention set: MinIO object keys, auth + refresh tokens, session ids, discord outbox/idempotency keys, GDPR self-deletion tokens — anything else that must stay long/unguessable?",
+          "q": "Confirm the uuid/opaque retention set: MinIO object keys, auth + refresh tokens, session ids, discord outbox/idempotency keys, GDPR self-deletion tokens \u2014 anything else that must stay long/unguessable?",
           "answer": "Retained opaque (NOT short-id): discord_identities.id (JWT sub) + its inbound FKs (members/applications.discord_identity_id), discord_sync_jobs.id, account_deletion_requests.confirm_token, storage object keys (randomUUID), OAuth state, auth tokens, Discord snowflakes, AES-GCM ciphertext.",
           "askedAt": "2026-07-14T23:55:03.452Z",
           "answeredAt": "2026-07-15T03:10:00Z"
@@ -5554,7 +5554,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "A freshly generated entity persists with a short id of the agreed length/alphabet, and all relations (member↔regiment, event↔occurrence, gallery↔member, etc.) resolve",
+          "desc": "A freshly generated entity persists with a short id of the agreed length/alphabet, and all relations (member\u2194regiment, event\u2194occurrence, gallery\u2194member, etc.) resolve",
           "status": "passed"
         },
         {
@@ -5607,7 +5607,7 @@
     {
       "id": "T-0083",
       "title": "Rewrite migrations to short-id column lengths (DB rebuild)",
-      "summary": "Rewrite InitialSchema (and reconcile follow-on migrations) so a clean db:setup builds the short-id schema directly — permitted because there is no production data. Ensure column lengths for retained-uuid columns are unchanged and the migration set still runs idempotently end to end.",
+      "summary": "Rewrite InitialSchema (and reconcile follow-on migrations) so a clean db:setup builds the short-id schema directly \u2014 permitted because there is no production data. Ensure column lengths for retained-uuid columns are unchanged and the migration set still runs idempotently end to end.",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -5628,7 +5628,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "npm run db:setup (create → migrate → seed) runs cleanly against a fresh MySQL 8 and produces short-id primary keys",
+          "desc": "npm run db:setup (create \u2192 migrate \u2192 seed) runs cleanly against a fresh MySQL 8 and produces short-id primary keys",
           "status": "passed"
         },
         {
@@ -5642,7 +5642,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "InitialSchema + follow-on migrations are rewritten; the change requires a clean DB rebuild — any existing dev/local data is dropped. Migration ordering and idempotency must be re-verified.",
+          "desc": "InitialSchema + follow-on migrations are rewritten; the change requires a clean DB rebuild \u2014 any existing dev/local data is dropped. Migration ordering and idempotency must be re-verified.",
           "status": "resolved",
           "notedAt": "2026-07-14T23:55:03.452Z",
           "resolvedAt": "2026-07-15T03:10:00Z",
@@ -5864,8 +5864,8 @@
     },
     {
       "id": "T-0087",
-      "title": "DB migration: drop gallery↔event + member-tag, add gallery_tags",
-      "summary": "Migration to remove the gallery→event association and the gallery member-tag junction/columns (never used going forward), and add a gallery tag store (mirroring event_tags) to back free-form + quick-chip tags. Clean rebuild acceptable (no production data).",
+      "title": "DB migration: drop gallery\u2194event + member-tag, add gallery_tags",
+      "summary": "Migration to remove the gallery\u2192event association and the gallery member-tag junction/columns (never used going forward), and add a gallery tag store (mirroring event_tags) to back free-form + quick-chip tags. Clean rebuild acceptable (no production data).",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -5893,7 +5893,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Drops gallery↔event and gallery member-tag associations from the schema; any code/DTO still referencing them must be updated in lockstep (T-0088), and the FE gallery consumers in lockstep (lords-regiment-dashboard).",
+          "desc": "Drops gallery\u2194event and gallery member-tag associations from the schema; any code/DTO still referencing them must be updated in lockstep (T-0088), and the FE gallery consumers in lockstep (lords-regiment-dashboard).",
           "status": "resolved",
           "notedAt": "2026-07-14T23:55:03.452Z",
           "resolvedAt": "2026-07-15T03:10:00Z",
@@ -5953,7 +5953,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "POST gallery with 11 tags → 400; ≤10 succeeds and tags round-trip on the read",
+          "desc": "POST gallery with 11 tags \u2192 400; \u226410 succeeds and tags round-trip on the read",
           "status": "passed"
         },
         {
@@ -6139,7 +6139,7 @@
     {
       "id": "T-0091",
       "title": "Reconcile Capability enum + seed defaults with the epic permission decisions",
-      "summary": "Update the capability catalog + role→permission seed defaults to match the epic: gallery archive view = members + mercenaries; gallery submit = members only (revoke from Mercenary); moderation queue = moderators + admins; dashboard \"Gallery submissions\" panel read = ManageEvents (see T-0094). This is the single source of truth the admin Permission Matrix renders.",
+      "summary": "Update the capability catalog + role\u2192permission seed defaults to match the epic: gallery archive view = members + mercenaries; gallery submit = members only (revoke from Mercenary); moderation queue = moderators + admins; dashboard \"Gallery submissions\" panel read = ManageEvents (see T-0094). This is the single source of truth the admin Permission Matrix renders.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -6331,7 +6331,7 @@
     {
       "id": "T-0094",
       "title": "Expose pending gallery submissions read to the dashboard \"Gallery submissions\" panel",
-      "summary": "Provide a read the dashboard \"Gallery submissions\" panel can call to list pending submissions (title + submitter username) for users with ManageEvents. Either widen the existing moderation-queue read's capability or add a lightweight pending-list endpoint — resolve the ManageEvents vs ModerateGallery gate question first.",
+      "summary": "Provide a read the dashboard \"Gallery submissions\" panel can call to list pending submissions (title + submitter username) for users with ManageEvents. Either widen the existing moderation-queue read's capability or add a lightweight pending-list endpoint \u2014 resolve the ManageEvents vs ModerateGallery gate question first.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -6402,7 +6402,7 @@
     {
       "id": "T-0095",
       "title": "Re-add applicant_type (Member/Mercenary) to applications",
-      "summary": "Restore the applicant_type field retired in T-0039: a new migration re-adds the column (enum Member/Mercenary, default Member), add applicantType to the Application entity, CreateApplicationDto (IsEnum) — UpdateMyApplicationDto inherits — and ApplicationDto(.from); branch the approve-flow enlisted role on applicantType instead of the hardcoded MemberRole.Member.",
+      "summary": "Restore the applicant_type field retired in T-0039: a new migration re-adds the column (enum Member/Mercenary, default Member), add applicantType to the Application entity, CreateApplicationDto (IsEnum) \u2014 UpdateMyApplicationDto inherits \u2014 and ApplicationDto(.from); branch the approve-flow enlisted role on applicantType instead of the hardcoded MemberRole.Member.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -6474,7 +6474,7 @@
     {
       "id": "T-0096",
       "title": "Expose hasServerPassword on the member Event DTO",
-      "summary": "Add a non-sensitive boolean hasServerPassword to EventDto, set in EventDto.from only under includeServer, computed as event.serverPassword != null — so the frontend can hide the password/reveal UI for passwordless events without exposing the password.",
+      "summary": "Add a non-sensitive boolean hasServerPassword to EventDto, set in EventDto.from only under includeServer, computed as event.serverPassword != null \u2014 so the frontend can hide the password/reveal UI for passwordless events without exposing the password.",
       "status": "deployed",
       "type": "feature",
       "size": "XS",
@@ -6881,7 +6881,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "The landing wants \"Since est 11/2023\" (month precision). Add month precision (establishedAt date / establishedMonth) as planned, or is year-only (\"Since est 2023\", already available) acceptable — which would make this task unnecessary?",
+          "q": "The landing wants \"Since est 11/2023\" (month precision). Add month precision (establishedAt date / establishedMonth) as planned, or is year-only (\"Since est 2023\", already available) acceptable \u2014 which would make this task unnecessary?",
           "answer": "do whatever, i gave you full date: 20/11/2023",
           "askedAt": "2026-07-15T20:30:00Z",
           "answeredAt": "2026-07-16T00:43:34.648Z"
@@ -6976,7 +6976,7 @@
           "notedAt": "2026-07-15T20:30:00Z",
           "resolvedAt": "2026-07-16T02:45:00Z",
           "resolvedBy": "claude",
-          "note": "enqueueEventAnnounce repointed off the announcementChannelId fallback to eventAnnouncementChannelId only; announcement_channel_id + NotificationsModule + notifications tables dropped; event-announce routing still works (post-mvp e2e). /discord/announce → 404 verified live."
+          "note": "enqueueEventAnnounce repointed off the announcementChannelId fallback to eventAnnouncementChannelId only; announcement_channel_id + NotificationsModule + notifications tables dropped; event-announce routing still works (post-mvp e2e). /discord/announce \u2192 404 verified live."
         }
       ],
       "skippedByClaude": [],
@@ -7010,7 +7010,7 @@
     {
       "id": "T-0104",
       "title": "Rename Quartermaster to Lord Adjutant in the backend/bot",
-      "summary": "Rename the audit actor label \"Quartermaster bot\" → \"Lord Adjutant bot\" in discord-sync.worker (2 places) and the mock gateway role name, and update comments in config/discord entities/dtos/module for consistency. String-only, no schema change.",
+      "summary": "Rename the audit actor label \"Quartermaster bot\" \u2192 \"Lord Adjutant bot\" in discord-sync.worker (2 places) and the mock gateway role name, and update comments in config/discord entities/dtos/module for consistency. String-only, no schema change.",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -7191,7 +7191,7 @@
           "notedAt": "2026-07-15T20:30:00Z",
           "resolvedAt": "2026-07-16T02:45:00Z",
           "resolvedBy": "claude",
-          "note": "members.name dropped; in_game_name backfilled + NOT NULL; every denormalized read path (audit actor/target label fallback, attendee display, gallery author, discord-sync, member search/order, self-edit, CurrentUserDto, dev-owner seed) repointed to inGameName. 298 unit + 36 e2e green; /auth/me → inGameName verified live."
+          "note": "members.name dropped; in_game_name backfilled + NOT NULL; every denormalized read path (audit actor/target label fallback, attendee display, gallery author, discord-sync, member search/order, self-edit, CurrentUserDto, dev-owner seed) repointed to inGameName. 298 unit + 36 e2e green; /auth/me \u2192 inGameName verified live."
         }
       ],
       "skippedByClaude": [],
@@ -7299,7 +7299,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "Throttle window for the per-request bump (default 5 min) — writing on every request would add a DB write per request, so bump at most once per window per member?",
+          "q": "Throttle window for the per-request bump (default 5 min) \u2014 writing on every request would add a DB write per request, so bump at most once per window per member?",
           "answer": null,
           "askedAt": "2026-07-17T00:00:00Z"
         }
@@ -7318,7 +7318,7 @@
           "status": "pending"
         },
         {
-          "desc": "Identity-only / Applicant sessions (no member row) are skipped — no write, no error",
+          "desc": "Identity-only / Applicant sessions (no member row) are skipped \u2014 no write, no error",
           "status": "pending"
         },
         {
@@ -7956,7 +7956,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Audit read path (findEntries/findOne/exportCsv) now eager-loads actorMember/targetMember.discordIdentity and the DTO/CSV emit actor/target avatar fields — shared by every audit consumer.",
+          "desc": "Audit read path (findEntries/findOne/exportCsv) now eager-loads actorMember/targetMember.discordIdentity and the DTO/CSV emit actor/target avatar fields \u2014 shared by every audit consumer.",
           "status": "resolved",
           "notedAt": "2026-07-18T04:56:34Z",
           "resolvedAt": "2026-07-18T04:56:34Z",
@@ -7982,6 +7982,651 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        }
+      ]
+    },
+    {
+      "id": "T-0120",
+      "title": "Accept an editable title on PATCH /gallery/:id (moderator edit)",
+      "summary": "Extend the moderator edit endpoint to accept an optional title (1-160 chars) on UpdateGalleryItemDto and persist it in GalleryService.update alongside caption and tags. Edit stays gated on Capability.ModerateGallery; update the DTO/Swagger docs that currently describe the title as immutable.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "gallery",
+      "feature": "moderation",
+      "subfeature": "edit",
+      "repo": "",
+      "paths": [
+        "src/gallery/dto/update-gallery-item.dto.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0115"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PATCH /api/gallery/:id with { title } as a moderator updates gallery_items.title and returns the new title",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH with an empty or >160-char title is rejected with 400 (validation)",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH omitting title leaves the existing title unchanged (caption/tags-only edits still work)",
+          "status": "pending"
+        },
+        {
+          "desc": "A non-moderator PATCH still returns 403 (edit remains ModerateGallery-gated)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Adds title to the shared gallery update DTO/service; must reject empty/over-long titles so a PATCH cannot violate the NOT NULL gallery_items.title column, and must not loosen forbidNonWhitelisted on the DTO.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T19:03:51Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T19:03:51Z",
+      "updatedAt": "2026-07-18T19:03:51Z",
+      "history": [
+        {
+          "at": "2026-07-18T19:03:51Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0121",
+      "title": "Allow the post author or a moderator to delete a gallery post",
+      "summary": "Relax DELETE /gallery/:id so the authenticated author of a post can delete it, in addition to holders of moderate_gallery. Inject AuthzService into GalleryService and enforce item.authorMemberId === user.memberId || authz.can(regimentId, role, ModerateGallery) inside remove(), throwing ForbiddenException otherwise (mirrors the EventsService inline authz pattern).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "feature": "moderation",
+      "subfeature": "delete",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "The post author (without moderate_gallery) can DELETE their own post -> 204",
+          "status": "pending"
+        },
+        {
+          "desc": "A moderator (moderate_gallery) can DELETE any post in the regiment -> 204",
+          "status": "pending"
+        },
+        {
+          "desc": "A signed-in non-author without moderate_gallery gets 403 deleting someone else's post",
+          "status": "pending"
+        },
+        {
+          "desc": "An author cannot delete a post in another regiment (regiment scoping preserved)",
+          "status": "pending"
+        },
+        {
+          "desc": "Soft-delete + backing storage cleanup + gallery.delete audit still fire on the author path",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Relaxes the DELETE /gallery/:id capability guard and moves authorization into GalleryService (now injecting AuthzService); a mistake could let a non-author/non-moderator delete posts or bypass regiment scoping. Pin with author-path + cross-author + cross-regiment delete specs.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T19:03:51Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T19:03:51Z",
+      "updatedAt": "2026-07-18T19:03:51Z",
+      "history": [
+        {
+          "at": "2026-07-18T19:03:51Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0122",
+      "title": "Remove the rank `chevrons` column (ranks now use a custom uploaded icon)",
+      "summary": "Ranks drop the chevron-quantity insignia in favour of the already-present `imageUrl` icon. Remove `chevrons` from the Rank entity, the create DTO (@Min/@Max), the response DTO (prop + assignment), RanksService (create write :80, update write :125, audit snapshot :345), the rank seed and specs; add a drop-column migration (timestamp > 1782530000000, modeled on MedalRankImages.down()); and expose the linked rank's `imageUrl` on the member projection where `chevrons` is denormalised today (members.service.ts, members/dto/member.dto.ts). Update the stale SCHEMA.md ranks table.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "roster",
+      "feature": "ranks",
+      "subfeature": "custom-icon",
+      "repo": "",
+      "paths": [
+        "src/ranks/entities/rank.entity.ts",
+        "src/ranks/dto/create-rank.dto.ts",
+        "src/ranks/dto/rank.dto.ts",
+        "src/ranks/ranks.service.ts",
+        "src/database/seeds/ranks.seed.ts",
+        "src/database/migrations/",
+        "src/members/members.service.ts",
+        "src/members/dto/member.dto.ts",
+        "src/ranks/ranks.service.spec.ts",
+        "src/members/members.service.spec.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "New drop-column migration removes `ranks.chevrons` idempotently; down() re-adds it as tinyint UNSIGNED default 0",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /api/ranks no longer returns `chevrons`; POST/PATCH /api/ranks reject or ignore a `chevrons` field",
+          "status": "pending"
+        },
+        {
+          "desc": "Member projection exposes the linked rank's `imageUrl` in place of the denormalised chevrons",
+          "status": "pending"
+        },
+        {
+          "desc": "ranks.service.spec + members.service.spec updated and green; audit before/after snapshots no longer include `chevrons`",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Drops a NOT-NULL column and reshapes the member projection (rank chevrons -> rank imageUrl); the frontend roster/dashboard/profile read member rank `chevrons` today and must deploy in lockstep with the FE icon-render change.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T21:18:15Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; remove the ranks chevron-quantity column + all references; rank icons already ride on the existing imageUrl column."
+        }
+      ]
+    },
+    {
+      "id": "T-0123",
+      "title": "Remove the medal `ribbon` colour column + MedalRibbon enum (medals now use a custom uploaded image)",
+      "summary": "Medals drop the ribbon-colour enum in favour of the already-present `imageUrl`. Remove `ribbon` from the Medal entity (:31-32), the `MedalRibbon` enum (common/enums/index.ts:39-45), the create DTO (@IsEnum), the response DTO (prop + assignment), MedalsService (create :90, update :132, audit snapshot :346), the medal seed and specs; add a drop-column/drop-enum migration; and on the members side swap `MemberMedalSummary.ribbon` for the awarded medal's `imageUrl` (members.service.ts:838, member.dto.ts:29-30). Keep `glyph`/disk-letter for now (see question). Update the stale SCHEMA.md.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "roster",
+      "feature": "medals",
+      "subfeature": "custom-icon",
+      "repo": "",
+      "paths": [
+        "src/medals/entities/medal.entity.ts",
+        "src/common/enums/index.ts",
+        "src/medals/dto/create-medal.dto.ts",
+        "src/medals/dto/medal.dto.ts",
+        "src/medals/medals.service.ts",
+        "src/database/seeds/medals.seed.ts",
+        "src/database/migrations/",
+        "src/members/members.service.ts",
+        "src/members/dto/member.dto.ts",
+        "src/medals/medals.service.spec.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should the medal `glyph`/disk-letter also be retired now that medals render a full uploaded image, or kept as a text fallback shown when no image has been uploaded?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "Migration drops `medals.ribbon` and the `medal_ribbon` enum type idempotently; down() restores them",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /api/medals no longer returns `ribbon`; POST/PATCH reject or ignore a `ribbon` field",
+          "status": "pending"
+        },
+        {
+          "desc": "Member awarded-medal summary exposes the medal `imageUrl` in place of `ribbon` (members API shape updated + specs green)",
+          "status": "pending"
+        },
+        {
+          "desc": "Audit before/after snapshots no longer include `ribbon`",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Removes `ribbon` from the members API (MemberMedalSummary) and the medals API; the FE roster medal dots + profile/dashboard hf-medal read `ribbon` today, so deploy the FE icon-render change in lockstep.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T21:18:15Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; remove the medal ribbon-colour column + enum + all references (incl. the members-side summary); medal images already ride on the existing imageUrl column."
+        }
+      ]
+    },
+    {
+      "id": "T-0124",
+      "title": "Restrict rank/medal icon uploads to SVG + PNG and serve SVGs safely",
+      "summary": "Constrain the existing `rank-image`/`medal-image` presigned-upload targets to `image/svg+xml` and `image/png` only: add svg to the storage mime map (storage.service.ts:21-25, which today is png/jpeg/webp), restrict these two targets' allowed types (drop jpeg/webp), and reflect it in the request-upload DTO mime regex and the `GET /api/storage/policy` payload. Because a user-uploaded SVG served same-origin is a stored-XSS vector, decide and apply a safe-serving posture (see question).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "storage",
+      "subfeature": "icon-upload",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/dto/request-upload.dto.ts",
+        "src/storage/storage.controller.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "How should user-uploaded SVG icons be served safely to prevent stored XSS - sanitize on upload/serve, force Content-Disposition + a restrictive CSP, serve from a separate asset origin, or restrict to a safe SVG subset?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "Requesting an upload ticket for rank-image/medal-image with image/png or image/svg+xml succeeds; jpeg/webp/gif are rejected",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /api/storage/policy reports svg+png (not jpeg/webp) for the two icon targets",
+          "status": "pending"
+        },
+        {
+          "desc": "A stored SVG cannot execute script when rendered by the frontend (the chosen safe-serving posture is verified end-to-end)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Narrows accepted MIME types on shared storage targets; any png/jpg/webp rank/medal icons already uploaded would no longer pass re-upload validation.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T21:18:15Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; tighten the existing rank-image/medal-image upload targets to svg+png and make SVG serving XSS-safe."
+        }
+      ]
+    },
+    {
+      "id": "T-0125",
+      "title": "Enforce a 250px max dimension on rank/medal icon uploads",
+      "summary": "Reject rank/medal icons whose largest raster dimension exceeds 250px (aspect ratio irrelevant). Uploads are presigned PUT, so the API never sees the bytes - a dimension cap needs a new enforcement mechanism (see question). SVGs are vector/scalable, so decide whether the cap applies to their intrinsic/viewBox size or is waived. May add an image-size/sharp dependency depending on the chosen mechanism.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "storage",
+      "subfeature": "icon-upload",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/dto/request-upload.dto.ts",
+        "package.json"
+      ],
+      "dependsOn": [
+        "T-0124"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "250px cannot be enforced at the presigned-PUT boundary (the API never sees the bytes). Enforce via (a) client-declared width/height validated at ticket time (spoofable), (b) a post-upload verification step that fetches the object and checks dimensions with image-size/sharp, deleting/flagging oversized uploads, or (c) frontend-only validation with no server guarantee?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        },
+        {
+          "q": "Does the 250px cap apply to SVG intrinsic/viewBox dimensions, or are SVGs (being vector/scalable) exempt from the pixel cap?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "A PNG with any side > 250px is rejected/flagged; a PNG within 250px is accepted",
+          "status": "pending"
+        },
+        {
+          "desc": "Enforcement holds even when a client under-declares dimensions (per the chosen approach)",
+          "status": "pending"
+        },
+        {
+          "desc": "SVG handling matches the decided policy (capped by viewBox or exempted) with no false rejects",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; enforce the 250px icon-dimension cap - mechanism TBD because presigned uploads bypass the API."
+        }
+      ]
+    },
+    {
+      "id": "T-0126",
+      "title": "Stop writing an audit log when an event server password is revealed",
+      "summary": "revealPassword() (events.service.ts:605-632) records an audit entry (`event.password.reveal`, events.service.ts:623-629) on every reveal. Remove/gate that audit.record() call so revealing the server password no longer creates an audit log. Keep the seeded `event.password.reveal` action (audit-actions.seed.ts:83-84) so existing rows still resolve.",
+      "status": "deploy_ready",
+      "type": "bug",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "events",
+      "feature": "crud",
+      "subfeature": "password-reveal",
+      "repo": "",
+      "paths": [
+        "src/events/events.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Confirm reveals should have NO audit trail at all (the request says no audit log), rather than a downgraded non-audit/security log for traceability?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T23:04:04Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "POST /events/:id/reveal-password returns the password and creates NO new audit-log row",
+          "status": "pending"
+        },
+        {
+          "desc": "Existing audit rows with action event.password.reveal still render (seed retained)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Removing the reveal audit means password reveals are no longer traceable in the audit log; confirm no compliance need to record who revealed credentials.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T23:04:04Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-18T23:04:04Z",
+      "history": [
+        {
+          "at": "2026-07-18T23:04:04Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; drop the audit.record() call in revealPassword so reveals aren't audited."
+        }
+      ]
+    },
+    {
+      "id": "T-0127",
+      "title": "Expose an event RSVP roster with member name, avatar and RSVP choice",
+      "summary": "The frontend Attendees section needs per-person RSVP data, but the check-in AttendeeDto (dto/attendee.dto.ts:5-24) only carries memberId/name/checkedInAt and there's no endpoint listing RSVPs with member info (EventRsvp.status at entities/event-rsvp.entity.ts:26-27; member.avatarUrl at member.entity.ts:63). Add an event RSVP-roster read (e.g. GET /events/:id/rsvps) returning {memberId, name, avatarUrl, status} by joining EventRsvp->member.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "events",
+      "feature": "crud",
+      "subfeature": "rsvp-roster",
+      "repo": "",
+      "paths": [
+        "src/events/events.controller.ts",
+        "src/events/events.service.ts",
+        "src/events/dto/attendee.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0203"
+      ],
+      "questions": [
+        {
+          "q": "Add a new GET /events/:id/rsvps, or extend the existing GET /events/:id/attendees (check-ins) with avatar + RSVP choice? Check-ins carry no RSVP choice, so a dedicated RSVP endpoint may be cleaner.",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T23:04:04Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "GET /events/:id/rsvps returns each RSVP'er's memberId, name, avatarUrl and status (interested/tentative/declined)",
+          "status": "pending"
+        },
+        {
+          "desc": "The endpoint is authorized to the intended audience and omits members who never RSVP'd",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The RSVP roster exposes every RSVP'er's name + avatar to whoever can call it; gate it to the same audience allowed to view the event/attendees to avoid leaking member identities.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T23:04:04Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-18T23:04:04Z",
+      "history": [
+        {
+          "at": "2026-07-18T23:04:04Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; add an event-scoped RSVP roster projection (name/avatar/choice) for the FE Attendees section."
+        }
+      ]
+    },
+    {
+      "id": "T-0128",
+      "title": "Include the applicant blocked flag in the admin applications projection",
+      "summary": "The admin applications list/detail (ApplicationDto, dto/application.dto.ts:10-100; findAll/findOne, applications.service.ts:290-316) never loads the discord identity, so it can't tell if an applicant is blocked (applicationsBlockedAt lives on discord_identities, discord-identity.entity.ts:75). Add a `blocked` boolean to ApplicationDto and populate it by joining the application's discordIdentityId -> identity.applicationsBlockedAt so the admin UI can conditionally show Block vs Re-enable.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "moderation",
+      "subfeature": "block-state",
+      "repo": "",
+      "paths": [
+        "src/applications/dto/application.dto.ts",
+        "src/applications/applications.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0210"
+      ],
+      "questions": [
+        {
+          "q": "Expose just `blocked: boolean` on ApplicationDto, or the full block metadata (reason / blockedBy / blockedAt) for the admin detail view?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T23:04:04Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "GET /applications and findOne include a `blocked` flag reflecting discord_identities.applicationsBlockedAt",
+          "status": "pending"
+        },
+        {
+          "desc": "Blocking/unblocking an applicant flips the flag in the admin list",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Adds an identity join/lookup to the shared findAll (admin queue) read path; ensure it doesn't introduce an N+1 across the applications list.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T23:04:04Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-18T23:04:04Z",
+      "history": [
+        {
+          "at": "2026-07-18T23:04:04Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; surface the applicant blocked flag on the admin applications DTO via an identity join."
+        }
+      ]
+    },
+    {
+      "id": "T-0129",
+      "title": "Expose live applicant identity on the admin application projection",
+      "summary": "Extend ApplicationDto with the applicant's live identity \u2014 currentAvatarUrl and currentDisplayName \u2014 derived from the promoted member (so post-approval profile edits are reflected) and falling back to the linked Discord identity's avatarUrl/globalName. Load the promotedMember relation in the admin queue findAll/findOne queries (discordIdentity is already joined); promotedMemberId is already exposed to drive the profile deep-link.",
+      "status": "planned",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "applications",
+      "feature": "review",
+      "subfeature": "live-identity",
+      "repo": "",
+      "paths": [
+        "src/applications/dto/application.dto.ts",
+        "src/applications/applications.service.ts",
+        "src/applications/applications.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0222"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "ApplicationDto.from() resolves currentDisplayName/currentAvatarUrl from the promoted member when present",
+          "status": "pending"
+        },
+        {
+          "desc": "Falls back to the linked Discord identity's globalName/avatarUrl when there is no promoted member",
+          "status": "pending"
+        },
+        {
+          "desc": "findAll and findOne eager-load promotedMember so the projection has live data without N+1",
+          "status": "pending"
+        },
+        {
+          "desc": "currentAvatarUrl is null (not error) when neither member nor identity has an avatar",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "ApplicationDto.from() shared by queue/detail/self-service responses \u2014 new relation load must not break existing callers",
+          "status": "open",
+          "notedAt": "2026-07-19T01:00:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-19T01:00:00Z",
+      "updatedAt": "2026-07-19T01:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-19T01:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
         }
       ]
     }

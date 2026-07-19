@@ -533,7 +533,7 @@ describe('EventsService', () => {
       events.findOne.mockResolvedValue(buildEvent());
       rsvps.findOne.mockResolvedValue(null);
 
-      await expect(service.revealPassword(user(), 'event-1', null)).rejects.toBeInstanceOf(
+      await expect(service.revealPassword(user(), 'event-1')).rejects.toBeInstanceOf(
         ForbiddenException,
       );
       expect(audit.record).not.toHaveBeenCalled();
@@ -543,7 +543,7 @@ describe('EventsService', () => {
       events.findOne.mockResolvedValue(buildEvent());
       rsvps.findOne.mockResolvedValue({ status: RsvpStatus.Declined });
 
-      await expect(service.revealPassword(user(), 'event-1', null)).rejects.toBeInstanceOf(
+      await expect(service.revealPassword(user(), 'event-1')).rejects.toBeInstanceOf(
         ForbiddenException,
       );
     });
@@ -552,30 +552,119 @@ describe('EventsService', () => {
       events.findOne.mockResolvedValue(buildEvent({ serverPassword: null }));
       rsvps.findOne.mockResolvedValue({ status: RsvpStatus.Interested });
 
-      await expect(service.revealPassword(user(), 'event-1', null)).rejects.toBeInstanceOf(
+      await expect(service.revealPassword(user(), 'event-1')).rejects.toBeInstanceOf(
         NotFoundException,
       );
     });
 
-    it('returns the decrypted password to an RSVP’d caller and audits the reveal', async () => {
+    it('returns the decrypted password to an RSVP’d caller without auditing the reveal (T-0126)', async () => {
       events.findOne.mockResolvedValue(
         buildEvent({ serverPassword: 'hunter2', serverName: 'LORDS-1', serverRegion: 'EU' }),
       );
       rsvps.findOne.mockResolvedValue({ status: RsvpStatus.Interested });
 
-      const result = await service.revealPassword(user(), 'event-1', '9.9.9.9');
+      const result = await service.revealPassword(user(), 'event-1');
 
       expect(result).toEqual({
         serverName: 'LORDS-1',
         serverRegion: 'EU',
         serverPassword: 'hunter2',
       });
-      expect(audit.record).toHaveBeenCalledWith(
+      // Reveals are no longer audited (T-0126) — no new event.password.reveal row.
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listRsvpRoster (T-0127)', () => {
+    it('returns each RSVP’er’s memberId/name/avatarUrl/status, sorted by name', async () => {
+      events.findOne.mockResolvedValue(buildEvent());
+      rsvps.find.mockResolvedValue([
+        {
+          eventId: 'event-1',
+          memberId: 'member-2',
+          status: RsvpStatus.Tentative,
+          member: { id: 'member-2', inGameName: 'Bravo', avatarUrl: 'https://cdn/b.png' },
+        },
+        {
+          eventId: 'event-1',
+          memberId: 'member-1',
+          status: RsvpStatus.Interested,
+          member: { id: 'member-1', inGameName: 'Alpha', avatarUrl: 'https://cdn/a.png' },
+        },
+      ]);
+
+      const result = await service.listRsvpRoster(user(), 'event-1');
+
+      // Queried with the nested discordIdentity relation for the avatar fallback.
+      expect(rsvps.find).toHaveBeenCalledWith(
         expect.objectContaining({
-          action: 'event.password.reveal',
-          target: expect.objectContaining({ type: 'event', id: 'event-1' }),
+          where: { eventId: 'event-1' },
+          relations: { member: { discordIdentity: true } },
         }),
       );
+      // Sorted by name — Alpha before Bravo despite insertion order.
+      expect(result).toEqual([
+        {
+          memberId: 'member-1',
+          name: 'Alpha',
+          avatarUrl: 'https://cdn/a.png',
+          status: RsvpStatus.Interested,
+        },
+        {
+          memberId: 'member-2',
+          name: 'Bravo',
+          avatarUrl: 'https://cdn/b.png',
+          status: RsvpStatus.Tentative,
+        },
+      ]);
+    });
+
+    it('falls back to the linked Discord avatar, then null', async () => {
+      events.findOne.mockResolvedValue(buildEvent());
+      rsvps.find.mockResolvedValue([
+        {
+          eventId: 'event-1',
+          memberId: 'member-1',
+          status: RsvpStatus.Interested,
+          member: {
+            id: 'member-1',
+            inGameName: 'Alpha',
+            avatarUrl: null,
+            discordIdentity: { avatarUrl: 'https://discord/a.png' },
+          },
+        },
+        {
+          eventId: 'event-1',
+          memberId: 'member-2',
+          status: RsvpStatus.Tentative,
+          member: { id: 'member-2', inGameName: 'Bravo', avatarUrl: null, discordIdentity: null },
+        },
+      ]);
+
+      const result = await service.listRsvpRoster(user(), 'event-1');
+
+      // Custom avatar absent → Discord avatar used.
+      expect(result[0].avatarUrl).toBe('https://discord/a.png');
+      // Neither custom nor Discord avatar → null.
+      expect(result[1].avatarUrl).toBeNull();
+    });
+
+    it('surfaces only members that RSVP’d (rows returned by the rsvps repo)', async () => {
+      events.findOne.mockResolvedValue(buildEvent());
+      // Only one member ever RSVP'd; non-RSVP'ers have no row and are absent.
+      rsvps.find.mockResolvedValue([
+        {
+          eventId: 'event-1',
+          memberId: 'member-1',
+          status: RsvpStatus.Interested,
+          member: { id: 'member-1', inGameName: 'Alpha', avatarUrl: null },
+        },
+      ]);
+
+      const result = await service.listRsvpRoster(user(), 'event-1');
+
+      expect(result).toHaveLength(1);
+      expect(result.map((r) => r.memberId)).toEqual(['member-1']);
     });
   });
 

@@ -38,9 +38,10 @@ import { GalleryLikeState, GalleryService } from './gallery.service';
 /**
  * Gallery API. The feed (`GET /` and `GET /:id`) is public and honours the
  * regiment's `publicGallery` flag; submitting requires SubmitToGallery, and the
- * moderation queue + approve/decline/delete require ModerateGallery. Likes are
- * open to any authenticated member. Mutations are scoped + audited in the
- * service. The literal `moderation/queue` route is declared before `:id`.
+ * moderation queue + approve/decline + caption/title edit require ModerateGallery.
+ * Delete is open to the post AUTHOR or a moderator (authorized in the service).
+ * Likes are open to any authenticated member. Mutations are scoped + audited in
+ * the service. The literal `moderation/queue` route is declared before `:id`.
  */
 @ApiTags('gallery')
 @ApiBearerAuth('access-token')
@@ -164,7 +165,7 @@ export class GalleryController {
 
   @Patch(':id')
   @RequireCapability(Capability.ModerateGallery)
-  @ApiOperation({ summary: 'Edit a gallery item caption + tags (media is not editable)' })
+  @ApiOperation({ summary: 'Edit a gallery item title, caption + tags (media is not editable)' })
   @ApiOkResponse({ type: GalleryItemDto, description: 'The updated gallery item.' })
   update(
     @Param('id', ParseShortIdPipe) id: string,
@@ -177,8 +178,8 @@ export class GalleryController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequireCapability(Capability.ModerateGallery)
-  @ApiOperation({ summary: 'Soft-delete a gallery item' })
+  @ApiOperation({ summary: 'Soft-delete a gallery item (post author or moderator)' })
+  @ApiForbiddenResponse({ description: 'Not the author and lacks ModerateGallery.' })
   @ApiNoContentResponse({ description: 'The gallery item was deleted.' })
   remove(
     @Param('id', ParseShortIdPipe) id: string,

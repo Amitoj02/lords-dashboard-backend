@@ -71,8 +71,19 @@ export class ApplicationDto {
   @ApiProperty({ example: '2026-06-22T18:30:00.000Z' })
   createdAt: string;
 
-  /** Map an Application entity to its safe client projection. */
-  static from(application: Application): ApplicationDto {
+  @ApiProperty({
+    description: 'Whether the applicant’s Discord identity is blocked from applying',
+  })
+  blocked: boolean;
+
+  /**
+   * Map an Application entity to its safe client projection. `blocked` reflects
+   * whether the applicant's Discord identity is barred from applying (T-0128):
+   * when omitted it is derived from the loaded `discordIdentity` relation, so the
+   * admin queue/detail must load that relation; callers that mutate the block
+   * state (unblock) pass it explicitly to avoid a stale read.
+   */
+  static from(application: Application, blocked?: boolean): ApplicationDto {
     return {
       id: application.id,
       applicantName: application.applicantName,
@@ -95,6 +106,7 @@ export class ApplicationDto {
       submittedAt: application.submittedAt.toISOString(),
       decidedAt: application.decidedAt ? application.decidedAt.toISOString() : null,
       createdAt: application.createdAt.toISOString(),
+      blocked: blocked ?? !!application.discordIdentity?.applicationsBlockedAt,
     };
   }
 }

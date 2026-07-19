@@ -9,8 +9,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
+import { AuthzService } from '../authz/authz.service';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { GalleryMediaType, GalleryStatus, MemberRole, StorageTarget } from '../common/enums';
+import {
+  Capability,
+  GalleryMediaType,
+  GalleryStatus,
+  MemberRole,
+  StorageTarget,
+} from '../common/enums';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
@@ -72,6 +79,8 @@ export class GalleryService {
     private readonly settings: Repository<RegimentSettings>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
+    // Capability checks for the author-or-moderator delete path (T-0121).
+    private readonly authz: AuthzService,
     // Resolves uploaded file keys to public URLs (namespace-validated).
     private readonly storage: StorageService,
     // Best-effort decline DMs to the submitter (never fails the decision).
@@ -331,10 +340,10 @@ export class GalleryService {
   }
 
   /**
-   * Moderator edit of an item's caption and/or tags (ModerateGallery). The media
-   * itself (title, type, files, links) is not editable here. Only the fields
+   * Moderator edit of an item's title, caption and/or tags (ModerateGallery). The
+   * media itself (type, files, links) is not editable here. Only the fields
    * present on the DTO are touched; `tags`, when provided, replaces the whole tag
-   * set (deduped/trimmed/capped, mirroring submit()). Runs the caption write and
+   * set (deduped/trimmed/capped, mirroring submit()). Runs the scalar writes and
    * the tag replacement in one transaction, then audits. Audited.
    */
   async update(
@@ -349,9 +358,24 @@ export class GalleryService {
       const itemRepo = manager.getRepository(GalleryItem);
       const tagRepo = manager.getRepository(GalleryTag);
 
+      // Title/caption are scalar edits on the item row — batch them into one save.
+      let itemDirty = false;
+      if (dto.title !== undefined) {
+        // The column is NOT NULL; a whitespace-only title (which slips past the
+        // DTO's @MinLength) is rejected rather than persisted as blank.
+        const trimmed = dto.title.trim();
+        if (trimmed.length === 0) {
+          throw new BadRequestException('Title cannot be empty');
+        }
+        item.title = trimmed;
+        itemDirty = true;
+      }
       if (dto.caption !== undefined) {
         const trimmed = dto.caption.trim();
         item.caption = trimmed.length > 0 ? trimmed : null;
+        itemDirty = true;
+      }
+      if (itemDirty) {
         await itemRepo.save(item);
       }
 
@@ -409,13 +433,32 @@ export class GalleryService {
   }
 
   /**
-   * Soft-delete an item and purge its stored media objects. The row is
-   * soft-removed (recoverable) but the backing MinIO/S3 objects are deleted
-   * best-effort so orphaned bytes don't outlive the item; a storage outage can
-   * never block the softRemove or the audit row. Audited.
+   * Soft-delete an item and purge its stored media objects. Authorized to the
+   * post AUTHOR or a moderator (ModerateGallery) — the controller no longer gates
+   * this route on the capability so an author can remove their own post (T-0121).
+   * Regiment scoping is preserved by {@link loadItem} (a cross-regiment id 404s
+   * before this check). The row is soft-removed (recoverable) but the backing
+   * MinIO/S3 objects are deleted best-effort so orphaned bytes don't outlive the
+   * item; a storage outage can never block the softRemove or the audit row.
+   * Audited.
    */
   async remove(user: AuthenticatedUser, id: string, ip: string | null): Promise<void> {
     const item = await this.loadItem(id, user.regimentId, {});
+
+    // Author OR moderator. The author check is exact (a member deleting their own
+    // post); everyone else must hold ModerateGallery within the regiment.
+    const isAuthor = !!user.memberId && item.authorMemberId === user.memberId;
+    if (!isAuthor) {
+      const canModerate = await this.authz.can(
+        user.regimentId,
+        user.role,
+        Capability.ModerateGallery,
+      );
+      if (!canModerate) {
+        throw new ForbiddenException('You can only delete your own gallery posts');
+      }
+    }
+
     // GalleryFile has no soft-delete column, so its rows remain readable after
     // softRemove — load them first to know which objects to purge.
     const files = await this.files.find({ where: { galleryItemId: item.id } });
