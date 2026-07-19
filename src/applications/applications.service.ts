@@ -298,6 +298,9 @@ export class ApplicationsService {
       .createQueryBuilder('a')
       // Single join for the block flag — the whole page in one query, no N+1 (T-0128).
       .leftJoinAndSelect('a.discordIdentity', 'identity')
+      // Join the promoted member so the projection carries the applicant's live
+      // identity (display name + avatar) without an N+1 (T-0129).
+      .leftJoinAndSelect('a.promotedMember', 'promotedMember')
       .where('a.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('a.isDraft = :isDraft', { isDraft: false });
 
@@ -545,8 +548,9 @@ export class ApplicationsService {
   private async loadOrFail(user: AuthenticatedUser, id: string): Promise<Application> {
     const application = await this.applications.findOne({
       where: { id, regimentId: user.regimentId },
-      // The identity carries the applications-block flag surfaced on the DTO (T-0128).
-      relations: { discordIdentity: true },
+      // The identity carries the applications-block flag surfaced on the DTO (T-0128);
+      // the promoted member carries the applicant's live identity (T-0129).
+      relations: { discordIdentity: true, promotedMember: true },
     });
     if (!application) {
       throw new NotFoundException('Application not found');

@@ -59,6 +59,22 @@ export class ApplicationDto {
   @ApiProperty({ nullable: true, description: 'Member id created on approval' })
   promotedMemberId: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    description:
+      "The applicant's current display name — the promoted member's in-game name once approved, " +
+      'else the linked Discord global name; null when neither is known. Reflects post-approval renames.',
+  })
+  currentDisplayName: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      "The applicant's current avatar URL — the promoted member's avatar once approved, else the " +
+      'linked Discord avatar; null when neither is set. Reflects post-approval avatar changes.',
+  })
+  currentAvatarUrl: string | null;
+
   @ApiProperty({ nullable: true, description: 'Member id of the staffer who decided' })
   decidedByMemberId: string | null;
 
@@ -82,8 +98,18 @@ export class ApplicationDto {
    * when omitted it is derived from the loaded `discordIdentity` relation, so the
    * admin queue/detail must load that relation; callers that mutate the block
    * state (unblock) pass it explicitly to avoid a stale read.
+   *
+   * `currentDisplayName`/`currentAvatarUrl` carry the applicant's LIVE identity
+   * (T-0129): the promoted member's in-game name + avatar once approved (so
+   * post-approval profile edits are reflected), falling back to the linked
+   * Discord identity's global name + avatar, else null. Resolving the member
+   * needs the `promotedMember` relation loaded; the queue/detail queries eager-
+   * load it. Callers that don't load it (self-service views) get the Discord
+   * fallback (or null), which is fine — those views don't surface live identity.
    */
   static from(application: Application, blocked?: boolean): ApplicationDto {
+    const member = application.promotedMember;
+    const identity = application.discordIdentity;
     return {
       id: application.id,
       applicantName: application.applicantName,
@@ -102,6 +128,8 @@ export class ApplicationDto {
       moderatorNote: application.moderatorNote,
       declineReason: application.declineReason,
       promotedMemberId: application.promotedMemberId,
+      currentDisplayName: member?.inGameName ?? identity?.globalName ?? null,
+      currentAvatarUrl: member?.avatarUrl ?? identity?.avatarUrl ?? null,
       decidedByMemberId: application.decidedByMemberId,
       submittedAt: application.submittedAt.toISOString(),
       decidedAt: application.decidedAt ? application.decidedAt.toISOString() : null,

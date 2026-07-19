@@ -433,9 +433,52 @@ describe('ApplicationsService', () => {
       // loadOrFail must eager-load the identity relation for the flag to resolve.
       const result = await service.findOne(STAFF, 'app-1');
       expect(applications.findOne).toHaveBeenCalledWith(
-        expect.objectContaining({ relations: { discordIdentity: true } }),
+        expect.objectContaining({ relations: { discordIdentity: true, promotedMember: true } }),
       );
       expect(result.blocked).toBe(true);
+    });
+
+    it('resolves live identity from the promoted member, else the Discord identity (T-0129)', async () => {
+      // Promoted member present → its in-game name + avatar win over the identity.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          promotedMember: {
+            inGameName: 'RenamedRecruit',
+            avatarUrl: 'https://cdn/member.png',
+          } as Member,
+          discordIdentity: {
+            id: 'identity-applicant',
+            globalName: 'OldDiscordName',
+            avatarUrl: 'https://cdn/discord.png',
+            applicationsBlockedAt: null,
+          } as DiscordIdentity,
+        }),
+      );
+      const withMember = await service.findOne(STAFF, 'app-1');
+      expect(withMember.currentDisplayName).toBe('RenamedRecruit');
+      expect(withMember.currentAvatarUrl).toBe('https://cdn/member.png');
+
+      // No promoted member → fall back to the linked Discord identity.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          promotedMember: null,
+          discordIdentity: {
+            id: 'identity-applicant',
+            globalName: 'OldDiscordName',
+            avatarUrl: 'https://cdn/discord.png',
+            applicationsBlockedAt: null,
+          } as DiscordIdentity,
+        }),
+      );
+      const identityOnly = await service.findOne(STAFF, 'app-1');
+      expect(identityOnly.currentDisplayName).toBe('OldDiscordName');
+      expect(identityOnly.currentAvatarUrl).toBe('https://cdn/discord.png');
+
+      // Neither member nor identity avatar → null (not an error).
+      applications.findOne!.mockResolvedValue(baseApplication({ discordIdentity: null }));
+      const neither = await service.findOne(STAFF, 'app-1');
+      expect(neither.currentDisplayName).toBeNull();
+      expect(neither.currentAvatarUrl).toBeNull();
     });
   });
 
@@ -605,8 +648,10 @@ describe('ApplicationsService', () => {
         status: ApplicationStatus.Pending,
       });
 
-      // The block flag is loaded via a single join before any filtering (T-0128).
+      // The block flag is loaded via a single join before any filtering (T-0128);
+      // the promoted member is joined for the applicant's live identity (T-0129).
       expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.discordIdentity', 'identity');
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.promotedMember', 'promotedMember');
       expect(qb.where).toHaveBeenCalledWith('a.regimentId = :regimentId', {
         regimentId: 'regiment-1',
       });
