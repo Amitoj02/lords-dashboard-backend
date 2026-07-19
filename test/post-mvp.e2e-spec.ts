@@ -193,9 +193,13 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(byTarget['member-banner'].maxImageMb).toBe(12);
       expect(byTarget['event-banner'].maxImageMb).toBe(12);
       expect(byTarget['gallery'].maxVideoMb).toBe(80);
-      // Icon targets accept ONLY PNG + SVG (T-0124); raster jpeg/webp are excluded.
-      expect(byTarget['rank-image'].acceptedExtensions).toEqual(['png', 'svg']);
-      expect(byTarget['medal-image'].acceptedMimeTypes).toEqual(['image/png', 'image/svg+xml']);
+      // Icon targets accept PNG + SVG (T-0124) and WebP (T-0130); jpeg stays excluded.
+      expect(byTarget['rank-image'].acceptedExtensions).toEqual(['png', 'svg', 'webp']);
+      expect(byTarget['medal-image'].acceptedMimeTypes).toEqual([
+        'image/png',
+        'image/svg+xml',
+        'image/webp',
+      ]);
       expect(byTarget['rank-image'].acceptedMimeTypes).not.toContain('image/jpeg');
       // Non-icon image targets keep the raster set.
       expect(byTarget['member-avatar'].acceptedExtensions).toEqual(['png', 'jpg', 'webp']);

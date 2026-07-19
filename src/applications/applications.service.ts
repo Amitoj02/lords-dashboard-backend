@@ -298,6 +298,9 @@ export class ApplicationsService {
       .createQueryBuilder('a')
       // Single join for the block flag — the whole page in one query, no N+1 (T-0128).
       .leftJoinAndSelect('a.discordIdentity', 'identity')
+      // Join the promoted member so the projection carries the applicant's live
+      // identity (display name + avatar) without an N+1 (T-0129).
+      .leftJoinAndSelect('a.promotedMember', 'promotedMember')
       .where('a.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('a.isDraft = :isDraft', { isDraft: false });
 
@@ -378,6 +381,12 @@ export class ApplicationsService {
 
       application.status = ApplicationStatus.Approved;
       application.promotedMemberId = member.id;
+      // `loadOrFail` hydrates the `promotedMember` relation (null before approval,
+      // T-0129). TypeORM gives a LOADED relation precedence over the raw FK column
+      // on save, so leaving it null here would write promoted_member_id = NULL and
+      // silently discard the promotion. Keep the two in step — this also lets the
+      // approve response carry the new member's live identity.
+      application.promotedMember = member;
       application.decidedByMemberId = user.memberId;
       application.decidedAt = now;
       const savedApplication = await applicationRepo.save(application);
@@ -545,8 +554,9 @@ export class ApplicationsService {
   private async loadOrFail(user: AuthenticatedUser, id: string): Promise<Application> {
     const application = await this.applications.findOne({
       where: { id, regimentId: user.regimentId },
-      // The identity carries the applications-block flag surfaced on the DTO (T-0128).
-      relations: { discordIdentity: true },
+      // The identity carries the applications-block flag surfaced on the DTO (T-0128);
+      // the promoted member carries the applicant's live identity (T-0129).
+      relations: { discordIdentity: true, promotedMember: true },
     });
     if (!application) {
       throw new NotFoundException('Application not found');

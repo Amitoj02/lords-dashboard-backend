@@ -170,15 +170,15 @@ describe('StorageService', () => {
     );
 
     it.each([StorageTarget.RankImage, StorageTarget.MedalImage])(
-      'rejects a webp for %s with 400',
+      'accepts a webp for %s and stores it with a .webp key (T-0130)',
       async (target) => {
-        await expect(
-          service.createUploadTicket(user(), {
-            target,
-            contentType: 'image/webp',
-            sizeBytes: 1024,
-          }),
-        ).rejects.toBeInstanceOf(BadRequestException);
+        const ticket = await service.createUploadTicket(user(), {
+          target,
+          contentType: 'image/webp',
+          sizeBytes: 1024,
+        });
+        expect(ticket.key).toMatch(/\.webp$/);
+        expect(ticket.requiredContentType).toBe('image/webp');
       },
     );
 
@@ -202,12 +202,16 @@ describe('StorageService', () => {
       expect(ticket.requiredContentType).toBe('image/svg+xml');
     });
 
-    it('reports PNG+SVG accepted types for the icon targets in getPolicy', () => {
+    it('reports PNG+SVG+WebP accepted types for the icon targets in getPolicy (T-0130)', () => {
       const byTarget = Object.fromEntries(service.getPolicy().targets.map((t) => [t.target, t]));
 
       for (const target of [StorageTarget.RankImage, StorageTarget.MedalImage]) {
-        expect(byTarget[target].acceptedMimeTypes).toEqual(['image/png', 'image/svg+xml']);
-        expect(byTarget[target].acceptedExtensions).toEqual(['png', 'svg']);
+        expect(byTarget[target].acceptedMimeTypes).toEqual([
+          'image/png',
+          'image/svg+xml',
+          'image/webp',
+        ]);
+        expect(byTarget[target].acceptedExtensions).toEqual(['png', 'svg', 'webp']);
       }
 
       // Other image targets still report the default raster set.
@@ -236,6 +240,26 @@ describe('StorageService', () => {
       return new Uint8Array(buf);
     };
 
+    /** A 32-byte VP8X (extended) WebP header carrying the given canvas dimensions. */
+    const webpHeader = (width: number, height: number): Uint8Array => {
+      const buf = Buffer.alloc(32);
+      buf.write('RIFF', 0, 'ascii');
+      buf.writeUInt32LE(26, 4); // RIFF payload size (unused by the parser)
+      buf.write('WEBP', 8, 'ascii');
+      buf.write('VP8X', 12, 'ascii');
+      buf.writeUInt32LE(10, 16); // VP8X chunk size
+      buf.writeUInt8(0, 20); // flags (byte 20); bytes 21-23 reserved (zero)
+      const w = width - 1;
+      const h = height - 1;
+      buf.writeUInt8(w & 0xff, 24);
+      buf.writeUInt8((w >> 8) & 0xff, 25);
+      buf.writeUInt8((w >> 16) & 0xff, 26);
+      buf.writeUInt8(h & 0xff, 27);
+      buf.writeUInt8((h >> 8) & 0xff, 28);
+      buf.writeUInt8((h >> 16) & 0xff, 29);
+      return new Uint8Array(buf);
+    };
+
     /** Mock the S3 client's send() to resolve a GetObject body wrapping `bytes`. */
     const mockGet = (bytes: Uint8Array) =>
       jest
@@ -260,6 +284,20 @@ describe('StorageService', () => {
       mockGet(pngHeader(240, 180));
       await expect(
         service.assertIconWithinDimensions(`medals/${REGIMENT}/icon.png`),
+      ).resolves.toBeUndefined();
+    });
+
+    it('rejects a WebP whose height exceeds the cap with 400 (T-0130)', async () => {
+      mockGet(webpHeader(100, 300));
+      await expect(
+        service.assertIconWithinDimensions(`ranks/${REGIMENT}/icon.webp`),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('resolves for a WebP within the cap (T-0130)', async () => {
+      mockGet(webpHeader(250, 200));
+      await expect(
+        service.assertIconWithinDimensions(`medals/${REGIMENT}/icon.webp`),
       ).resolves.toBeUndefined();
     });
 

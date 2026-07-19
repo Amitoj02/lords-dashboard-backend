@@ -29,16 +29,20 @@ const IMAGE_TYPES: Record<string, string> = {
   'image/webp': 'webp',
 };
 /**
- * Rank/medal icon targets accept ONLY PNG + SVG (T-0124) — not the raster
- * jpeg/webp of the default set. SVGs are served safely because the frontend
- * renders every icon through an <img> tag, where the browser processes SVG in
- * "secure static mode": no script execution, no external fetches. Objects are
- * also served from a SEPARATE storage origin that holds no app session, so even a
- * directly-navigated malicious SVG cannot touch the app's tokens.
+ * Rank/medal icon targets accept PNG + SVG + WebP (T-0124; WebP added T-0130) —
+ * not the JPEG of the default raster set. WebP is a compact raster icon format,
+ * capped to the same 250px-per-side dimension as PNG (see
+ * {@link StorageService.assertIconWithinDimensions}). SVGs are served safely
+ * because the frontend renders every icon through an <img> tag, where the browser
+ * processes SVG in "secure static mode": no script execution, no external
+ * fetches. Objects are also served from a SEPARATE storage origin that holds no
+ * app session, so even a directly-navigated malicious SVG cannot touch the app's
+ * tokens.
  */
 const ICON_IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
   'image/svg+xml': 'svg',
+  'image/webp': 'webp',
 };
 const VIDEO_TYPES: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -110,6 +114,54 @@ function parsePngDimensions(header: Buffer): { width: number; height: number } |
     return null;
   }
   return { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
+}
+
+/**
+ * Parse a WebP's pixel dimensions from its RIFF header (T-0130). A WebP is a
+ * "RIFF"…"WEBP" container whose first chunk is one of three VP8 variants, each
+ * encoding the dimensions differently:
+ *  - "VP8 " (lossy): a 3-byte start code (0x9d 0x01 0x2a) at offset 23, then a
+ *    14-bit little-endian width and height at offsets 26 and 28.
+ *  - "VP8L" (lossless): a 0x2f signature at offset 20, then packed 14-bit
+ *    (width-1) and (height-1) in the next 4 little-endian bytes.
+ *  - "VP8X" (extended): a 24-bit little-endian (canvas width-1)/(canvas height-1)
+ *    at offsets 24 and 27.
+ * Returns null for anything that is not a WebP header we can read (so the caller
+ * applies its fallback policy). The header must be at least 30 bytes to cover the
+ * furthest-out field (VP8 / VP8X); the reader fetches 32.
+ */
+function parseWebpDimensions(header: Buffer): { width: number; height: number } | null {
+  if (
+    header.length < 30 ||
+    header.subarray(0, 4).toString('ascii') !== 'RIFF' ||
+    header.subarray(8, 12).toString('ascii') !== 'WEBP'
+  ) {
+    return null;
+  }
+  const format = header.subarray(12, 16).toString('ascii');
+  if (format === 'VP8 ') {
+    return {
+      width: header.readUInt16LE(26) & 0x3fff,
+      height: header.readUInt16LE(28) & 0x3fff,
+    };
+  }
+  if (format === 'VP8L') {
+    if (header[20] !== 0x2f) {
+      return null;
+    }
+    const bits = header.readUInt32LE(21);
+    return {
+      width: (bits & 0x3fff) + 1,
+      height: ((bits >> 14) & 0x3fff) + 1,
+    };
+  }
+  if (format === 'VP8X') {
+    return {
+      width: (header[24] | (header[25] << 8) | (header[26] << 16)) + 1,
+      height: (header[27] | (header[28] << 8) | (header[29] << 16)) + 1,
+    };
+  }
+  return null;
 }
 
 /**
@@ -311,13 +363,14 @@ export class StorageService {
    * image key, BEFORE it is persisted. The bytes never pass through the API (they
    * are PUT straight to storage), so a client-declared width/height can't be
    * trusted — instead we read the stored object's header directly:
-   *  - PNG: a ranged GET of the IHDR chunk gives the exact pixel dimensions;
+   *  - PNG / WebP: a ranged GET of the header gives the exact pixel dimensions;
    *    either side over the cap is rejected (400). This holds even when the client
    *    under-declares the size, because we read the real pixels.
    *  - SVG: exempt — a scalable vector has no intrinsic raster dimension (it is
    *    bounded by its viewBox at render time), so there is nothing to cap.
    * A transient read failure is logged and allowed (fail-open for availability): a
-   * genuine oversize PNG is always readable here, moments after its own upload.
+   * genuine oversize raster icon is always readable here, moments after its own
+   * upload.
    */
   async assertIconWithinDimensions(key: string, maxPx = ICON_MAX_DIMENSION_PX): Promise<void> {
     if (key.toLowerCase().endsWith('.svg')) {
@@ -325,17 +378,19 @@ export class StorageService {
     }
     let header: Buffer;
     try {
-      header = await this.readObjectHead(key, 24);
+      // 32 bytes covers both the PNG IHDR and the furthest-out WebP dimension field.
+      header = await this.readObjectHead(key, 32);
     } catch (error) {
       this.logger.warn(
         `Could not read ${key} to validate icon dimensions: ${(error as Error).message}`,
       );
       return;
     }
-    const dims = parsePngDimensions(header);
+    const dims = parsePngDimensions(header) ?? parseWebpDimensions(header);
     if (!dims) {
-      // Not a PNG we can parse — the MIME allow-list already restricts icons to
-      // PNG/SVG, so this is an unreadable/corrupt object; leave it to fail on use.
+      // Not a PNG/WebP we can parse — the MIME allow-list already restricts icons
+      // to PNG/SVG/WebP, so this is an unreadable/corrupt object; leave it to fail
+      // on use.
       return;
     }
     if (dims.width > maxPx || dims.height > maxPx) {

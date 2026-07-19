@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "400e1cc1f6ef8f8b83c4aa37d1fdcf2201ca8df8",
-  "lastSyncedAt": "2026-07-19T00:18:56Z",
-  "notesForNextSession": "Planned-tasks T-0120..T-0128 implemented -> deploy_ready (BE 400e1cc). Gallery editable title on PATCH + author-or-moderator delete; dropped ranks.chevrons + medals.ribbon (+MedalRibbon enum) via idempotent migration, member projection now exposes rankImageUrl+medal imageUrl; rank/medal icon uploads restricted to PNG+SVG (safe <img> serving + separate storage origin) with a server-authoritative 250px cap read from the stored PNG IHDR (SVG exempt); reveal-password no longer audited (historical rows retained); new GET /events/:id/rsvps roster gated on ViewMembersDirectory; applications admin projection gains a joined blocked flag (no N+1). SHIP WITH frontend branch feat/rank-medal-icons-events-polish (6da2aae). BE CI green (lint/format/build/384 unit/43 e2e); migration verified on the throwaway e2e DB + dev DB. No planned tasks remain.",
-  "nextIdCounter": 130,
+  "lastSyncedCommit": "4870cd29ce4b74f0e006101b336a73520aafd880",
+  "lastSyncedAt": "2026-07-19T20:45:48Z",
+  "notesForNextSession": "PR #16 (feat/webp-icons-live-applicant-identity) CI was RED and is now fixed in T-0132 (4870cd2) \u2014 watch the run before merging. Two causes, both reproduced locally first: (1) T-0129 eager-loading promotedMember in loadOrFail made TypeORM write promoted_member_id = NULL on approve (a LOADED relation beats the raw FK column on save), which nulled promotedMemberId in the approve response and cascaded into 4 discord e2e failures that derive their member id from it; fix assigns application.promotedMember = member alongside the FK. (2) T-0130 added WebP to ICON_IMAGE_TYPES but left post-mvp e2e's storage-policy assertion on the old PNG+SVG set. LESSON: the previous session shipped T-0129/T-0130 on unit tests alone and marked the shared-code risk resolved without ever running e2e \u2014 run e2e locally before calling a shared-code change verified. LOCAL E2E RECIPE (CI has no .env, so it hides these): drop/recreate a scratch DB, then run BOTH migrate+seed AND jest with DB_DATABASE=<scratch> DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= \u2014 .env otherwise seeds the real owner snowflake (every capability endpoint 403s) and disables the bot mock (wsPing null). Local `npm run build` EACCESes on the root-owned dist/; use `npx tsc -p tsconfig.build.json --noEmit`. STILL SHIP WITH frontend feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224). OPEN RISK T-0132#0: the loaded-relation-vs-FK footgun is not audited outside the approve path. BLUEFRAME GOTCHA (T-0131): testPlan item status MUST be pending|passed|failed \u2014 \"done\" silently fails schema validation and blanks the whole repo in the UI (taskCount: 0 at 127.0.0.1:7317/api/repos). Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff.",
+  "nextIdCounter": 133,
   "connections": [],
   "tasks": [
     {
@@ -8573,7 +8573,7 @@
       "id": "T-0129",
       "title": "Expose live applicant identity on the admin application projection",
       "summary": "Extend ApplicationDto with the applicant's live identity \u2014 currentAvatarUrl and currentDisplayName \u2014 derived from the promoted member (so post-approval profile edits are reflected) and falling back to the linked Discord identity's avatarUrl/globalName. Load the promotedMember relation in the admin queue findAll/findOne queries (discordIdentity is already joined); promotedMemberId is already exposed to drive the profile deep-link.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8594,32 +8594,35 @@
       "testPlan": [
         {
           "desc": "ApplicationDto.from() resolves currentDisplayName/currentAvatarUrl from the promoted member when present",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "Falls back to the linked Discord identity's globalName/avatarUrl when there is no promoted member",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "findAll and findOne eager-load promotedMember so the projection has live data without N+1",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "currentAvatarUrl is null (not error) when neither member nor identity has an avatar",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "ApplicationDto.from() shared by queue/detail/self-service responses \u2014 new relation load must not break existing callers",
-          "status": "open",
-          "notedAt": "2026-07-19T01:00:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-19T01:00:00Z",
+          "resolvedAt": "2026-07-19T20:45:48Z",
+          "resolvedBy": "claude",
+          "note": "ApplicationDto.from stays null-safe for all callers (self-service returns null live-identity); findAll/findOne eager-load promotedMember with no N+1. Verified by applications.service.spec (387 unit tests green) and live API returning currentDisplayName/currentAvatarUrl. FOLLOW-UP (T-0132): this resolution was premature \u2014 it was verified against unit tests and read paths only, never e2e. The new promotedMember eager-load in loadOrFail DID break a write caller: TypeORM lets a loaded relation win over the raw FK on save, so approve wrote promoted_member_id = NULL. Fixed in 4870cd2; mvp + discord e2e now cover it."
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
       "createdAt": "2026-07-19T01:00:00Z",
-      "updatedAt": "2026-07-19T01:00:00Z",
+      "updatedAt": "2026-07-19T20:45:48Z",
       "history": [
         {
           "at": "2026-07-19T01:00:00Z",
@@ -8627,8 +8630,219 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-07-19T03:32:11Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented: ApplicationDto currentDisplayName/currentAvatarUrl + promotedMember eager-load (findAll join, loadOrFail relations). Tests + live API verified. Coupled FE PR feat/admin-polish-audit-diff-webp-live-identity."
+        },
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Risk note amended: the eager-load regressed the approve write path (fixed in T-0132)."
         }
       ]
+    },
+    {
+      "id": "T-0130",
+      "title": "Accept WebP for rank/medal icon uploads",
+      "summary": "Extend the rank/medal icon accepted-type policy from PNG+SVG to PNG+SVG+WebP (ICON_IMAGE_TYPES) so the presign flow accepts image/webp and stores a .webp key. WebP is raster, so parse its pixel dimensions from the RIFF header (VP8/VP8L/VP8X) in assertIconWithinDimensions \u2014 reading 32 header bytes and trying PNG then WebP \u2014 to keep the 250px-per-side cap enforced server-side (SVG stays exempt). Discovered while implementing the frontend WebP acceptance (FE T-0214/T-0215): without this the FE would 400 on every WebP icon upload.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "storage",
+      "feature": "uploads",
+      "subfeature": "icon-policy",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/storage.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0214",
+        "lords-regiment-dashboard:T-0215"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "createUploadTicket accepts image/webp for rank-image/medal-image and stores a .webp key",
+          "status": "passed"
+        },
+        {
+          "desc": "getPolicy advertises PNG+SVG+WebP for the icon targets",
+          "status": "passed"
+        },
+        {
+          "desc": "assertIconWithinDimensions rejects an oversized WebP (VP8X header parse) and passes a within-cap one",
+          "status": "passed"
+        },
+        {
+          "desc": "PNG + SVG icon uploads are unaffected (SVG still dimension-exempt)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "ICON_IMAGE_TYPES + assertIconWithinDimensions are the shared rank/medal icon upload gate; the WebP additions must not loosen the PNG/SVG policy or the 250px cap.",
+          "status": "resolved",
+          "notedAt": "2026-07-19T03:32:11Z",
+          "resolvedAt": "2026-07-19T03:32:11Z",
+          "resolvedBy": "claude",
+          "note": "WebP added alongside PNG/SVG (order preserved); WebP dimension parsing (VP8/VP8L/VP8X) enforces the same 250px cap, PNG path unchanged, SVG still exempt. Pinned by storage.service.spec (webp accept/reject/policy) \u2014 387 unit tests green."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
+      "createdAt": "2026-07-19T03:32:11Z",
+      "updatedAt": "2026-07-19T20:45:48Z",
+      "history": [
+        {
+          "at": "2026-07-19T03:32:11Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Created + implemented in one pass (discovered as the backend counterpart to FE WebP acceptance). ICON_IMAGE_TYPES += image/webp; parseWebpDimensions added; assertIconWithinDimensions reads 32 bytes and tries PNG then WebP. Tests green."
+        },
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Follow-up in T-0132: post-mvp e2e storage-policy assertion still expected the pre-WebP icon set and failed CI."
+        }
+      ]
+    },
+    {
+      "id": "T-0131",
+      "title": "Fix invalid testPlan status values breaking Blueframe state validation",
+      "summary": "The T-0129/T-0130 test plans recorded verified items with status \"done\", which is not a member of the testPlan status enum (pending|passed|failed). state.json therefore failed schema validation and the Blueframe server at 127.0.0.1:7317 reported the repo with taskCount: 0, surfacing no tasks at all. Remapped the 8 affected entries to \"passed\" (all were verified acceptance criteria on deploy_ready tasks); no other fields changed.",
+      "status": "deploy_ready",
+      "type": "bug",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "platform",
+      "feature": "infra",
+      "subfeature": "blueframe-state",
+      "repo": "",
+      "paths": [
+        ".blueframe/state.json"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /api/state?repo=<key> returns the parsed state instead of a validation error",
+          "status": "passed"
+        },
+        {
+          "desc": "GET /api/repos reports the repo's real taskCount (not 0)",
+          "status": "passed"
+        },
+        {
+          "desc": "No \"status\": \"done\" remains anywhere in state.json; every testPlan status is pending|passed|failed",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "3c813d3c246bb7b518491401c5b5511f2dd38035",
+      "createdAt": "2026-07-19T04:10:00Z",
+      "updatedAt": "2026-07-19T04:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-19T04:10:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-19T04:10:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Remapped 8 testPlan \"done\" -> \"passed\"; server now loads the repo (taskCount restored)."
+        }
+      ]
+    },
+    {
+      "id": "T-0132",
+      "title": "Fix CI: approve dropped the promotion FK; icon-policy e2e left stale",
+      "summary": "PR #16 CI failed on 6 e2e tests from two causes. (1) T-0129 added promotedMember to loadOrFail's relations; TypeORM gives a LOADED relation precedence over the raw FK column on save, so the hydrated promotedMember=null overwrote promotedMemberId and approve wrote promoted_member_id = NULL. POST /applications/:id/approve returned promotedMemberId: null, and discord.e2e \u2014 which derives its member id from that response \u2014 404d every downstream ban/suspend/rank call. Fixed by assigning the relation alongside the FK, which also lets the approve response carry the new member's live identity. (2) T-0130 intentionally added image/webp to ICON_IMAGE_TYPES and updated the unit spec, but the post-mvp e2e storage-policy assertion still expected PNG+SVG only; updated to PNG+SVG+WebP (jpeg still excluded).",
+      "status": "deploy_ready",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 1,
+      "area": "applications",
+      "feature": "review",
+      "repo": "",
+      "paths": [
+        "src/applications/applications.service.ts",
+        "src/applications/applications.service.spec.ts",
+        "test/post-mvp.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0129",
+        "T-0130"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "approve persists the promoted member on BOTH the FK and the relation (unit regression test)",
+          "status": "passed"
+        },
+        {
+          "desc": "mvp e2e: approve returns a non-null promotedMemberId and the member lands on the roster",
+          "status": "passed"
+        },
+        {
+          "desc": "discord e2e: ban/unban, suspend/unsuspend and rank-change enqueue jobs against the promoted member",
+          "status": "passed"
+        },
+        {
+          "desc": "post-mvp e2e: storage policy advertises png+svg+webp for icon targets, still excluding jpeg",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Any entity save after loadOrFail now carries loaded relations \u2014 a loaded relation silently overrides its FK column on save, so future code setting only an *Id field on an Application can lose the write the same way.",
+          "status": "open",
+          "notedAt": "2026-07-19T20:45:48Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not audit other services for the same loaded-relation-vs-FK footgun; only the applications approve path was fixed.",
+        "Did not run `npm run build` locally (dist/ is root-owned from a prior docker build); used `npx tsc -p tsconfig.build.json --noEmit` as the type gate instead."
+      ],
+      "lastTouchedCommit": "4870cd2",
+      "createdAt": "2026-07-19T20:45:48Z",
+      "updatedAt": "2026-07-19T20:45:48Z",
+      "history": [
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created \u2014 PR #16 CI failure triage"
+        },
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Fixed both causes; reproduced each failure locally first. 388 unit + 43 e2e green, lint + tsc clean. Pushed as 4870cd2."
+        }
+      ],
+      "subfeature": "live-identity"
     }
   ]
 }
