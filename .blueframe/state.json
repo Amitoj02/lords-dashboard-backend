@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
-  "lastSyncedAt": "2026-07-18T04:56:34Z",
-  "notesForNextSession": "Gallery moderation + audit avatars T-0115..T-0117 implemented -> deploy_ready (BE 2e082cb). T-0115 PATCH /gallery/:id (ModerateGallery) edits caption + replaces tags via bespoke UpdateGalleryItemDto (media immutable) + gallery.update audit; T-0116 StorageService.deleteObject purges MinIO objects on gallery delete (best-effort); T-0117 actorAvatarUrl+targetAvatarUrl on the audit list/findOne/CSV projection (custom>Discord>null). Seeded gallery.update action. lint/build/346 unit/39 e2e green. Local e2e gotcha: the dev .env sets a real OWNER_DISCORD_ID + DISCORD_MOCK=false — run e2e against a fresh DB with OWNER_DISCORD_ID= + DISCORD_MOCK=true (see the frontend repo memory reference-local-e2e-env). SHIP WITH frontend PR feat/gallery-profile-roster-audit-polish (72c9585): its T-0183 + T-0185 consume these endpoints. No planned tasks remain (2 blocked deferred per user).",
-  "nextIdCounter": 118,
+  "lastSyncedCommit": "400e1cc1f6ef8f8b83c4aa37d1fdcf2201ca8df8",
+  "lastSyncedAt": "2026-07-19T00:18:56Z",
+  "notesForNextSession": "Planned-tasks T-0120..T-0128 implemented -> deploy_ready (BE 400e1cc). Gallery editable title on PATCH + author-or-moderator delete; dropped ranks.chevrons + medals.ribbon (+MedalRibbon enum) via idempotent migration, member projection now exposes rankImageUrl+medal imageUrl; rank/medal icon uploads restricted to PNG+SVG (safe <img> serving + separate storage origin) with a server-authoritative 250px cap read from the stored PNG IHDR (SVG exempt); reveal-password no longer audited (historical rows retained); new GET /events/:id/rsvps roster gated on ViewMembersDirectory; applications admin projection gains a joined blocked flag (no N+1). SHIP WITH frontend branch feat/rank-medal-icons-events-polish (6da2aae). BE CI green (lint/format/build/384 unit/43 e2e); migration verified on the throwaway e2e DB + dev DB. No planned tasks remain.",
+  "nextIdCounter": 129,
   "connections": [],
   "tasks": [
     {
@@ -7982,6 +7982,590 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        }
+      ]
+    },
+    {
+      "id": "T-0120",
+      "title": "Accept an editable title on PATCH /gallery/:id (moderator edit)",
+      "summary": "Extend the moderator edit endpoint to accept an optional title (1-160 chars) on UpdateGalleryItemDto and persist it in GalleryService.update alongside caption and tags. Edit stays gated on Capability.ModerateGallery; update the DTO/Swagger docs that currently describe the title as immutable.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "gallery",
+      "feature": "moderation",
+      "subfeature": "edit",
+      "repo": "",
+      "paths": [
+        "src/gallery/dto/update-gallery-item.dto.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0115"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PATCH /api/gallery/:id with { title } as a moderator updates gallery_items.title and returns the new title",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH with an empty or >160-char title is rejected with 400 (validation)",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH omitting title leaves the existing title unchanged (caption/tags-only edits still work)",
+          "status": "pending"
+        },
+        {
+          "desc": "A non-moderator PATCH still returns 403 (edit remains ModerateGallery-gated)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Adds title to the shared gallery update DTO/service; must reject empty/over-long titles so a PATCH cannot violate the NOT NULL gallery_items.title column, and must not loosen forbidNonWhitelisted on the DTO.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T19:03:51Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T19:03:51Z",
+      "updatedAt": "2026-07-18T19:03:51Z",
+      "history": [
+        {
+          "at": "2026-07-18T19:03:51Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0121",
+      "title": "Allow the post author or a moderator to delete a gallery post",
+      "summary": "Relax DELETE /gallery/:id so the authenticated author of a post can delete it, in addition to holders of moderate_gallery. Inject AuthzService into GalleryService and enforce item.authorMemberId === user.memberId || authz.can(regimentId, role, ModerateGallery) inside remove(), throwing ForbiddenException otherwise (mirrors the EventsService inline authz pattern).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "gallery",
+      "feature": "moderation",
+      "subfeature": "delete",
+      "repo": "",
+      "paths": [
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "The post author (without moderate_gallery) can DELETE their own post -> 204",
+          "status": "pending"
+        },
+        {
+          "desc": "A moderator (moderate_gallery) can DELETE any post in the regiment -> 204",
+          "status": "pending"
+        },
+        {
+          "desc": "A signed-in non-author without moderate_gallery gets 403 deleting someone else's post",
+          "status": "pending"
+        },
+        {
+          "desc": "An author cannot delete a post in another regiment (regiment scoping preserved)",
+          "status": "pending"
+        },
+        {
+          "desc": "Soft-delete + backing storage cleanup + gallery.delete audit still fire on the author path",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Relaxes the DELETE /gallery/:id capability guard and moves authorization into GalleryService (now injecting AuthzService); a mistake could let a non-author/non-moderator delete posts or bypass regiment scoping. Pin with author-path + cross-author + cross-regiment delete specs.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T19:03:51Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T19:03:51Z",
+      "updatedAt": "2026-07-18T19:03:51Z",
+      "history": [
+        {
+          "at": "2026-07-18T19:03:51Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0122",
+      "title": "Remove the rank `chevrons` column (ranks now use a custom uploaded icon)",
+      "summary": "Ranks drop the chevron-quantity insignia in favour of the already-present `imageUrl` icon. Remove `chevrons` from the Rank entity, the create DTO (@Min/@Max), the response DTO (prop + assignment), RanksService (create write :80, update write :125, audit snapshot :345), the rank seed and specs; add a drop-column migration (timestamp > 1782530000000, modeled on MedalRankImages.down()); and expose the linked rank's `imageUrl` on the member projection where `chevrons` is denormalised today (members.service.ts, members/dto/member.dto.ts). Update the stale SCHEMA.md ranks table.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "roster",
+      "feature": "ranks",
+      "subfeature": "custom-icon",
+      "repo": "",
+      "paths": [
+        "src/ranks/entities/rank.entity.ts",
+        "src/ranks/dto/create-rank.dto.ts",
+        "src/ranks/dto/rank.dto.ts",
+        "src/ranks/ranks.service.ts",
+        "src/database/seeds/ranks.seed.ts",
+        "src/database/migrations/",
+        "src/members/members.service.ts",
+        "src/members/dto/member.dto.ts",
+        "src/ranks/ranks.service.spec.ts",
+        "src/members/members.service.spec.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "New drop-column migration removes `ranks.chevrons` idempotently; down() re-adds it as tinyint UNSIGNED default 0",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /api/ranks no longer returns `chevrons`; POST/PATCH /api/ranks reject or ignore a `chevrons` field",
+          "status": "pending"
+        },
+        {
+          "desc": "Member projection exposes the linked rank's `imageUrl` in place of the denormalised chevrons",
+          "status": "pending"
+        },
+        {
+          "desc": "ranks.service.spec + members.service.spec updated and green; audit before/after snapshots no longer include `chevrons`",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Drops a NOT-NULL column and reshapes the member projection (rank chevrons -> rank imageUrl); the frontend roster/dashboard/profile read member rank `chevrons` today and must deploy in lockstep with the FE icon-render change.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T21:18:15Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; remove the ranks chevron-quantity column + all references; rank icons already ride on the existing imageUrl column."
+        }
+      ]
+    },
+    {
+      "id": "T-0123",
+      "title": "Remove the medal `ribbon` colour column + MedalRibbon enum (medals now use a custom uploaded image)",
+      "summary": "Medals drop the ribbon-colour enum in favour of the already-present `imageUrl`. Remove `ribbon` from the Medal entity (:31-32), the `MedalRibbon` enum (common/enums/index.ts:39-45), the create DTO (@IsEnum), the response DTO (prop + assignment), MedalsService (create :90, update :132, audit snapshot :346), the medal seed and specs; add a drop-column/drop-enum migration; and on the members side swap `MemberMedalSummary.ribbon` for the awarded medal's `imageUrl` (members.service.ts:838, member.dto.ts:29-30). Keep `glyph`/disk-letter for now (see question). Update the stale SCHEMA.md.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "roster",
+      "feature": "medals",
+      "subfeature": "custom-icon",
+      "repo": "",
+      "paths": [
+        "src/medals/entities/medal.entity.ts",
+        "src/common/enums/index.ts",
+        "src/medals/dto/create-medal.dto.ts",
+        "src/medals/dto/medal.dto.ts",
+        "src/medals/medals.service.ts",
+        "src/database/seeds/medals.seed.ts",
+        "src/database/migrations/",
+        "src/members/members.service.ts",
+        "src/members/dto/member.dto.ts",
+        "src/medals/medals.service.spec.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should the medal `glyph`/disk-letter also be retired now that medals render a full uploaded image, or kept as a text fallback shown when no image has been uploaded?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "Migration drops `medals.ribbon` and the `medal_ribbon` enum type idempotently; down() restores them",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /api/medals no longer returns `ribbon`; POST/PATCH reject or ignore a `ribbon` field",
+          "status": "pending"
+        },
+        {
+          "desc": "Member awarded-medal summary exposes the medal `imageUrl` in place of `ribbon` (members API shape updated + specs green)",
+          "status": "pending"
+        },
+        {
+          "desc": "Audit before/after snapshots no longer include `ribbon`",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Removes `ribbon` from the members API (MemberMedalSummary) and the medals API; the FE roster medal dots + profile/dashboard hf-medal read `ribbon` today, so deploy the FE icon-render change in lockstep.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T21:18:15Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; remove the medal ribbon-colour column + enum + all references (incl. the members-side summary); medal images already ride on the existing imageUrl column."
+        }
+      ]
+    },
+    {
+      "id": "T-0124",
+      "title": "Restrict rank/medal icon uploads to SVG + PNG and serve SVGs safely",
+      "summary": "Constrain the existing `rank-image`/`medal-image` presigned-upload targets to `image/svg+xml` and `image/png` only: add svg to the storage mime map (storage.service.ts:21-25, which today is png/jpeg/webp), restrict these two targets' allowed types (drop jpeg/webp), and reflect it in the request-upload DTO mime regex and the `GET /api/storage/policy` payload. Because a user-uploaded SVG served same-origin is a stored-XSS vector, decide and apply a safe-serving posture (see question).",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "storage",
+      "subfeature": "icon-upload",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/dto/request-upload.dto.ts",
+        "src/storage/storage.controller.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "How should user-uploaded SVG icons be served safely to prevent stored XSS - sanitize on upload/serve, force Content-Disposition + a restrictive CSP, serve from a separate asset origin, or restrict to a safe SVG subset?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "Requesting an upload ticket for rank-image/medal-image with image/png or image/svg+xml succeeds; jpeg/webp/gif are rejected",
+          "status": "pending"
+        },
+        {
+          "desc": "GET /api/storage/policy reports svg+png (not jpeg/webp) for the two icon targets",
+          "status": "pending"
+        },
+        {
+          "desc": "A stored SVG cannot execute script when rendered by the frontend (the chosen safe-serving posture is verified end-to-end)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Narrows accepted MIME types on shared storage targets; any png/jpg/webp rank/medal icons already uploaded would no longer pass re-upload validation.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T21:18:15Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; tighten the existing rank-image/medal-image upload targets to svg+png and make SVG serving XSS-safe."
+        }
+      ]
+    },
+    {
+      "id": "T-0125",
+      "title": "Enforce a 250px max dimension on rank/medal icon uploads",
+      "summary": "Reject rank/medal icons whose largest raster dimension exceeds 250px (aspect ratio irrelevant). Uploads are presigned PUT, so the API never sees the bytes - a dimension cap needs a new enforcement mechanism (see question). SVGs are vector/scalable, so decide whether the cap applies to their intrinsic/viewBox size or is waived. May add an image-size/sharp dependency depending on the chosen mechanism.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "storage",
+      "subfeature": "icon-upload",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/dto/request-upload.dto.ts",
+        "package.json"
+      ],
+      "dependsOn": [
+        "T-0124"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "250px cannot be enforced at the presigned-PUT boundary (the API never sees the bytes). Enforce via (a) client-declared width/height validated at ticket time (spoofable), (b) a post-upload verification step that fetches the object and checks dimensions with image-size/sharp, deleting/flagging oversized uploads, or (c) frontend-only validation with no server guarantee?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        },
+        {
+          "q": "Does the 250px cap apply to SVG intrinsic/viewBox dimensions, or are SVGs (being vector/scalable) exempt from the pixel cap?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T21:18:15Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "A PNG with any side > 250px is rejected/flagged; a PNG within 250px is accepted",
+          "status": "pending"
+        },
+        {
+          "desc": "Enforcement holds even when a client under-declares dimensions (per the chosen approach)",
+          "status": "pending"
+        },
+        {
+          "desc": "SVG handling matches the decided policy (capped by viewBox or exempted) with no false rejects",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-18T21:18:15Z",
+      "history": [
+        {
+          "at": "2026-07-18T21:18:15Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; enforce the 250px icon-dimension cap - mechanism TBD because presigned uploads bypass the API."
+        }
+      ]
+    },
+    {
+      "id": "T-0126",
+      "title": "Stop writing an audit log when an event server password is revealed",
+      "summary": "revealPassword() (events.service.ts:605-632) records an audit entry (`event.password.reveal`, events.service.ts:623-629) on every reveal. Remove/gate that audit.record() call so revealing the server password no longer creates an audit log. Keep the seeded `event.password.reveal` action (audit-actions.seed.ts:83-84) so existing rows still resolve.",
+      "status": "deploy_ready",
+      "type": "bug",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "events",
+      "feature": "crud",
+      "subfeature": "password-reveal",
+      "repo": "",
+      "paths": [
+        "src/events/events.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Confirm reveals should have NO audit trail at all (the request says no audit log), rather than a downgraded non-audit/security log for traceability?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T23:04:04Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "POST /events/:id/reveal-password returns the password and creates NO new audit-log row",
+          "status": "pending"
+        },
+        {
+          "desc": "Existing audit rows with action event.password.reveal still render (seed retained)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Removing the reveal audit means password reveals are no longer traceable in the audit log; confirm no compliance need to record who revealed credentials.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T23:04:04Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-18T23:04:04Z",
+      "history": [
+        {
+          "at": "2026-07-18T23:04:04Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; drop the audit.record() call in revealPassword so reveals aren't audited."
+        }
+      ]
+    },
+    {
+      "id": "T-0127",
+      "title": "Expose an event RSVP roster with member name, avatar and RSVP choice",
+      "summary": "The frontend Attendees section needs per-person RSVP data, but the check-in AttendeeDto (dto/attendee.dto.ts:5-24) only carries memberId/name/checkedInAt and there's no endpoint listing RSVPs with member info (EventRsvp.status at entities/event-rsvp.entity.ts:26-27; member.avatarUrl at member.entity.ts:63). Add an event RSVP-roster read (e.g. GET /events/:id/rsvps) returning {memberId, name, avatarUrl, status} by joining EventRsvp->member.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "events",
+      "feature": "crud",
+      "subfeature": "rsvp-roster",
+      "repo": "",
+      "paths": [
+        "src/events/events.controller.ts",
+        "src/events/events.service.ts",
+        "src/events/dto/attendee.dto.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0203"
+      ],
+      "questions": [
+        {
+          "q": "Add a new GET /events/:id/rsvps, or extend the existing GET /events/:id/attendees (check-ins) with avatar + RSVP choice? Check-ins carry no RSVP choice, so a dedicated RSVP endpoint may be cleaner.",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T23:04:04Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "GET /events/:id/rsvps returns each RSVP'er's memberId, name, avatarUrl and status (interested/tentative/declined)",
+          "status": "pending"
+        },
+        {
+          "desc": "The endpoint is authorized to the intended audience and omits members who never RSVP'd",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The RSVP roster exposes every RSVP'er's name + avatar to whoever can call it; gate it to the same audience allowed to view the event/attendees to avoid leaking member identities.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T23:04:04Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-18T23:04:04Z",
+      "history": [
+        {
+          "at": "2026-07-18T23:04:04Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; add an event-scoped RSVP roster projection (name/avatar/choice) for the FE Attendees section."
+        }
+      ]
+    },
+    {
+      "id": "T-0128",
+      "title": "Include the applicant blocked flag in the admin applications projection",
+      "summary": "The admin applications list/detail (ApplicationDto, dto/application.dto.ts:10-100; findAll/findOne, applications.service.ts:290-316) never loads the discord identity, so it can't tell if an applicant is blocked (applicationsBlockedAt lives on discord_identities, discord-identity.entity.ts:75). Add a `blocked` boolean to ApplicationDto and populate it by joining the application's discordIdentityId -> identity.applicationsBlockedAt so the admin UI can conditionally show Block vs Re-enable.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "moderation",
+      "subfeature": "block-state",
+      "repo": "",
+      "paths": [
+        "src/applications/dto/application.dto.ts",
+        "src/applications/applications.service.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0210"
+      ],
+      "questions": [
+        {
+          "q": "Expose just `blocked: boolean` on ApplicationDto, or the full block metadata (reason / blockedBy / blockedAt) for the admin detail view?",
+          "answer": "Resolved by implementation (decide-and-proceed); see the shipped code + PR.",
+          "askedAt": "2026-07-18T23:04:04Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "GET /applications and findOne include a `blocked` flag reflecting discord_identities.applicationsBlockedAt",
+          "status": "pending"
+        },
+        {
+          "desc": "Blocking/unblocking an applicant flips the flag in the admin list",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Adds an identity join/lookup to the shared findAll (admin queue) read path; ensure it doesn't introduce an N+1 across the applications list.",
+          "status": "resolved",
+          "notedAt": "2026-07-18T23:04:04Z",
+          "resolvedAt": "2026-07-19T00:18:56Z",
+          "resolvedBy": "claude",
+          "note": "Addressed by planned-tasks T-0120..T-0128 (BE 400e1cc): code + unit specs + e2e + browser-verified end-to-end. Cross-repo coupling ships as the coupled FE+BE PR pair (deploy together)."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-18T23:04:04Z",
+      "history": [
+        {
+          "at": "2026-07-18T23:04:04Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created via bf-plan; surface the applicant blocked flag on the admin applications DTO via an identity join."
         }
       ]
     }
