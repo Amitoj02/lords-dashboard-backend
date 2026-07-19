@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "3c813d3c246bb7b518491401c5b5511f2dd38035",
-  "lastSyncedAt": "2026-07-19T04:10:00Z",
-  "notesForNextSession": "BLUEFRAME GOTCHA (fixed in T-0131): testPlan item status MUST be one of pending|passed|failed. \"done\" is NOT valid and silently breaks the ENTIRE repo in the Blueframe UI \u2014 state.json fails schema validation, so the server at 127.0.0.1:7317 reports taskCount: 0 and shows no tasks. After editing state.json verify with: curl -s http://127.0.0.1:7317/api/repos (taskCount 0 == invalid file); curl -s 'http://127.0.0.1:7317/api/state?repo=<key>' prints the exact schema errors. Note the file is written ASCII-escaped (ensure_ascii) \u2014 keep it that way or every em-dash line shows as a spurious diff. PREVIOUS HANDOFF: T-0129 (live applicant identity on ApplicationDto: currentDisplayName/currentAvatarUrl from promoted member -> Discord identity -> null; promotedMember eager-load in findAll/loadOrFail) + T-0130 (WebP accepted for rank/medal icons: ICON_IMAGE_TYPES += image/webp, WebP RIFF dimension parsing keeps the 250px cap) -> deploy_ready (BE 364d05e). SHIP WITH frontend branch feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224): the FE offers WebP icon uploads (would 400 without T-0130) and renders the live applicant identity + profile deep-link (needs T-0129). BE CI green locally: lint + tsc + 387 unit tests; build/e2e need a clean container (local dist/ is root-owned from a prior docker build) + running DB. Browser-verified end-to-end against the live dev API (webp policy, live currentDisplayName=\"Test\" over snapshot). No backend planned tasks remain (2 blocked off-ramps untouched per request).",
-  "nextIdCounter": 132,
+  "lastSyncedCommit": "4870cd29ce4b74f0e006101b336a73520aafd880",
+  "lastSyncedAt": "2026-07-19T20:45:48Z",
+  "notesForNextSession": "PR #16 (feat/webp-icons-live-applicant-identity) CI was RED and is now fixed in T-0132 (4870cd2) \u2014 watch the run before merging. Two causes, both reproduced locally first: (1) T-0129 eager-loading promotedMember in loadOrFail made TypeORM write promoted_member_id = NULL on approve (a LOADED relation beats the raw FK column on save), which nulled promotedMemberId in the approve response and cascaded into 4 discord e2e failures that derive their member id from it; fix assigns application.promotedMember = member alongside the FK. (2) T-0130 added WebP to ICON_IMAGE_TYPES but left post-mvp e2e's storage-policy assertion on the old PNG+SVG set. LESSON: the previous session shipped T-0129/T-0130 on unit tests alone and marked the shared-code risk resolved without ever running e2e \u2014 run e2e locally before calling a shared-code change verified. LOCAL E2E RECIPE (CI has no .env, so it hides these): drop/recreate a scratch DB, then run BOTH migrate+seed AND jest with DB_DATABASE=<scratch> DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= \u2014 .env otherwise seeds the real owner snowflake (every capability endpoint 403s) and disables the bot mock (wsPing null). Local `npm run build` EACCESes on the root-owned dist/; use `npx tsc -p tsconfig.build.json --noEmit`. STILL SHIP WITH frontend feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224). OPEN RISK T-0132#0: the loaded-relation-vs-FK footgun is not audited outside the approve path. BLUEFRAME GOTCHA (T-0131): testPlan item status MUST be pending|passed|failed \u2014 \"done\" silently fails schema validation and blanks the whole repo in the UI (taskCount: 0 at 127.0.0.1:7317/api/repos). Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff.",
+  "nextIdCounter": 133,
   "connections": [],
   "tasks": [
     {
@@ -8614,15 +8614,15 @@
           "desc": "ApplicationDto.from() shared by queue/detail/self-service responses \u2014 new relation load must not break existing callers",
           "status": "resolved",
           "notedAt": "2026-07-19T01:00:00Z",
-          "resolvedAt": "2026-07-19T03:32:11Z",
+          "resolvedAt": "2026-07-19T20:45:48Z",
           "resolvedBy": "claude",
-          "note": "ApplicationDto.from stays null-safe for all callers (self-service returns null live-identity); findAll/findOne eager-load promotedMember with no N+1. Verified by applications.service.spec (387 unit tests green) and live API returning currentDisplayName/currentAvatarUrl."
+          "note": "ApplicationDto.from stays null-safe for all callers (self-service returns null live-identity); findAll/findOne eager-load promotedMember with no N+1. Verified by applications.service.spec (387 unit tests green) and live API returning currentDisplayName/currentAvatarUrl. FOLLOW-UP (T-0132): this resolution was premature \u2014 it was verified against unit tests and read paths only, never e2e. The new promotedMember eager-load in loadOrFail DID break a write caller: TypeORM lets a loaded relation win over the raw FK on save, so approve wrote promoted_member_id = NULL. Fixed in 4870cd2; mvp + discord e2e now cover it."
         }
       ],
       "skippedByClaude": [],
       "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
       "createdAt": "2026-07-19T01:00:00Z",
-      "updatedAt": "2026-07-19T03:32:11Z",
+      "updatedAt": "2026-07-19T20:45:48Z",
       "history": [
         {
           "at": "2026-07-19T01:00:00Z",
@@ -8637,6 +8637,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented: ApplicationDto currentDisplayName/currentAvatarUrl + promotedMember eager-load (findAll join, loadOrFail relations). Tests + live API verified. Coupled FE PR feat/admin-polish-audit-diff-webp-live-identity."
+        },
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Risk note amended: the eager-load regressed the approve write path (fixed in T-0132)."
         }
       ]
     },
@@ -8693,7 +8700,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
       "createdAt": "2026-07-19T03:32:11Z",
-      "updatedAt": "2026-07-19T03:32:11Z",
+      "updatedAt": "2026-07-19T20:45:48Z",
       "history": [
         {
           "at": "2026-07-19T03:32:11Z",
@@ -8701,6 +8708,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Created + implemented in one pass (discovered as the backend counterpart to FE WebP acceptance). ICON_IMAGE_TYPES += image/webp; parseWebpDimensions added; assertIconWithinDimensions reads 32 bytes and tries PNG then WebP. Tests green."
+        },
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Follow-up in T-0132: post-mvp e2e storage-policy assertion still expected the pre-WebP icon set and failed CI."
         }
       ]
     },
@@ -8757,6 +8771,78 @@
           "note": "Remapped 8 testPlan \"done\" -> \"passed\"; server now loads the repo (taskCount restored)."
         }
       ]
+    },
+    {
+      "id": "T-0132",
+      "title": "Fix CI: approve dropped the promotion FK; icon-policy e2e left stale",
+      "summary": "PR #16 CI failed on 6 e2e tests from two causes. (1) T-0129 added promotedMember to loadOrFail's relations; TypeORM gives a LOADED relation precedence over the raw FK column on save, so the hydrated promotedMember=null overwrote promotedMemberId and approve wrote promoted_member_id = NULL. POST /applications/:id/approve returned promotedMemberId: null, and discord.e2e \u2014 which derives its member id from that response \u2014 404d every downstream ban/suspend/rank call. Fixed by assigning the relation alongside the FK, which also lets the approve response carry the new member's live identity. (2) T-0130 intentionally added image/webp to ICON_IMAGE_TYPES and updated the unit spec, but the post-mvp e2e storage-policy assertion still expected PNG+SVG only; updated to PNG+SVG+WebP (jpeg still excluded).",
+      "status": "deploy_ready",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 1,
+      "area": "applications",
+      "feature": "review",
+      "repo": "",
+      "paths": [
+        "src/applications/applications.service.ts",
+        "src/applications/applications.service.spec.ts",
+        "test/post-mvp.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0129",
+        "T-0130"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "approve persists the promoted member on BOTH the FK and the relation (unit regression test)",
+          "status": "passed"
+        },
+        {
+          "desc": "mvp e2e: approve returns a non-null promotedMemberId and the member lands on the roster",
+          "status": "passed"
+        },
+        {
+          "desc": "discord e2e: ban/unban, suspend/unsuspend and rank-change enqueue jobs against the promoted member",
+          "status": "passed"
+        },
+        {
+          "desc": "post-mvp e2e: storage policy advertises png+svg+webp for icon targets, still excluding jpeg",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Any entity save after loadOrFail now carries loaded relations \u2014 a loaded relation silently overrides its FK column on save, so future code setting only an *Id field on an Application can lose the write the same way.",
+          "status": "open",
+          "notedAt": "2026-07-19T20:45:48Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not audit other services for the same loaded-relation-vs-FK footgun; only the applications approve path was fixed.",
+        "Did not run `npm run build` locally (dist/ is root-owned from a prior docker build); used `npx tsc -p tsconfig.build.json --noEmit` as the type gate instead."
+      ],
+      "lastTouchedCommit": "4870cd2",
+      "createdAt": "2026-07-19T20:45:48Z",
+      "updatedAt": "2026-07-19T20:45:48Z",
+      "history": [
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created \u2014 PR #16 CI failure triage"
+        },
+        {
+          "at": "2026-07-19T20:45:48Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Fixed both causes; reproduced each failure locally first. 388 unit + 43 e2e green, lint + tsc clean. Pushed as 4870cd2."
+        }
+      ],
+      "subfeature": "live-identity"
     }
   ]
 }
