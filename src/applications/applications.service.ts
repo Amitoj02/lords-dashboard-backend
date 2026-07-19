@@ -381,6 +381,12 @@ export class ApplicationsService {
 
       application.status = ApplicationStatus.Approved;
       application.promotedMemberId = member.id;
+      // `loadOrFail` hydrates the `promotedMember` relation (null before approval,
+      // T-0129). TypeORM gives a LOADED relation precedence over the raw FK column
+      // on save, so leaving it null here would write promoted_member_id = NULL and
+      // silently discard the promotion. Keep the two in step — this also lets the
+      // approve response carry the new member's live identity.
+      application.promotedMember = member;
       application.decidedByMemberId = user.memberId;
       application.decidedAt = now;
       const savedApplication = await applicationRepo.save(application);

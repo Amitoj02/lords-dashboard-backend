@@ -534,6 +534,20 @@ describe('ApplicationsService', () => {
       );
     });
 
+    it('persists the promoted member on BOTH the FK and the relation', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      // `loadOrFail` hydrates `promotedMember` (null pre-approval, T-0129) and TypeORM
+      // lets a loaded relation win over the raw FK on save — so persisting only
+      // `promotedMemberId` would write promoted_member_id = NULL and lose the promotion.
+      const saved = txApplications.save!.mock.calls[0][0] as Application;
+      expect(saved.promotedMemberId).toBe('member-new');
+      expect(saved.promotedMember).toMatchObject({ id: 'member-new' });
+    });
+
     it('enlists a Mercenary applicant as a Mercenary (T-0095)', async () => {
       applications.findOne!.mockResolvedValue(
         baseApplication({ applicantType: ApplicantType.Mercenary }),
