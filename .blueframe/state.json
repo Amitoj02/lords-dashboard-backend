@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "400e1cc1f6ef8f8b83c4aa37d1fdcf2201ca8df8",
-  "lastSyncedAt": "2026-07-19T00:18:56Z",
-  "notesForNextSession": "Planned-tasks T-0120..T-0128 implemented -> deploy_ready (BE 400e1cc). Gallery editable title on PATCH + author-or-moderator delete; dropped ranks.chevrons + medals.ribbon (+MedalRibbon enum) via idempotent migration, member projection now exposes rankImageUrl+medal imageUrl; rank/medal icon uploads restricted to PNG+SVG (safe <img> serving + separate storage origin) with a server-authoritative 250px cap read from the stored PNG IHDR (SVG exempt); reveal-password no longer audited (historical rows retained); new GET /events/:id/rsvps roster gated on ViewMembersDirectory; applications admin projection gains a joined blocked flag (no N+1). SHIP WITH frontend branch feat/rank-medal-icons-events-polish (6da2aae). BE CI green (lint/format/build/384 unit/43 e2e); migration verified on the throwaway e2e DB + dev DB. No planned tasks remain.",
-  "nextIdCounter": 130,
+  "lastSyncedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
+  "lastSyncedAt": "2026-07-19T03:32:11Z",
+  "notesForNextSession": "T-0129 (live applicant identity on ApplicationDto: currentDisplayName/currentAvatarUrl from promoted member -> Discord identity -> null; promotedMember eager-load in findAll/loadOrFail) + T-0130 (WebP accepted for rank/medal icons: ICON_IMAGE_TYPES += image/webp, WebP RIFF dimension parsing keeps the 250px cap) -> deploy_ready (BE 364d05e). SHIP WITH frontend branch feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224): the FE offers WebP icon uploads (would 400 without T-0130) and renders the live applicant identity + profile deep-link (needs T-0129). BE CI green locally: lint + tsc + 387 unit tests; build/e2e need a clean container (local dist/ is root-owned from a prior docker build) + running DB. Browser-verified end-to-end against the live dev API (webp policy, live currentDisplayName=\"Test\" over snapshot). No backend planned tasks remain (2 blocked off-ramps untouched per request).",
+  "nextIdCounter": 131,
   "connections": [],
   "tasks": [
     {
@@ -8573,7 +8573,7 @@
       "id": "T-0129",
       "title": "Expose live applicant identity on the admin application projection",
       "summary": "Extend ApplicationDto with the applicant's live identity \u2014 currentAvatarUrl and currentDisplayName \u2014 derived from the promoted member (so post-approval profile edits are reflected) and falling back to the linked Discord identity's avatarUrl/globalName. Load the promotedMember relation in the admin queue findAll/findOne queries (discordIdentity is already joined); promotedMemberId is already exposed to drive the profile deep-link.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8594,32 +8594,35 @@
       "testPlan": [
         {
           "desc": "ApplicationDto.from() resolves currentDisplayName/currentAvatarUrl from the promoted member when present",
-          "status": "pending"
+          "status": "done"
         },
         {
           "desc": "Falls back to the linked Discord identity's globalName/avatarUrl when there is no promoted member",
-          "status": "pending"
+          "status": "done"
         },
         {
           "desc": "findAll and findOne eager-load promotedMember so the projection has live data without N+1",
-          "status": "pending"
+          "status": "done"
         },
         {
           "desc": "currentAvatarUrl is null (not error) when neither member nor identity has an avatar",
-          "status": "pending"
+          "status": "done"
         }
       ],
       "regressionRisk": [
         {
           "desc": "ApplicationDto.from() shared by queue/detail/self-service responses \u2014 new relation load must not break existing callers",
-          "status": "open",
-          "notedAt": "2026-07-19T01:00:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-19T01:00:00Z",
+          "resolvedAt": "2026-07-19T03:32:11Z",
+          "resolvedBy": "claude",
+          "note": "ApplicationDto.from stays null-safe for all callers (self-service returns null live-identity); findAll/findOne eager-load promotedMember with no N+1. Verified by applications.service.spec (387 unit tests green) and live API returning currentDisplayName/currentAvatarUrl."
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
       "createdAt": "2026-07-19T01:00:00Z",
-      "updatedAt": "2026-07-19T01:00:00Z",
+      "updatedAt": "2026-07-19T03:32:11Z",
       "history": [
         {
           "at": "2026-07-19T01:00:00Z",
@@ -8627,6 +8630,77 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-07-19T03:32:11Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Implemented: ApplicationDto currentDisplayName/currentAvatarUrl + promotedMember eager-load (findAll join, loadOrFail relations). Tests + live API verified. Coupled FE PR feat/admin-polish-audit-diff-webp-live-identity."
+        }
+      ]
+    },
+    {
+      "id": "T-0130",
+      "title": "Accept WebP for rank/medal icon uploads",
+      "summary": "Extend the rank/medal icon accepted-type policy from PNG+SVG to PNG+SVG+WebP (ICON_IMAGE_TYPES) so the presign flow accepts image/webp and stores a .webp key. WebP is raster, so parse its pixel dimensions from the RIFF header (VP8/VP8L/VP8X) in assertIconWithinDimensions \u2014 reading 32 header bytes and trying PNG then WebP \u2014 to keep the 250px-per-side cap enforced server-side (SVG stays exempt). Discovered while implementing the frontend WebP acceptance (FE T-0214/T-0215): without this the FE would 400 on every WebP icon upload.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "storage",
+      "feature": "uploads",
+      "subfeature": "icon-policy",
+      "repo": "",
+      "paths": [
+        "src/storage/storage.service.ts",
+        "src/storage/storage.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0214",
+        "lords-regiment-dashboard:T-0215"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "createUploadTicket accepts image/webp for rank-image/medal-image and stores a .webp key",
+          "status": "done"
+        },
+        {
+          "desc": "getPolicy advertises PNG+SVG+WebP for the icon targets",
+          "status": "done"
+        },
+        {
+          "desc": "assertIconWithinDimensions rejects an oversized WebP (VP8X header parse) and passes a within-cap one",
+          "status": "done"
+        },
+        {
+          "desc": "PNG + SVG icon uploads are unaffected (SVG still dimension-exempt)",
+          "status": "done"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "ICON_IMAGE_TYPES + assertIconWithinDimensions are the shared rank/medal icon upload gate; the WebP additions must not loosen the PNG/SVG policy or the 250px cap.",
+          "status": "resolved",
+          "notedAt": "2026-07-19T03:32:11Z",
+          "resolvedAt": "2026-07-19T03:32:11Z",
+          "resolvedBy": "claude",
+          "note": "WebP added alongside PNG/SVG (order preserved); WebP dimension parsing (VP8/VP8L/VP8X) enforces the same 250px cap, PNG path unchanged, SVG still exempt. Pinned by storage.service.spec (webp accept/reject/policy) \u2014 387 unit tests green."
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
+      "createdAt": "2026-07-19T03:32:11Z",
+      "updatedAt": "2026-07-19T03:32:11Z",
+      "history": [
+        {
+          "at": "2026-07-19T03:32:11Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Created + implemented in one pass (discovered as the backend counterpart to FE WebP acceptance). ICON_IMAGE_TYPES += image/webp; parseWebpDimensions added; assertIconWithinDimensions reads 32 bytes and tries PNG then WebP. Tests green."
         }
       ]
     }
