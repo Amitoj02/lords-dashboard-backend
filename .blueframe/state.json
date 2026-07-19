@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
-  "lastSyncedAt": "2026-07-19T03:32:11Z",
-  "notesForNextSession": "T-0129 (live applicant identity on ApplicationDto: currentDisplayName/currentAvatarUrl from promoted member -> Discord identity -> null; promotedMember eager-load in findAll/loadOrFail) + T-0130 (WebP accepted for rank/medal icons: ICON_IMAGE_TYPES += image/webp, WebP RIFF dimension parsing keeps the 250px cap) -> deploy_ready (BE 364d05e). SHIP WITH frontend branch feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224): the FE offers WebP icon uploads (would 400 without T-0130) and renders the live applicant identity + profile deep-link (needs T-0129). BE CI green locally: lint + tsc + 387 unit tests; build/e2e need a clean container (local dist/ is root-owned from a prior docker build) + running DB. Browser-verified end-to-end against the live dev API (webp policy, live currentDisplayName=\"Test\" over snapshot). No backend planned tasks remain (2 blocked off-ramps untouched per request).",
-  "nextIdCounter": 131,
+  "lastSyncedCommit": "3c813d3c246bb7b518491401c5b5511f2dd38035",
+  "lastSyncedAt": "2026-07-19T04:10:00Z",
+  "notesForNextSession": "BLUEFRAME GOTCHA (fixed in T-0131): testPlan item status MUST be one of pending|passed|failed. \"done\" is NOT valid and silently breaks the ENTIRE repo in the Blueframe UI \u2014 state.json fails schema validation, so the server at 127.0.0.1:7317 reports taskCount: 0 and shows no tasks. After editing state.json verify with: curl -s http://127.0.0.1:7317/api/repos (taskCount 0 == invalid file); curl -s 'http://127.0.0.1:7317/api/state?repo=<key>' prints the exact schema errors. Note the file is written ASCII-escaped (ensure_ascii) \u2014 keep it that way or every em-dash line shows as a spurious diff. PREVIOUS HANDOFF: T-0129 (live applicant identity on ApplicationDto: currentDisplayName/currentAvatarUrl from promoted member -> Discord identity -> null; promotedMember eager-load in findAll/loadOrFail) + T-0130 (WebP accepted for rank/medal icons: ICON_IMAGE_TYPES += image/webp, WebP RIFF dimension parsing keeps the 250px cap) -> deploy_ready (BE 364d05e). SHIP WITH frontend branch feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224): the FE offers WebP icon uploads (would 400 without T-0130) and renders the live applicant identity + profile deep-link (needs T-0129). BE CI green locally: lint + tsc + 387 unit tests; build/e2e need a clean container (local dist/ is root-owned from a prior docker build) + running DB. Browser-verified end-to-end against the live dev API (webp policy, live currentDisplayName=\"Test\" over snapshot). No backend planned tasks remain (2 blocked off-ramps untouched per request).",
+  "nextIdCounter": 132,
   "connections": [],
   "tasks": [
     {
@@ -8701,6 +8701,60 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Created + implemented in one pass (discovered as the backend counterpart to FE WebP acceptance). ICON_IMAGE_TYPES += image/webp; parseWebpDimensions added; assertIconWithinDimensions reads 32 bytes and tries PNG then WebP. Tests green."
+        }
+      ]
+    },
+    {
+      "id": "T-0131",
+      "title": "Fix invalid testPlan status values breaking Blueframe state validation",
+      "summary": "The T-0129/T-0130 test plans recorded verified items with status \"done\", which is not a member of the testPlan status enum (pending|passed|failed). state.json therefore failed schema validation and the Blueframe server at 127.0.0.1:7317 reported the repo with taskCount: 0, surfacing no tasks at all. Remapped the 8 affected entries to \"passed\" (all were verified acceptance criteria on deploy_ready tasks); no other fields changed.",
+      "status": "deploy_ready",
+      "type": "bug",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "platform",
+      "feature": "infra",
+      "subfeature": "blueframe-state",
+      "repo": "",
+      "paths": [
+        ".blueframe/state.json"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /api/state?repo=<key> returns the parsed state instead of a validation error",
+          "status": "passed"
+        },
+        {
+          "desc": "GET /api/repos reports the repo's real taskCount (not 0)",
+          "status": "passed"
+        },
+        {
+          "desc": "No \"status\": \"done\" remains anywhere in state.json; every testPlan status is pending|passed|failed",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "3c813d3c246bb7b518491401c5b5511f2dd38035",
+      "createdAt": "2026-07-19T04:10:00Z",
+      "updatedAt": "2026-07-19T04:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-19T04:10:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-19T04:10:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "Remapped 8 testPlan \"done\" -> \"passed\"; server now loads the repo (taskCount restored)."
         }
       ]
     }
