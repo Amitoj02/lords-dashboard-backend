@@ -8594,19 +8594,19 @@
       "testPlan": [
         {
           "desc": "ApplicationDto.from() resolves currentDisplayName/currentAvatarUrl from the promoted member when present",
-          "status": "done"
+          "status": "passed"
         },
         {
           "desc": "Falls back to the linked Discord identity's globalName/avatarUrl when there is no promoted member",
-          "status": "done"
+          "status": "passed"
         },
         {
           "desc": "findAll and findOne eager-load promotedMember so the projection has live data without N+1",
-          "status": "done"
+          "status": "passed"
         },
         {
           "desc": "currentAvatarUrl is null (not error) when neither member nor identity has an avatar",
-          "status": "done"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
@@ -8665,19 +8665,19 @@
       "testPlan": [
         {
           "desc": "createUploadTicket accepts image/webp for rank-image/medal-image and stores a .webp key",
-          "status": "done"
+          "status": "passed"
         },
         {
           "desc": "getPolicy advertises PNG+SVG+WebP for the icon targets",
-          "status": "done"
+          "status": "passed"
         },
         {
           "desc": "assertIconWithinDimensions rejects an oversized WebP (VP8X header parse) and passes a within-cap one",
-          "status": "done"
+          "status": "passed"
         },
         {
           "desc": "PNG + SVG icon uploads are unaffected (SVG still dimension-exempt)",
-          "status": "done"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
