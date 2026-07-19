@@ -1,14 +1,25 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 /**
  * Body for PATCH /api/gallery/:id (moderator edit). Deliberately a bespoke class
- * — NOT a PartialType of CreateGalleryItemDto — so only the caption and tags are
- * editable: the media itself (title, type, files, linkUrl, thumbnailUrl) stays
- * immutable once submitted. Both fields are optional; an omitted field is left
+ * — NOT a PartialType of CreateGalleryItemDto — so only the title, caption and
+ * tags are editable: the media itself (type, files, linkUrl, thumbnailUrl) stays
+ * immutable once submitted. Every field is optional; an omitted field is left
  * untouched, and `tags` (when present) replaces the existing tag set wholesale.
  */
 export class UpdateGalleryItemDto {
+  @ApiPropertyOptional({
+    minLength: 1,
+    maxLength: 160,
+    description: 'Post title (must be non-empty when present; the column is NOT NULL)',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(160)
+  title?: string;
+
   @ApiPropertyOptional({ maxLength: 512 })
   @IsOptional()
   @IsString()

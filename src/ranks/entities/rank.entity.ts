@@ -25,9 +25,6 @@ export class Rank extends ShortIdEntity {
   @Column({ type: 'varchar', length: 60 })
   name: string;
 
-  @Column({ type: 'tinyint', unsigned: true, default: 0 })
-  chevrons: number;
-
   /** Public URL of an uploaded rank insignia image (via the storage presign flow, T-0070). */
   @Column({ type: 'varchar', length: 512, nullable: true })
   imageUrl: string | null;

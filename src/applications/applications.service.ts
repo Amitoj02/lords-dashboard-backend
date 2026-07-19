@@ -284,7 +284,9 @@ export class ApplicationsService {
       detail: null,
     });
 
-    return ApplicationDto.from(application);
+    // `application` was loaded before the block was cleared, so its relation is
+    // stale — pin blocked=false explicitly to reflect the just-applied unblock.
+    return ApplicationDto.from(application, false);
   }
 
   /** Admin queue: paginated, optionally status-filtered, drafts excluded. */
@@ -294,6 +296,8 @@ export class ApplicationsService {
   ): Promise<PaginatedResponseDto<ApplicationDto>> {
     const qb = this.applications
       .createQueryBuilder('a')
+      // Single join for the block flag — the whole page in one query, no N+1 (T-0128).
+      .leftJoinAndSelect('a.discordIdentity', 'identity')
       .where('a.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('a.isDraft = :isDraft', { isDraft: false });
 
@@ -541,6 +545,8 @@ export class ApplicationsService {
   private async loadOrFail(user: AuthenticatedUser, id: string): Promise<Application> {
     const application = await this.applications.findOne({
       where: { id, regimentId: user.regimentId },
+      // The identity carries the applications-block flag surfaced on the DTO (T-0128).
+      relations: { discordIdentity: true },
     });
     if (!application) {
       throw new NotFoundException('Application not found');

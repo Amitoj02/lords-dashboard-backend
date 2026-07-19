@@ -36,14 +36,6 @@ export enum Platform {
   PlayStation = 'ps',
 }
 
-export enum MedalRibbon {
-  Blue = 'blue',
-  Red = 'red',
-  Gold = 'gold',
-  Green = 'green',
-  Tricolor = 'tricolor',
-}
-
 export enum EventStatus {
   Upcoming = 'upcoming',
   Ongoing = 'ongoing',

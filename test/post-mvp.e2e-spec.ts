@@ -193,6 +193,12 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(byTarget['member-banner'].maxImageMb).toBe(12);
       expect(byTarget['event-banner'].maxImageMb).toBe(12);
       expect(byTarget['gallery'].maxVideoMb).toBe(80);
+      // Icon targets accept ONLY PNG + SVG (T-0124); raster jpeg/webp are excluded.
+      expect(byTarget['rank-image'].acceptedExtensions).toEqual(['png', 'svg']);
+      expect(byTarget['medal-image'].acceptedMimeTypes).toEqual(['image/png', 'image/svg+xml']);
+      expect(byTarget['rank-image'].acceptedMimeTypes).not.toContain('image/jpeg');
+      // Non-icon image targets keep the raster set.
+      expect(byTarget['member-avatar'].acceptedExtensions).toEqual(['png', 'jpg', 'webp']);
     });
 
     it('rejects an unauthenticated caller', async () => {
@@ -259,7 +265,7 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(mine.serverName).toBeUndefined();
     });
 
-    it('gates password reveal on an RSVP, then returns the decrypted password + audits it', async () => {
+    it('gates password reveal on an RSVP, then returns the decrypted password WITHOUT auditing it', async () => {
       // No RSVP yet → reveal is forbidden.
       await request(server())
         .post(`/api/events/${eventId}/reveal-password`)
@@ -272,17 +278,39 @@ describe('Post-MVP feature modules (e2e)', () => {
         .send({ status: 'interested' })
         .expect(200);
 
+      // Capture the reveal-audit count BEFORE revealing (T-0126: reveals are no
+      // longer audited, so this count must not change).
+      const before = await request(server())
+        .get('/api/audit?action=event.password.reveal&limit=1')
+        .set(bearer(ownerToken))
+        .expect(200);
+      const beforeTotal = before.body.meta.total;
+
       const revealed = await request(server())
         .post(`/api/events/${eventId}/reveal-password`)
         .set(bearer(ownerToken))
         .expect(200);
       expect(revealed.body.serverPassword).toBe(PASSWORD);
 
-      const audit = await request(server())
-        .get('/api/audit?action=event.password.reveal&limit=5')
+      const after = await request(server())
+        .get('/api/audit?action=event.password.reveal&limit=1')
         .set(bearer(ownerToken))
         .expect(200);
-      expect(audit.body.data.length).toBeGreaterThanOrEqual(1);
+      expect(after.body.meta.total).toBe(beforeTotal);
+    });
+
+    it('exposes the RSVP roster (name, avatar, choice) to a members-directory viewer (T-0127)', async () => {
+      // The owner RSVP'd 'interested' in the prior test; the roster reflects it.
+      const roster = await request(server())
+        .get(`/api/events/${eventId}/rsvps`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      expect(Array.isArray(roster.body)).toBe(true);
+      const entry = roster.body.find((r: { status: string }) => r.status === 'interested');
+      expect(entry).toBeDefined();
+      expect(entry).toHaveProperty('memberId');
+      expect(entry).toHaveProperty('name');
+      expect(entry).toHaveProperty('avatarUrl');
     });
 
     it('hides an archived event from the public detail endpoint too (not just the list)', async () => {

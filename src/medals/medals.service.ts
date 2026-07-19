@@ -82,16 +82,14 @@ export class MedalsService {
     await this.assertTitleFree(user.regimentId, dto.title);
 
     const precedence = dto.precedence ?? (await this.nextPrecedence(user.regimentId));
+    const imageUrl = await this.resolveIconImage(user, dto.imageKey ?? null);
 
     const medal = this.medals.create({
       regimentId: user.regimentId,
       title: dto.title,
       glyph: dto.glyph,
-      ribbon: dto.ribbon,
       description: dto.description ?? null,
-      imageUrl: dto.imageKey
-        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.MedalImage)
-        : null,
+      imageUrl,
       precedence,
       discordRoleName: dto.discordRoleName ?? null,
       linked: false,
@@ -129,12 +127,9 @@ export class MedalsService {
       medal.title = dto.title;
     }
     if (dto.glyph !== undefined) medal.glyph = dto.glyph;
-    if (dto.ribbon !== undefined) medal.ribbon = dto.ribbon;
     if (dto.description !== undefined) medal.description = dto.description ?? null;
     if (dto.imageKey !== undefined) {
-      medal.imageUrl = dto.imageKey
-        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.MedalImage)
-        : null;
+      medal.imageUrl = await this.resolveIconImage(user, dto.imageKey || null);
     }
     if (dto.precedence !== undefined) medal.precedence = dto.precedence;
     if (dto.discordRoleName !== undefined) medal.discordRoleName = dto.discordRoleName ?? null;
@@ -343,7 +338,6 @@ export class MedalsService {
     return {
       title: medal.title,
       glyph: medal.glyph,
-      ribbon: medal.ribbon,
       description: medal.description,
       imageUrl: medal.imageUrl,
       precedence: medal.precedence,
@@ -351,5 +345,20 @@ export class MedalsService {
       discordRoleId: medal.discordRoleId,
       linked: medal.linked,
     };
+  }
+
+  /**
+   * Resolve an uploaded medal-image key to its persisted public URL, enforcing the
+   * 250px dimension cap first (T-0125). A null/empty key clears the image.
+   */
+  private async resolveIconImage(
+    user: AuthenticatedUser,
+    key: string | null,
+  ): Promise<string | null> {
+    if (!key) {
+      return null;
+    }
+    await this.storage.assertIconWithinDimensions(key);
+    return this.storage.resolveKeyToPublicUrl(user, key, StorageTarget.MedalImage);
   }
 }

@@ -8,7 +8,6 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
-import { MedalRibbon } from '../../common/enums';
 import { Regiment } from '../../regiments/entities/regiment.entity';
 
 /** Medal/award catalogue (lookup table, per regiment). */
@@ -27,9 +26,6 @@ export class Medal extends ShortIdEntity {
 
   @Column({ type: 'varchar', length: 4 })
   glyph: string;
-
-  @Column({ type: 'enum', enum: MedalRibbon })
-  ribbon: MedalRibbon;
 
   @Column({ type: 'varchar', length: 400, nullable: true })
   description: string | null;

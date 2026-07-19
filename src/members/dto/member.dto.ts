@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { MedalRibbon, MemberRole, MemberStatus } from '../../common/enums';
+import { MemberRole, MemberStatus } from '../../common/enums';
 import { Member } from '../entities/member.entity';
 
 /** Computed/derived metrics passed into the {@link MemberDto} mapper. */
@@ -23,11 +23,14 @@ export class MemberMedalSummary {
   @ApiProperty()
   title: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Short fallback label (shown when the medal has no image)' })
   glyph: string;
 
-  @ApiProperty({ enum: MedalRibbon })
-  ribbon: MedalRibbon;
+  @ApiProperty({
+    nullable: true,
+    description: 'Public URL of the medal image (null → fallback tile)',
+  })
+  imageUrl: string | null;
 
   @ApiProperty({ nullable: true })
   detail: string | null;
@@ -39,7 +42,7 @@ export class MemberMedalSummary {
 /**
  * Public roster projection of a {@link Member}. Never expose the raw entity:
  * secrets (Discord tokens live on the identity), internal flags and FK ids are
- * omitted. Rank/chevron/attendance fields are derived server-side.
+ * omitted. Rank/rank-image/attendance fields are derived server-side.
  */
 export class MemberDto {
   @ApiProperty({ format: 'uuid' })
@@ -60,8 +63,8 @@ export class MemberDto {
   @ApiProperty({ format: 'uuid', description: 'Rank id (to pre-select in admin UI)' })
   rankId: string;
 
-  @ApiProperty({ description: 'Chevron count for the rank (0 when unranked)' })
-  chevrons: number;
+  @ApiProperty({ nullable: true, description: 'Public URL of the rank insignia image' })
+  rankImageUrl: string | null;
 
   @ApiProperty({ nullable: true, description: 'Rank precedence (lower sorts higher)' })
   rankPrecedence: number | null;
@@ -123,7 +126,7 @@ export class MemberDto {
     dto.status = member.status;
     dto.rank = member.rank?.name ?? null;
     dto.rankId = member.rankId;
-    dto.chevrons = member.rank?.chevrons ?? 0;
+    dto.rankImageUrl = member.rank?.imageUrl ?? null;
     dto.rankPrecedence = member.rank?.precedence ?? null;
     dto.discordTag = member.discordIdentity?.discordTag ?? null;
     dto.discordLinked = member.discordLinked;

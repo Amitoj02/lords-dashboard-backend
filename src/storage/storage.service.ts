@@ -1,7 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DeleteObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
@@ -17,11 +22,23 @@ import { AcceptedTypeDto, StoragePolicyDto } from './dto/storage-policy.dto';
 /** A file kind for the content-type / size policy. */
 type AssetKind = 'image' | 'video';
 
-/** Allowed MIME types → the extension stored in the object key. */
+/** Allowed MIME types → the extension stored in the object key (default image set). */
 const IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/webp': 'webp',
+};
+/**
+ * Rank/medal icon targets accept ONLY PNG + SVG (T-0124) — not the raster
+ * jpeg/webp of the default set. SVGs are served safely because the frontend
+ * renders every icon through an <img> tag, where the browser processes SVG in
+ * "secure static mode": no script execution, no external fetches. Objects are
+ * also served from a SEPARATE storage origin that holds no app session, so even a
+ * directly-navigated malicious SVG cannot touch the app's tokens.
+ */
+const ICON_IMAGE_TYPES: Record<string, string> = {
+  'image/png': 'png',
+  'image/svg+xml': 'svg',
 };
 const VIDEO_TYPES: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -33,6 +50,9 @@ const VIDEO_TYPES: Record<string, string> = {
 const DEFAULT_MAX_IMAGE_MB = 12;
 const DEFAULT_MAX_VIDEO_MB = 80;
 
+/** The max pixel dimension (per side) allowed for a rank/medal icon (T-0125). */
+const ICON_MAX_DIMENSION_PX = 250;
+
 /** Per-target upload policy: which kinds are allowed + the image size cap (MB). */
 interface TargetPolicy {
   kinds: AssetKind[];
@@ -40,6 +60,10 @@ interface TargetPolicy {
   maxImageMb: number;
   /** Required capability, or null for self-service member targets (needs memberId). */
   capability: Capability | null;
+  /** Overrides the default image MIME set (e.g. icons: PNG+SVG only). */
+  imageTypes?: Record<string, string>;
+  /** Enforce the 250px dimension cap for this target's images (rank/medal icons). */
+  enforceIconDimensions?: boolean;
 }
 
 const TARGET_POLICY: Record<StorageTarget, TargetPolicy> = {
@@ -54,11 +78,15 @@ const TARGET_POLICY: Record<StorageTarget, TargetPolicy> = {
     kinds: ['image'],
     maxImageMb: 4,
     capability: Capability.EditRanksMedals,
+    imageTypes: ICON_IMAGE_TYPES,
+    enforceIconDimensions: true,
   },
   [StorageTarget.RankImage]: {
     kinds: ['image'],
     maxImageMb: 4,
     capability: Capability.EditRanksMedals,
+    imageTypes: ICON_IMAGE_TYPES,
+    enforceIconDimensions: true,
   },
   [StorageTarget.Gallery]: {
     kinds: ['image', 'video'],
@@ -66,6 +94,23 @@ const TARGET_POLICY: Record<StorageTarget, TargetPolicy> = {
     capability: Capability.SubmitToGallery,
   },
 };
+
+/**
+ * Parse a PNG's pixel dimensions from its IHDR chunk (the first 24 bytes: an
+ * 8-byte signature, then a 4-byte length + the ASCII "IHDR" tag + 4-byte width +
+ * 4-byte height, all big-endian). Returns null for anything that is not a PNG we
+ * can read, so callers can decide the fallback policy.
+ */
+function parsePngDimensions(header: Buffer): { width: number; height: number } | null {
+  const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (header.length < 24 || !header.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    return null;
+  }
+  if (header.subarray(12, 16).toString('ascii') !== 'IHDR') {
+    return null;
+  }
+  return { width: header.readUInt32BE(16), height: header.readUInt32BE(20) };
+}
 
 /**
  * Object storage for user uploads via a presigned-PUT flow (T-0066). The client
@@ -112,8 +157,9 @@ export class StorageService {
     dto: RequestUploadDto,
   ): Promise<PresignedUploadDto> {
     const policy = TARGET_POLICY[dto.target];
+    const imageTypes = policy.imageTypes ?? IMAGE_TYPES;
     const contentType = dto.contentType.toLowerCase();
-    const kind = this.kindOf(contentType);
+    const kind = this.kindOf(contentType, imageTypes);
 
     if (kind === null || !policy.kinds.includes(kind)) {
       throw new BadRequestException(
@@ -131,7 +177,7 @@ export class StorageService {
 
     await this.authorize(user, dto.target, policy);
 
-    const ext = kind === 'image' ? IMAGE_TYPES[contentType] : VIDEO_TYPES[contentType];
+    const ext = kind === 'image' ? imageTypes[contentType] : VIDEO_TYPES[contentType];
     const key = `${this.namespacePrefix(user, dto.target)}${randomUUID()}.${ext}`;
 
     // Sign the exact Content-Length as well as the Content-Type: because both are
@@ -211,6 +257,12 @@ export class StorageService {
     const targets = (Object.keys(TARGET_POLICY) as StorageTarget[]).map((target) => {
       const policy = TARGET_POLICY[target];
       const acceptsVideo = policy.kinds.includes('video');
+      // Icon targets override the default image set (PNG+SVG only) — report that.
+      const targetImageTypes = policy.imageTypes ?? IMAGE_TYPES;
+      const targetImage: AcceptedTypeDto = {
+        mimeTypes: Object.keys(targetImageTypes),
+        extensions: Object.values(targetImageTypes),
+      };
       return {
         target,
         kinds: policy.kinds,
@@ -219,10 +271,10 @@ export class StorageService {
         // fallback (the live cap is admin-configurable via settings).
         maxVideoMb: acceptsVideo ? cap(DEFAULT_MAX_VIDEO_MB) : null,
         acceptedMimeTypes: policy.kinds.flatMap((kind) =>
-          kind === 'image' ? image.mimeTypes : video.mimeTypes,
+          kind === 'image' ? targetImage.mimeTypes : video.mimeTypes,
         ),
         acceptedExtensions: policy.kinds.flatMap((kind) =>
-          kind === 'image' ? image.extensions : video.extensions,
+          kind === 'image' ? targetImage.extensions : video.extensions,
         ),
       };
     });
@@ -254,10 +306,65 @@ export class StorageService {
     }
   }
 
+  /**
+   * Enforce the 250px icon dimension cap (T-0125) on a freshly-uploaded rank/medal
+   * image key, BEFORE it is persisted. The bytes never pass through the API (they
+   * are PUT straight to storage), so a client-declared width/height can't be
+   * trusted — instead we read the stored object's header directly:
+   *  - PNG: a ranged GET of the IHDR chunk gives the exact pixel dimensions;
+   *    either side over the cap is rejected (400). This holds even when the client
+   *    under-declares the size, because we read the real pixels.
+   *  - SVG: exempt — a scalable vector has no intrinsic raster dimension (it is
+   *    bounded by its viewBox at render time), so there is nothing to cap.
+   * A transient read failure is logged and allowed (fail-open for availability): a
+   * genuine oversize PNG is always readable here, moments after its own upload.
+   */
+  async assertIconWithinDimensions(key: string, maxPx = ICON_MAX_DIMENSION_PX): Promise<void> {
+    if (key.toLowerCase().endsWith('.svg')) {
+      return;
+    }
+    let header: Buffer;
+    try {
+      header = await this.readObjectHead(key, 24);
+    } catch (error) {
+      this.logger.warn(
+        `Could not read ${key} to validate icon dimensions: ${(error as Error).message}`,
+      );
+      return;
+    }
+    const dims = parsePngDimensions(header);
+    if (!dims) {
+      // Not a PNG we can parse — the MIME allow-list already restricts icons to
+      // PNG/SVG, so this is an unreadable/corrupt object; leave it to fail on use.
+      return;
+    }
+    if (dims.width > maxPx || dims.height > maxPx) {
+      throw new BadRequestException(
+        `Icon image must be at most ${maxPx}×${maxPx}px (got ${dims.width}×${dims.height})`,
+      );
+    }
+  }
+
   // ── Internals ────────────────────────────────────────────────────────────────
 
-  private kindOf(contentType: string): AssetKind | null {
-    if (contentType in IMAGE_TYPES) return 'image';
+  /** Read the first `bytes` of a stored object (a bounded, ranged GET). */
+  private async readObjectHead(key: string, bytes: number): Promise<Buffer> {
+    const res = await this.s3.send(
+      new GetObjectCommand({ Bucket: this.cfg.bucket, Key: key, Range: `bytes=0-${bytes - 1}` }),
+    );
+    if (!res.Body) {
+      throw new Error('Empty object body');
+    }
+    // The S3 client's stream mixin collects the (already range-bounded) bytes.
+    const array = await res.Body.transformToByteArray();
+    return Buffer.from(array);
+  }
+
+  private kindOf(
+    contentType: string,
+    imageTypes: Record<string, string> = IMAGE_TYPES,
+  ): AssetKind | null {
+    if (contentType in imageTypes) return 'image';
     if (contentType in VIDEO_TYPES) return 'video';
     return null;
   }

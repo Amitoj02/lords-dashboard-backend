@@ -25,7 +25,6 @@ const buildRank = (overrides: Partial<Rank> = {}): Rank => ({
   id: 'rank-1',
   regimentId: REGIMENT,
   name: 'Sergeant',
-  chevrons: 3,
   imageUrl: null,
   precedence: 2,
   discordRoleName: '@Sergeant',
@@ -71,6 +70,7 @@ describe('RanksService', () => {
   const dataSource = { transaction: jest.fn() };
   const audit = { record: jest.fn() };
   const storage = {
+    assertIconWithinDimensions: jest.fn().mockResolvedValue(undefined),
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
 
@@ -158,7 +158,6 @@ describe('RanksService', () => {
 
       const saved = rankRepo.save.mock.calls[0][0] as Rank;
       expect(saved.precedence).toBe(12); // max + 1
-      expect(saved.chevrons).toBe(0); // default applied server-side
       expect(saved.linked).toBe(false);
       expect(dto.holdersCount).toBe(0);
       expect(audit.record).toHaveBeenCalledWith(
@@ -172,6 +171,69 @@ describe('RanksService', () => {
         ConflictException,
       );
       expect(rankRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('validates the icon dimensions before resolving its public url and persists it', async () => {
+      rankRepo.findOne.mockResolvedValue(null); // name is free
+      rankQb.getRawOne.mockResolvedValue({ max: 4 });
+
+      await service.create(user(), { name: 'Captain', imageKey: 'icons/captain.png' }, null);
+
+      expect(storage.assertIconWithinDimensions).toHaveBeenCalledWith('icons/captain.png');
+      // Dimension check runs before the URL is resolved.
+      expect(storage.assertIconWithinDimensions.mock.invocationCallOrder[0]).toBeLessThan(
+        storage.resolveKeyToPublicUrl.mock.invocationCallOrder[0],
+      );
+
+      const saved = rankRepo.save.mock.calls[0][0] as Rank;
+      expect(saved.imageUrl).toBe('https://cdn.example/icons/captain.png');
+    });
+
+    it('rejects and does not save when the icon fails the dimension check', async () => {
+      rankRepo.findOne.mockResolvedValue(null);
+      rankQb.getRawOne.mockResolvedValue({ max: 4 });
+      storage.assertIconWithinDimensions.mockRejectedValueOnce(new BadRequestException('too big'));
+
+      await expect(
+        service.create(user(), { name: 'Captain', imageKey: 'icons/huge.png' }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(storage.resolveKeyToPublicUrl).not.toHaveBeenCalled();
+      expect(rankRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('update', () => {
+    it('validates the icon dimensions before resolving its public url and persists it', async () => {
+      rankRepo.findOne.mockResolvedValue(buildRank());
+      memberRepo.count.mockResolvedValue(0);
+
+      const dto = await service.update(user(), 'rank-1', { imageKey: 'icons/sergeant.png' }, null);
+
+      expect(storage.assertIconWithinDimensions).toHaveBeenCalledWith('icons/sergeant.png');
+      // Dimension check runs before the URL is resolved.
+      expect(storage.assertIconWithinDimensions.mock.invocationCallOrder[0]).toBeLessThan(
+        storage.resolveKeyToPublicUrl.mock.invocationCallOrder[0],
+      );
+
+      const saved = rankRepo.save.mock.calls[0][0] as Rank;
+      expect(saved.imageUrl).toBe('https://cdn.example/icons/sergeant.png');
+      expect(dto.imageUrl).toBe('https://cdn.example/icons/sergeant.png');
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'rank.update' }));
+    });
+
+    it('rejects and does not save when the icon fails the dimension check', async () => {
+      rankRepo.findOne.mockResolvedValue(buildRank());
+      storage.assertIconWithinDimensions.mockRejectedValueOnce(new BadRequestException('too big'));
+
+      await expect(
+        service.update(user(), 'rank-1', { imageKey: 'icons/huge.png' }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(storage.resolveKeyToPublicUrl).not.toHaveBeenCalled();
+      expect(rankRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

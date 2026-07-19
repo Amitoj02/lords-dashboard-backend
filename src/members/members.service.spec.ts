@@ -55,7 +55,7 @@ const buildMember = (overrides: Partial<Member> = {}): Member =>
     standing: 'good',
     joinedAt: new Date('2024-01-01T00:00:00.000Z'),
     lastSeenAt: new Date('2024-06-01T00:00:00.000Z'),
-    rank: { id: 'rank-1', name: 'Sergeant', chevrons: 3, precedence: 2 },
+    rank: { id: 'rank-1', name: 'Sergeant', imageUrl: 'https://cdn/rank.png', precedence: 2 },
     discordIdentity: { discordTag: '@commander' },
     ...overrides,
   }) as unknown as Member;
@@ -238,7 +238,7 @@ describe('MembersService', () => {
       const dto = result.data[0];
       expect(dto.inGameName).toBe('LC');
       expect(dto.rank).toBe('Sergeant');
-      expect(dto.chevrons).toBe(3);
+      expect(dto.rankImageUrl).toBe('https://cdn/rank.png');
       expect(dto.rankPrecedence).toBe(2);
       expect(dto.discordTag).toBe('@commander');
       expect(dto.eventsAttended).toBe(7);
@@ -267,8 +267,52 @@ describe('MembersService', () => {
       expect(dto.eventsAttended).toBe(0);
       // Unranked member falls back gracefully.
       expect(dto.rank).toBeNull();
-      expect(dto.chevrons).toBe(0);
+      expect(dto.rankImageUrl).toBeNull();
       expect(dto.rankPrecedence).toBeNull();
+    });
+
+    it('projects each medal award with its image URL and glyph fallback', async () => {
+      const member = buildMember();
+      memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
+      memberMedalRepo.find.mockResolvedValue([
+        {
+          id: 'award-1',
+          memberId: 'member-1',
+          medalId: 'medal-1',
+          detail: 'For valour',
+          awardedAt: new Date('2024-05-01T00:00:00.000Z'),
+          medal: { title: 'Valor', glyph: 'V', imageUrl: 'https://cdn/medal.png' },
+        },
+      ]);
+
+      const result = await service.findAll({ page: 1, limit: 20, skip: 0 }, user());
+
+      const medal = result.data[0].medals[0];
+      expect(medal.title).toBe('Valor');
+      expect(medal.glyph).toBe('V');
+      expect(medal.imageUrl).toBe('https://cdn/medal.png');
+      expect(medal.awardedAt).toBe('2024-05-01T00:00:00.000Z');
+    });
+
+    it('leaves medal.imageUrl null when the medal has no image (glyph fallback)', async () => {
+      const member = buildMember();
+      memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
+      memberMedalRepo.find.mockResolvedValue([
+        {
+          id: 'award-2',
+          memberId: 'member-1',
+          medalId: 'medal-2',
+          detail: null,
+          awardedAt: new Date('2024-05-02T00:00:00.000Z'),
+          medal: { title: 'Service', glyph: 'S', imageUrl: null },
+        },
+      ]);
+
+      const result = await service.findAll({ page: 1, limit: 20, skip: 0 }, user());
+
+      const medal = result.data[0].medals[0];
+      expect(medal.imageUrl).toBeNull();
+      expect(medal.glyph).toBe('S');
     });
   });
 
@@ -372,7 +416,7 @@ describe('MembersService', () => {
       rankRepo.findOne.mockResolvedValue({
         id: 'rank-9',
         name: 'Captain',
-        chevrons: 4,
+        imageUrl: 'https://cdn/captain.png',
         precedence: 4,
       });
 
@@ -384,6 +428,8 @@ describe('MembersService', () => {
       );
 
       expect(dto.rank).toBe('Captain');
+      // The projection surfaces the new rank's insignia image URL.
+      expect(dto.rankImageUrl).toBe('https://cdn/captain.png');
       expect(serviceRecordRepo.save).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'member.rank.change', regimentId: REGIMENT }),

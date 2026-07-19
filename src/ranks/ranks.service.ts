@@ -62,9 +62,9 @@ export class RanksService {
   }
 
   /**
-   * Create a rank. `chevrons` defaults to 0; when `precedence` is omitted the
-   * rank is appended at the end of the ladder. Duplicate name/precedence within
-   * the regiment (the two UNIQUE indexes) surface as a 409.
+   * Create a rank. When `precedence` is omitted the rank is appended at the end of
+   * the ladder. Duplicate name/precedence within the regiment (the two UNIQUE
+   * indexes) surface as a 409. The insignia is a custom uploaded icon (`imageKey`).
    */
   async create(user: AuthenticatedUser, dto: CreateRankDto, ip: string | null): Promise<RankDto> {
     await this.assertNameFree(user.regimentId, dto.name);
@@ -73,14 +73,12 @@ export class RanksService {
     }
 
     const precedence = dto.precedence ?? (await this.nextPrecedence(user.regimentId));
+    const imageUrl = await this.resolveIconImage(user, dto.imageKey ?? null);
 
     const rank = this.ranks.create({
       regimentId: user.regimentId,
       name: dto.name,
-      chevrons: dto.chevrons ?? 0,
-      imageUrl: dto.imageKey
-        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.RankImage)
-        : null,
+      imageUrl,
       precedence,
       discordRoleName: dto.discordRoleName ?? null,
       discordRoleId: null,
@@ -122,11 +120,8 @@ export class RanksService {
       await this.assertPrecedenceFree(user.regimentId, dto.precedence, id);
       rank.precedence = dto.precedence;
     }
-    if (dto.chevrons !== undefined) rank.chevrons = dto.chevrons;
     if (dto.imageKey !== undefined) {
-      rank.imageUrl = dto.imageKey
-        ? this.storage.resolveKeyToPublicUrl(user, dto.imageKey, StorageTarget.RankImage)
-        : null;
+      rank.imageUrl = await this.resolveIconImage(user, dto.imageKey || null);
     }
     if (dto.discordRoleName !== undefined) rank.discordRoleName = dto.discordRoleName;
 
@@ -342,12 +337,26 @@ export class RanksService {
   private snapshot(rank: Rank): Record<string, unknown> {
     return {
       name: rank.name,
-      chevrons: rank.chevrons,
       imageUrl: rank.imageUrl,
       precedence: rank.precedence,
       discordRoleName: rank.discordRoleName,
       discordRoleId: rank.discordRoleId,
       linked: rank.linked,
     };
+  }
+
+  /**
+   * Resolve an uploaded rank-icon key to its persisted public URL, enforcing the
+   * 250px dimension cap first (T-0125). A null/empty key clears the image.
+   */
+  private async resolveIconImage(
+    user: AuthenticatedUser,
+    key: string | null,
+  ): Promise<string | null> {
+    if (!key) {
+      return null;
+    }
+    await this.storage.assertIconWithinDimensions(key);
+    return this.storage.resolveKeyToPublicUrl(user, key, StorageTarget.RankImage);
   }
 }

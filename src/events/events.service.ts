@@ -23,6 +23,7 @@ import { EventQueryDto } from './dto/event-query.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
 import { RevealedPasswordDto } from './dto/revealed-password.dto';
 import { RsvpDto } from './dto/rsvp.dto';
+import { RsvpRosterEntryDto } from './dto/rsvp-roster-entry.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { EventAttendee } from './entities/event-attendee.entity';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
@@ -553,6 +554,24 @@ export class EventsService {
   }
 
   /**
+   * The RSVP roster for an event (T-0127): everyone who has RSVP'd, with their
+   * name, avatar and choice. Gated on ViewMembersDirectory (same audience as the
+   * attendee list) because it surfaces member identities. Members who never
+   * RSVP'd are naturally absent (there is no row for them). Ordered by name.
+   */
+  async listRsvpRoster(user: AuthenticatedUser, id: string): Promise<RsvpRosterEntryDto[]> {
+    const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
+    const rows = await this.rsvps.find({
+      where: { eventId: event.id },
+      // Nested identity so the avatar can fall back to the linked Discord avatar.
+      relations: { member: { discordIdentity: true } },
+    });
+    return rows
+      .map((rsvp) => RsvpRosterEntryDto.from(rsvp))
+      .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
+  }
+
+  /**
    * Idempotently check members in as attendees (ManageEvents). Every member id is
    * validated to belong to the caller's regiment; unknown ids are rejected. Ids
    * that are already checked in keep their original timestamp.
@@ -600,13 +619,12 @@ export class EventsService {
   /**
    * Reveal the decrypted server password. SENSITIVE and double-gated: beyond the
    * RevealEventPasswords capability, the caller must have an RSVP to the event
-   * that is not `declined`. 404 when no password is set. Every reveal is audited.
+   * that is not `declined`. 404 when no password is set. Reveals are NOT audited
+   * (T-0126) — legitimate members reveal on every session, so the reveal event
+   * added noise without moderation value; the historical `event.password.reveal`
+   * rows still render, but no new ones are written.
    */
-  async revealPassword(
-    user: AuthenticatedUser,
-    id: string,
-    ip: string | null,
-  ): Promise<RevealedPasswordDto> {
+  async revealPassword(user: AuthenticatedUser, id: string): Promise<RevealedPasswordDto> {
     const event = await this.loadEvent(id, user.regimentId);
 
     const rsvp = user.memberId
@@ -619,14 +637,6 @@ export class EventsService {
     if (event.serverPassword === null || event.serverPassword === undefined) {
       throw new NotFoundException('No server password set');
     }
-
-    await this.audit.record({
-      regimentId: user.regimentId,
-      action: 'event.password.reveal',
-      actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'event', id: event.id, label: event.title },
-      detail: 'password revealed',
-    });
 
     return RevealedPasswordDto.from(event);
   }

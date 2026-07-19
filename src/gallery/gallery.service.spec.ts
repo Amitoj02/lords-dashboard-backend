@@ -3,10 +3,17 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { AuthzService } from '../authz/authz.service';
 import { StorageService } from '../storage/storage.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { GalleryMediaType, GalleryStatus, GalleryType, MemberRole } from '../common/enums';
+import {
+  Capability,
+  GalleryMediaType,
+  GalleryStatus,
+  GalleryType,
+  MemberRole,
+} from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { GalleryFileInputDto } from './dto/create-gallery-item.dto';
@@ -133,6 +140,7 @@ describe('GalleryService', () => {
   let members: MockRepo<Member>;
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
+  let authz: { can: jest.Mock };
   let discordSync: { enqueueApplicationDecision: jest.Mock };
   let storage: { resolveKeyToPublicUrl: jest.Mock; deleteObject: jest.Mock };
 
@@ -167,6 +175,7 @@ describe('GalleryService', () => {
     members = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
     settings = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn() };
     audit = { record: jest.fn() };
+    authz = { can: jest.fn().mockResolvedValue(true) };
     discordSync = { enqueueApplicationDecision: jest.fn().mockResolvedValue(null) };
     storage = {
       resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
@@ -209,6 +218,7 @@ describe('GalleryService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
+        { provide: AuthzService, useValue: authz },
         { provide: StorageService, useValue: storage },
         { provide: DiscordSyncService, useValue: discordSync },
       ],
@@ -683,6 +693,32 @@ describe('GalleryService', () => {
       );
     });
 
+    it('updates the title (trimmed) and audits', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ title: 'old title' }));
+
+      const result = await service.update(
+        ADMIN_USER,
+        'gallery-1',
+        { title: '  Edited title  ' },
+        '2.2.2.2',
+      );
+
+      const saved = txItems.save!.mock.calls[0][0] as GalleryItem;
+      expect(saved.title).toBe('Edited title');
+      expect(result.title).toBe('Edited title');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'gallery.update', regimentId: REGIMENT }),
+      );
+    });
+
+    it('rejects an empty/whitespace title (BadRequestException)', async () => {
+      items.findOne!.mockResolvedValue(buildItem({ title: 'old title' }));
+
+      await expect(
+        service.update(ADMIN_USER, 'gallery-1', { title: '   ' }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
     it('normalises an all-whitespace caption to null', async () => {
       items.findOne!.mockResolvedValue(buildItem({ caption: 'old' }));
       await service.update(ADMIN_USER, 'gallery-1', { caption: '   ' }, null);
@@ -759,6 +795,44 @@ describe('GalleryService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'gallery.delete' }),
       );
+    });
+
+    it('author (non-moderator) can delete their own post (T-0121)', async () => {
+      // The caller is the author; the capability check must be bypassed entirely.
+      const item = buildItem({ authorMemberId: MEMBER_USER.memberId! });
+      items.findOne!.mockResolvedValue(item);
+      authz.can.mockResolvedValue(false);
+
+      await service.remove(MEMBER_USER, 'gallery-1', null);
+
+      expect(authz.can).not.toHaveBeenCalled();
+      expect(items.softRemove).toHaveBeenCalledWith(item);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'gallery.delete' }),
+      );
+    });
+
+    it('a moderator can delete any post (T-0121)', async () => {
+      // Not the author, but holds ModerateGallery in the regiment.
+      const item = buildItem({ authorMemberId: 'someone-else' });
+      items.findOne!.mockResolvedValue(item);
+      authz.can.mockResolvedValue(true);
+
+      await service.remove(ADMIN_USER, 'gallery-1', null);
+
+      expect(authz.can).toHaveBeenCalledWith(REGIMENT, ADMIN_USER.role, Capability.ModerateGallery);
+      expect(items.softRemove).toHaveBeenCalledWith(item);
+    });
+
+    it('a non-author without moderate_gallery is forbidden (T-0121)', async () => {
+      const item = buildItem({ authorMemberId: 'someone-else' });
+      items.findOne!.mockResolvedValue(item);
+      authz.can.mockResolvedValue(false);
+
+      await expect(service.remove(MEMBER_USER, 'gallery-1', null)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(items.softRemove).not.toHaveBeenCalled();
     });
   });
 });

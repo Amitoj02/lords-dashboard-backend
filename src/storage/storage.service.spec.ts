@@ -155,6 +155,132 @@ describe('StorageService', () => {
     });
   });
 
+  describe('createUploadTicket — icon targets accept PNG + SVG only (T-0124)', () => {
+    it.each([StorageTarget.RankImage, StorageTarget.MedalImage])(
+      'rejects a jpeg for %s with 400',
+      async (target) => {
+        await expect(
+          service.createUploadTicket(user(), {
+            target,
+            contentType: 'image/jpeg',
+            sizeBytes: 1024,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      },
+    );
+
+    it.each([StorageTarget.RankImage, StorageTarget.MedalImage])(
+      'rejects a webp for %s with 400',
+      async (target) => {
+        await expect(
+          service.createUploadTicket(user(), {
+            target,
+            contentType: 'image/webp',
+            sizeBytes: 1024,
+          }),
+        ).rejects.toBeInstanceOf(BadRequestException);
+      },
+    );
+
+    it('accepts a png for a rank image and stores it with a .png key', async () => {
+      const ticket = await service.createUploadTicket(user(), {
+        target: StorageTarget.RankImage,
+        contentType: 'image/png',
+        sizeBytes: 1024,
+      });
+      expect(ticket.key).toMatch(new RegExp(`^ranks/${REGIMENT}/[0-9a-f-]+\\.png$`));
+      expect(ticket.requiredContentType).toBe('image/png');
+    });
+
+    it('accepts an svg for a medal image and stores it with a .svg key', async () => {
+      const ticket = await service.createUploadTicket(user(), {
+        target: StorageTarget.MedalImage,
+        contentType: 'image/svg+xml',
+        sizeBytes: 1024,
+      });
+      expect(ticket.key).toMatch(new RegExp(`^medals/${REGIMENT}/[0-9a-f-]+\\.svg$`));
+      expect(ticket.requiredContentType).toBe('image/svg+xml');
+    });
+
+    it('reports PNG+SVG accepted types for the icon targets in getPolicy', () => {
+      const byTarget = Object.fromEntries(service.getPolicy().targets.map((t) => [t.target, t]));
+
+      for (const target of [StorageTarget.RankImage, StorageTarget.MedalImage]) {
+        expect(byTarget[target].acceptedMimeTypes).toEqual(['image/png', 'image/svg+xml']);
+        expect(byTarget[target].acceptedExtensions).toEqual(['png', 'svg']);
+      }
+
+      // Other image targets still report the default raster set.
+      expect(byTarget[StorageTarget.MemberAvatar].acceptedMimeTypes).toEqual([
+        'image/png',
+        'image/jpeg',
+        'image/webp',
+      ]);
+      expect(byTarget[StorageTarget.MemberAvatar].acceptedExtensions).toEqual([
+        'png',
+        'jpg',
+        'webp',
+      ]);
+    });
+  });
+
+  describe('assertIconWithinDimensions (T-0125)', () => {
+    /** A 24-byte PNG header whose IHDR carries the given pixel dimensions. */
+    const pngHeader = (width: number, height: number): Uint8Array => {
+      const buf = Buffer.alloc(24);
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(buf, 0);
+      buf.writeUInt32BE(13, 8); // IHDR chunk length
+      buf.write('IHDR', 12, 'ascii');
+      buf.writeUInt32BE(width, 16);
+      buf.writeUInt32BE(height, 20);
+      return new Uint8Array(buf);
+    };
+
+    /** Mock the S3 client's send() to resolve a GetObject body wrapping `bytes`. */
+    const mockGet = (bytes: Uint8Array) =>
+      jest
+        .spyOn((service as unknown as { s3: { send: jest.Mock } }).s3, 'send')
+        .mockResolvedValue({ Body: { transformToByteArray: () => Promise.resolve(bytes) } });
+
+    it('rejects a PNG whose width exceeds the cap with 400', async () => {
+      mockGet(pngHeader(300, 100));
+      await expect(
+        service.assertIconWithinDimensions(`ranks/${REGIMENT}/icon.png`),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('resolves for a PNG exactly at the cap', async () => {
+      mockGet(pngHeader(250, 250));
+      await expect(
+        service.assertIconWithinDimensions(`ranks/${REGIMENT}/icon.png`),
+      ).resolves.toBeUndefined();
+    });
+
+    it('resolves for a PNG comfortably within the cap', async () => {
+      mockGet(pngHeader(240, 180));
+      await expect(
+        service.assertIconWithinDimensions(`medals/${REGIMENT}/icon.png`),
+      ).resolves.toBeUndefined();
+    });
+
+    it('exempts an .svg key — resolves without ever calling S3', async () => {
+      const send = mockGet(pngHeader(999, 999));
+      await expect(
+        service.assertIconWithinDimensions(`medals/${REGIMENT}/icon.svg`),
+      ).resolves.toBeUndefined();
+      expect(send).not.toHaveBeenCalled();
+    });
+
+    it('fails open — swallows a read error and resolves', async () => {
+      jest
+        .spyOn((service as unknown as { s3: { send: jest.Mock } }).s3, 'send')
+        .mockRejectedValue(new Error('network'));
+      await expect(
+        service.assertIconWithinDimensions(`ranks/${REGIMENT}/icon.png`),
+      ).resolves.toBeUndefined();
+    });
+  });
+
   describe('resolveKeyToPublicUrl', () => {
     const UUID = '550e8400-e29b-41d4-a716-446655440000';
 

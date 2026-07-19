@@ -5,7 +5,7 @@ import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MedalRibbon, MemberRole, StorageTarget } from '../common/enums';
+import { MemberRole, StorageTarget } from '../common/enums';
 import { Medal } from './entities/medal.entity';
 import { MemberMedal } from './entities/member-medal.entity';
 import { MedalsService } from './medals.service';
@@ -26,7 +26,6 @@ const buildMedal = (overrides: Partial<Medal> = {}): Medal => ({
   regimentId: REGIMENT,
   title: 'Distinguished Service Cross',
   glyph: 'DSC',
-  ribbon: MedalRibbon.Gold,
   description: 'Gallantry in the line.',
   imageUrl: null,
   precedence: 1,
@@ -72,6 +71,7 @@ describe('MedalsService', () => {
   const dataSource = { transaction: jest.fn() };
   const audit = { record: jest.fn() };
   const storage = {
+    assertIconWithinDimensions: jest.fn().mockResolvedValue(undefined),
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
 
@@ -156,7 +156,7 @@ describe('MedalsService', () => {
 
       const dto = await service.create(
         user(),
-        { title: 'Medal of Valor', glyph: 'MoV', ribbon: MedalRibbon.Red },
+        { title: 'Medal of Valor', glyph: 'MoV' },
         '10.0.0.1',
       );
 
@@ -178,11 +178,7 @@ describe('MedalsService', () => {
     it('honors an explicit precedence and rejects a duplicate title', async () => {
       medalRepo.findOne.mockResolvedValue(buildMedal());
       await expect(
-        service.create(
-          user(),
-          { title: 'Distinguished Service Cross', glyph: 'DSC', ribbon: MedalRibbon.Gold },
-          null,
-        ),
+        service.create(user(), { title: 'Distinguished Service Cross', glyph: 'DSC' }, null),
       ).rejects.toBeInstanceOf(ConflictException);
       expect(medalRepo.save).not.toHaveBeenCalled();
     });
@@ -196,7 +192,6 @@ describe('MedalsService', () => {
         {
           title: 'Medal of Storage',
           glyph: 'MoS',
-          ribbon: MedalRibbon.Blue,
           imageKey: `medals/${REGIMENT}/img-1.png`,
         },
         null,
@@ -210,6 +205,45 @@ describe('MedalsService', () => {
       const saved = medalRepo.save.mock.calls[0][0] as Medal;
       expect(saved.imageUrl).toBe(`https://cdn.example/medals/${REGIMENT}/img-1.png`);
       expect(dto.imageUrl).toBe(`https://cdn.example/medals/${REGIMENT}/img-1.png`);
+    });
+
+    it('enforces the icon dimension cap before resolving the image key (T-0125)', async () => {
+      medalRepo.findOne.mockResolvedValue(null);
+      medalQb.getRawOne.mockResolvedValue({ max: '0' });
+
+      await service.create(
+        user(),
+        { title: 'Medal of Dimensions', glyph: 'MoD', imageKey: `medals/${REGIMENT}/img-2.png` },
+        null,
+      );
+
+      expect(storage.assertIconWithinDimensions).toHaveBeenCalledWith(
+        `medals/${REGIMENT}/img-2.png`,
+      );
+      // Dimension check runs first, then the URL is resolved.
+      const dimOrder = storage.assertIconWithinDimensions.mock.invocationCallOrder[0];
+      const resolveOrder = storage.resolveKeyToPublicUrl.mock.invocationCallOrder[0];
+      expect(dimOrder).toBeLessThan(resolveOrder);
+    });
+
+    it('rejects the create when the icon exceeds the dimension cap and does not save (T-0125)', async () => {
+      medalRepo.findOne.mockResolvedValue(null);
+      medalQb.getRawOne.mockResolvedValue({ max: '0' });
+      storage.assertIconWithinDimensions.mockRejectedValueOnce(
+        new BadRequestException('Icon exceeds maximum dimensions'),
+      );
+
+      await expect(
+        service.create(
+          user(),
+          { title: 'Oversized Medal', glyph: 'OM', imageKey: `medals/${REGIMENT}/huge.png` },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(storage.resolveKeyToPublicUrl).not.toHaveBeenCalled();
+      expect(medalRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 
@@ -243,6 +277,38 @@ describe('MedalsService', () => {
       await expect(service.update(user(), 'missing', { glyph: 'X' }, null)).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+
+    it('enforces the icon dimension cap before resolving a new image key (T-0125)', async () => {
+      medalRepo.findOne.mockResolvedValue(buildMedal());
+
+      const saved = await service.update(
+        user(),
+        'medal-1',
+        { imageKey: `medals/${REGIMENT}/new.png` },
+        null,
+      );
+
+      expect(storage.assertIconWithinDimensions).toHaveBeenCalledWith(`medals/${REGIMENT}/new.png`);
+      const dimOrder = storage.assertIconWithinDimensions.mock.invocationCallOrder[0];
+      const resolveOrder = storage.resolveKeyToPublicUrl.mock.invocationCallOrder[0];
+      expect(dimOrder).toBeLessThan(resolveOrder);
+      expect(saved.imageUrl).toBe(`https://cdn.example/medals/${REGIMENT}/new.png`);
+    });
+
+    it('rejects the update when the icon exceeds the dimension cap and does not save (T-0125)', async () => {
+      medalRepo.findOne.mockResolvedValue(buildMedal());
+      storage.assertIconWithinDimensions.mockRejectedValueOnce(
+        new BadRequestException('Icon exceeds maximum dimensions'),
+      );
+
+      await expect(
+        service.update(user(), 'medal-1', { imageKey: `medals/${REGIMENT}/huge.png` }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(storage.resolveKeyToPublicUrl).not.toHaveBeenCalled();
+      expect(medalRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 
