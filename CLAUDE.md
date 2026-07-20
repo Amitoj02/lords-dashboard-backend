@@ -20,7 +20,7 @@ This API is one half of a two-repo system. The **frontend that consumes it lives
 
 Key files to consult in the frontend repo:
 - `src/app/core/models/` — TypeScript interfaces (`member`, `event`, `application`, `gallery`, `audit-log`) that mirror this API's response shapes.
-- `src/app/core/services/` — currently RxJS `of()` stubs; each is a slot for an `HttpClient` call to this API, so they define exactly which endpoints and shapes the client expects.
+- `src/app/core/services/` — **fully wired to this API**. All 13 services call `HttpClient` against `environment.apiBaseUrl` (the relative string `/api`, so the build is host-agnostic). The remaining `of(...)` calls are `catchError` fallbacks and one default storage policy, not stub data. Treat these as the authoritative statement of which endpoints and response shapes the client expects.
 - `CLAUDE.md` — the frontend's own architecture, routing, and design-system notes.
 
 The frontend's `AuthService` expects the `CurrentUser` projection from `GET /api/auth/me`; its OAuth callback route is `http://localhost:4200/auth/callback`. Both repos are grouped in the Blueframe workspace **`lords-dashboard`** — run `bf serve lords-dashboard` for combined project state and cross-repo drift.

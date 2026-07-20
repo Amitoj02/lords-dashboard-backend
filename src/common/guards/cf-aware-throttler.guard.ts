@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
+/** The subset of the request we need; avoids an `any`-typed parameter. */
+interface ProxyAwareRequest {
+  headers?: Record<string, string | string[] | undefined>;
+  ip?: string;
+}
+
 /**
  * Rate-limits by the real client IP rather than the reverse proxy's.
  *
@@ -11,21 +17,21 @@ import { ThrottlerGuard } from '@nestjs/throttler';
  * else.
  *
  * Reading `CF-Connecting-IP` directly sidesteps Express's `trust proxy` hop
- * counting entirely, which is the safer of the two fixes: `trust proxy: true`
- * would let any client forge `X-Forwarded-For` and therefore forge the identity
- * used for logging, banning and rate limiting, and a hardcoded hop count silently
- * breaks the moment a proxy is added or removed.
+ * counting, which is the safer of the two fixes: `trust proxy: true` would let any
+ * client forge `X-Forwarded-For` and therefore forge the identity used for
+ * logging, banning and rate limiting, while a hardcoded hop count silently breaks
+ * the moment a proxy is added or removed.
  *
  * `CF-Connecting-IP` is set by Cloudflare and, because the origin only accepts
  * traffic through Cloudflare (Authenticated Origin Pulls), cannot be spoofed by a
  * client. When absent — local dev, direct origin access — this falls back to
- * `req.ip`, so behaviour is unchanged outside production.
+ * `req.ip`, so behaviour outside production is unchanged.
  */
 @Injectable()
 export class CfAwareThrottlerGuard extends ThrottlerGuard {
-  protected async getTracker(req: Record<string, any>): Promise<string> {
+  protected getTracker(req: ProxyAwareRequest): Promise<string> {
     const cfIp = req.headers?.['cf-connecting-ip'];
-    if (typeof cfIp === 'string' && cfIp.length > 0) return cfIp;
-    return req.ip as string;
+    const tracker = typeof cfIp === 'string' && cfIp.length > 0 ? cfIp : (req.ip ?? 'unknown');
+    return Promise.resolve(tracker);
   }
 }

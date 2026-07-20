@@ -53,8 +53,7 @@ async function bootstrap(): Promise<void> {
   // it, and there is no audience for it on a public deployment serving one
   // regiment. Set SWAGGER_ENABLED=true to force it on (e.g. a staging box).
   const swaggerEnabled =
-    process.env.SWAGGER_ENABLED === 'true' ||
-    config.get('env', { infer: true }) !== 'production';
+    process.env.SWAGGER_ENABLED === 'true' || config.get('env', { infer: true }) !== 'production';
 
   if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
