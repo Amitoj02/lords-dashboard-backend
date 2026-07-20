@@ -1,0 +1,21 @@
+# Nightly at 03:30 UTC — deliberately BEFORE the 04:30 unattended-upgrades
+# reboot window, so the day's backup is already in R2 before the box may bounce.
+
+[Unit]
+Description=Nightly Lords database backup
+Documentation=file:%h/lords/deploy/README.md
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+
+# Smear the start so every box on this schedule does not hit R2 at once, and so
+# the backup does not land on the exact same second as any other cron-ish job.
+RandomizedDelaySec=15min
+
+# Run a missed backup on the next boot. Without this a reboot spanning 03:30
+# silently skips a night — and a skipped backup looks identical to a successful
+# one unless you are watching the heartbeat.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

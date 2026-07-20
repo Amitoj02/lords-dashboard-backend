@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# Nightly logical backup of the production database to Cloudflare R2.
+#
+#   mysqldump --single-transaction --quick  →  zstd  →  rclone  →  r2:lords-backups
+#
+# Run by the lords-backup.timer systemd USER unit (see deploy/systemd/). It is a
+# user unit rather than a system one because the deploy account owns the docker
+# socket and the .env, and `loginctl enable-linger deploy` is already set — so
+# none of this needs root.
+#
+# Configuration comes from ~/lords/backup.env (0600):
+#
+#   RCLONE_REMOTE=r2                    rclone remote name (see rclone.conf)
+#   BACKUP_BUCKET=lords-backups
+#   BACKUP_RETENTION_DAYS=30
+#   BACKUP_MIN_BYTES=20000              floor for the "did the dump work" check
+#   BACKUP_HEARTBEAT_URL=https://...    optional; pinged only on success
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+APP_DIR="${LORDS_APP_DIR:-$HOME/lords}"
+ENV_FILE="$APP_DIR/.env"
+CFG_FILE="$APP_DIR/backup.env"
+COMPOSE=(docker compose -f "$APP_DIR/docker-compose.yml" -f "$APP_DIR/docker-compose.prod.yml")
+
+log()  { printf '[backup] %s\n' "$*"; }
+fail() { printf '[backup] FAILED: %s\n' "$*" >&2; exit 1; }
+
+[ -r "$ENV_FILE" ] || fail "$ENV_FILE missing"
+[ -r "$CFG_FILE" ] || fail "$CFG_FILE missing (copy deploy/backup.env.template)"
+
+# Read the two values needed out of .env WITHOUT sourcing it — the file holds
+# secrets with characters that a naive `source` would happily execute.
+read_env() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+
+DB_PASSWORD="$(read_env DB_PASSWORD)"
+DB_DATABASE="$(read_env DB_DATABASE)"
+: "${DB_DATABASE:=lords_dashboard}"
+[ -n "$DB_PASSWORD" ] || fail "DB_PASSWORD not found in $ENV_FILE"
+
+# shellcheck disable=SC1090
+. "$CFG_FILE"
+: "${RCLONE_REMOTE:=r2}"
+: "${BACKUP_BUCKET:=lords-backups}"
+: "${BACKUP_RETENTION_DAYS:=30}"
+: "${BACKUP_MIN_BYTES:=20000}"
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+NAME="lords_dashboard-${STAMP}.sql.zst"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+OUT="$WORK/$NAME"
+
+# ── Dump ────────────────────────────────────────────────────────────────────
+# --single-transaction: consistent snapshot without locking out the live API
+#   (InnoDB throughout, so this is a real point-in-time dump, not a smear).
+# --quick: stream rows instead of buffering the whole result set — this box has
+#   4 GB and the api is sharing it.
+# MYSQL_PWD rather than -p on the command line: the argv of `docker compose exec`
+#   is visible to every user in `ps` on the host.
+log "dumping $DB_DATABASE"
+set +e
+"${COMPOSE[@]}" exec -T -e MYSQL_PWD="$DB_PASSWORD" db \
+	mysqldump \
+	--single-transaction --quick \
+	--routines --triggers --events \
+	--default-character-set=utf8mb4 \
+	--no-tablespaces \
+	-u root "$DB_DATABASE" 2>"$WORK/dump.err" | zstd -9 -q -o "$OUT"
+STATUS=("${PIPESTATUS[@]}")
+set -e
+
+# Both halves of the pipe must be checked. mysqldump exits non-zero on an auth
+# failure while still writing a short, perfectly valid .zst — which is exactly
+# the shape of backup that looks fine for months and restores to nothing.
+[ "${STATUS[0]}" -eq 0 ] || fail "mysqldump exited ${STATUS[0]}: $(tail -3 "$WORK/dump.err")"
+[ "${STATUS[1]}" -eq 0 ] || fail "zstd exited ${STATUS[1]}"
+
+if [ -s "$WORK/dump.err" ]; then
+	# Warnings are common and harmless; surface them without failing.
+	log "mysqldump stderr: $(tr '\n' ' ' <"$WORK/dump.err" | cut -c1-300)"
+fi
+
+# ── Sanity-check the size ───────────────────────────────────────────────────
+SIZE="$(stat -c %s "$OUT")"
+[ "$SIZE" -ge "$BACKUP_MIN_BYTES" ] || \
+	fail "dump is only ${SIZE}B, below the ${BACKUP_MIN_BYTES}B floor — refusing to upload"
+
+# Relative check against the most recent stored backup. A database does not
+# normally shrink by more than half overnight; if it has, something is wrong and
+# a human should look before this overwrites the good history.
+PREV_SIZE="$(rclone lsjson "${RCLONE_REMOTE}:${BACKUP_BUCKET}" 2>/dev/null \
+	| grep -o '"Size":[0-9]*' | cut -d: -f2 | sort -n | tail -1 || true)"
+if [ -n "${PREV_SIZE:-}" ] && [ "$PREV_SIZE" -gt 0 ] && [ "$SIZE" -lt $((PREV_SIZE / 2)) ]; then
+	fail "dump is ${SIZE}B but the largest stored backup is ${PREV_SIZE}B — over 50% smaller, refusing to upload"
+fi
+
+log "dump OK: $NAME (${SIZE} bytes)"
+
+# ── Verify it actually decompresses ─────────────────────────────────────────
+# Cheap, and catches a truncated or corrupt archive here rather than during an
+# incident. Does not prove the SQL restores — that is what the restore drill is
+# for (deploy/bin/lords-restore-drill).
+zstd -t "$OUT" 2>/dev/null || fail "archive fails its own integrity check"
+zstdcat "$OUT" | tail -5 | grep -q 'Dump completed' \
+	|| fail "archive does not end with mysqldump's completion marker — likely truncated"
+
+# ── Upload ──────────────────────────────────────────────────────────────────
+log "uploading to ${RCLONE_REMOTE}:${BACKUP_BUCKET}/"
+rclone copyto "$OUT" "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${NAME}" \
+	--s3-no-check-bucket --retries 3 || fail "rclone upload failed"
+
+rclone lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${NAME}" >/dev/null \
+	|| fail "uploaded object is not listable — treating as a failed backup"
+
+# ── Prune ───────────────────────────────────────────────────────────────────
+log "pruning backups older than ${BACKUP_RETENTION_DAYS}d"
+rclone delete "${RCLONE_REMOTE}:${BACKUP_BUCKET}" \
+	--min-age "${BACKUP_RETENTION_DAYS}d" --include 'lords_dashboard-*.sql.zst' \
+	|| log "WARNING: prune failed (backup itself succeeded)"
+
+REMAINING="$(rclone lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" | wc -l)"
+log "done — ${REMAINING} backup(s) retained"
+
+# ── Heartbeat ───────────────────────────────────────────────────────────────
+# Pinged ONLY here, at the end of the success path. The monitor alerts on the
+# ABSENCE of this ping, which is what catches the timer silently not running —
+# a failure mode no amount of error handling inside this script can report.
+if [ -n "${BACKUP_HEARTBEAT_URL:-}" ]; then
+	curl -fsS --max-time 10 --retry 2 "$BACKUP_HEARTBEAT_URL" >/dev/null \
+		&& log "heartbeat sent" || log "WARNING: heartbeat ping failed"
+fi

@@ -1,0 +1,30 @@
+# Systemd USER unit — installed under ~/.config/systemd/user/, not /etc.
+#
+# The deploy account already owns the docker socket, the .env and the rclone
+# config, and `loginctl enable-linger deploy` is set (so user units run without
+# an active login session). That makes root unnecessary for backups, which is
+# one less thing holding privilege it does not need.
+#
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now lords-backup.timer
+#   systemctl --user start lords-backup.service   # run one now
+#   journalctl --user -u lords-backup.service -n 50
+
+[Unit]
+Description=Back up the Lords dashboard database to Cloudflare R2
+Documentation=file:%h/lords/deploy/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/bin/lords-backup
+
+# The dump streams through zstd on a 2 vCore box shared with a live MySQL and
+# the API. Keep it off the critical path rather than letting it compete.
+Nice=10
+IOSchedulingClass=idle
+
+# Generous, but bounded: a hung mysqldump holding a read view open is worse than
+# a failed backup, and the timer would otherwise stack runs.
+TimeoutStartSec=30min

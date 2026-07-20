@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# Restore the most recent R2 backup into a scratch database and time it.
+#
+# The number this prints IS the RTO. A backup that has never been restored is a
+# hypothesis, and the failure modes it catches — a dump taken with the wrong
+# character set, a missing routine, an auth failure that still exited 0 — are
+# invisible until the day it matters.
+#
+# SAFE TO RUN AGAINST PRODUCTION. It restores into a scratch schema
+# (lords_restore_drill), reads the live one only to compare row counts, and
+# drops the scratch schema at the end. It never writes to lords_dashboard.
+#
+#   ~/bin/lords-restore-drill            # newest backup
+#   ~/bin/lords-restore-drill <object>   # a specific one
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+APP_DIR="${LORDS_APP_DIR:-$HOME/lords}"
+ENV_FILE="$APP_DIR/.env"
+CFG_FILE="$APP_DIR/backup.env"
+COMPOSE=(docker compose -f "$APP_DIR/docker-compose.yml" -f "$APP_DIR/docker-compose.prod.yml")
+DRILL_DB="lords_restore_drill"
+
+log()  { printf '[drill] %s\n' "$*"; }
+fail() { printf '[drill] FAILED: %s\n' "$*" >&2; exit 1; }
+
+[ -r "$ENV_FILE" ] || fail "$ENV_FILE missing"
+[ -r "$CFG_FILE" ] || fail "$CFG_FILE missing"
+
+read_env() { grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }
+DB_PASSWORD="$(read_env DB_PASSWORD)"
+DB_DATABASE="$(read_env DB_DATABASE)"
+: "${DB_DATABASE:=lords_dashboard}"
+
+# shellcheck disable=SC1090
+. "$CFG_FILE"
+: "${RCLONE_REMOTE:=r2}"
+: "${BACKUP_BUCKET:=lords-backups}"
+
+[ "$DRILL_DB" != "$DB_DATABASE" ] || fail "refusing to drill onto the live database"
+
+mysql_root() {
+	"${COMPOSE[@]}" exec -T -e MYSQL_PWD="$DB_PASSWORD" db mysql -u root "$@"
+}
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"; mysql_root -e "DROP DATABASE IF EXISTS \`${DRILL_DB}\`;" >/dev/null 2>&1 || true' EXIT
+
+# ── Pick the archive ────────────────────────────────────────────────────────
+OBJECT="${1:-}"
+if [ -z "$OBJECT" ]; then
+	OBJECT="$(rclone lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" --include 'lords_dashboard-*.sql.zst' \
+		| sort | tail -1)"
+	[ -n "$OBJECT" ] || fail "no backups found in ${RCLONE_REMOTE}:${BACKUP_BUCKET}"
+fi
+log "restoring $OBJECT"
+
+START="$(date +%s)"
+
+# ── Download ────────────────────────────────────────────────────────────────
+rclone copyto "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${OBJECT}" "$WORK/$OBJECT" --retries 3 \
+	|| fail "download failed"
+log "downloaded $(stat -c %s "$WORK/$OBJECT") bytes in $(( $(date +%s) - START ))s"
+
+# ── Restore ─────────────────────────────────────────────────────────────────
+mysql_root -e "DROP DATABASE IF EXISTS \`${DRILL_DB}\`;
+               CREATE DATABASE \`${DRILL_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" \
+	|| fail "could not create the scratch database"
+
+# The dump is a single-schema mysqldump (no --databases), so it carries no
+# CREATE DATABASE or USE and can be replayed into any target schema.
+set +e
+zstdcat "$WORK/$OBJECT" | "${COMPOSE[@]}" exec -T -e MYSQL_PWD="$DB_PASSWORD" db \
+	mysql -u root "$DRILL_DB" 2>"$WORK/restore.err"
+STATUS=("${PIPESTATUS[@]}")
+set -e
+[ "${STATUS[0]}" -eq 0 ] || fail "zstdcat exited ${STATUS[0]} — archive is corrupt"
+[ "${STATUS[1]}" -eq 0 ] || fail "mysql exited ${STATUS[1]}: $(tail -3 "$WORK/restore.err")"
+
+ELAPSED=$(( $(date +%s) - START ))
+
+# ── Compare against live ────────────────────────────────────────────────────
+log "verifying"
+counts_for() {
+	mysql_root -N -B -e "SELECT table_name, table_rows FROM information_schema.tables
+	                     WHERE table_schema='$1' ORDER BY table_name;"
+}
+LIVE_TABLES="$(mysql_root -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_DATABASE}';")"
+DRILL_TABLES="$(mysql_root -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DRILL_DB}';")"
+
+printf '\n  %-28s %s\n' "tables in live:" "$LIVE_TABLES"
+printf '  %-28s %s\n\n' "tables restored:" "$DRILL_TABLES"
+
+[ "$DRILL_TABLES" -eq "$LIVE_TABLES" ] \
+	|| fail "restored $DRILL_TABLES tables but live has $LIVE_TABLES"
+
+# Exact row counts on the tables whose loss would actually hurt. information_schema
+# table_rows is an estimate for InnoDB, so count these for real.
+for t in members ranks medals applications events gallery_items audit_logs; do
+	live=$(mysql_root -N -B -e "SELECT COUNT(*) FROM \`${DB_DATABASE}\`.\`$t\`;" 2>/dev/null || echo skip)
+	[ "$live" = skip ] && continue
+	got=$(mysql_root -N -B -e "SELECT COUNT(*) FROM \`${DRILL_DB}\`.\`$t\`;" 2>/dev/null || echo ERR)
+	if [ "$live" = "$got" ]; then
+		printf '  ✓ %-20s %s rows\n' "$t" "$got"
+	else
+		printf '  ✗ %-20s live=%s restored=%s\n' "$t" "$live" "$got"
+		DRIFT=1
+	fi
+done
+
+# A newer row written between the dump and now is expected drift, not a failure —
+# so this reports rather than exits non-zero. Investigate a LARGE gap.
+[ -n "${DRIFT:-}" ] && log "NOTE: row counts differ; rows written since the dump are expected"
+
+cat <<EOF
+
+  ────────────────────────────────────────────────
+   RTO: ${ELAPSED}s  (download + restore, ${OBJECT})
+  ────────────────────────────────────────────────
+
+  Record this number. It is how long the site is down in a
+  restore-from-backup scenario, excluding the time to notice.
+
+EOF
+log "scratch database dropped; live database untouched"

@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# ─────────────────────────────────────────────────────────────────────────────
+# The ONLY thing the CI deploy key is allowed to do.
+#
+# Installed as an SSH forced command:
+#
+#   command="/home/deploy/bin/lords-deploy",no-agent-forwarding,\
+#   no-port-forwarding,no-pty,restrict ssh-ed25519 AAAA... github-actions
+#
+# The requested command arrives in $SSH_ORIGINAL_COMMAND and is NOT executed —
+# it is parsed and matched against a fixed allowlist. That is the whole point:
+# a stolen CI credential can roll images, and nothing else. It cannot get a
+# shell, read the .env, or reach the database.
+#
+# Accepted:
+#   deploy api  <tag>            roll the API image
+#   deploy web  <tag>            roll the SPA image
+#   deploy both <apitag> <webtag>
+#   status                       report running images + health
+#
+# <tag> must be a 7-40 char lowercase hex commit sha, or the literal "latest".
+# ─────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+APP_DIR="${LORDS_APP_DIR:-$HOME/lords}"
+ENV_FILE="$APP_DIR/.env"
+LOCK_FILE="$HOME/.lords-deploy.lock"
+COMPOSE=(docker compose -f "$APP_DIR/docker-compose.yml" -f "$APP_DIR/docker-compose.prod.yml")
+READY_PATH="/api/health/ready"
+
+log() { printf '[deploy] %s\n' "$*"; }
+die() { printf '[deploy] ERROR: %s\n' "$*" >&2; exit 1; }
+
+# Probed from INSIDE the api container. In prod the api publishes no host port —
+# caddy is the only container with a `ports:` entry — so there is nothing on the
+# host's :3000 to curl. Going through caddy instead would drag TLS, the public
+# hostname and Cloudflare into what should be a local check.
+ready() {
+	"${COMPOSE[@]}" exec -T api \
+		wget --no-verbose --tries=1 --timeout=5 --spider "http://localhost:3000${READY_PATH}" \
+		>/dev/null 2>&1
+}
+
+# ── Parse and validate ──────────────────────────────────────────────────────
+# Deliberately word-split: the input is an allowlisted command, not a shell line.
+# shellcheck disable=SC2086
+set -- ${SSH_ORIGINAL_COMMAND:-}
+
+[ $# -gt 0 ] || die "no command given (this key is restricted to lords-deploy)"
+
+valid_tag() { [[ "$1" =~ ^([0-9a-f]{7,40}|latest)$ ]]; }
+
+ACTION="$1"; shift
+
+case "$ACTION" in
+	status) ;;
+	deploy)
+		[ $# -ge 1 ] || die "usage: deploy <api|web|both> <tag> [webtag]"
+		COMPONENT="$1"; shift
+		case "$COMPONENT" in
+			api | web)
+				[ $# -eq 1 ] || die "usage: deploy $COMPONENT <tag>"
+				valid_tag "$1" || die "refusing tag '$1' (want a 7-40 char hex sha or 'latest')"
+				;;
+			both)
+				[ $# -eq 2 ] || die "usage: deploy both <apitag> <webtag>"
+				valid_tag "$1" || die "refusing api tag '$1'"
+				valid_tag "$2" || die "refusing web tag '$2'"
+				;;
+			*) die "unknown component '$COMPONENT' (want api, web or both)" ;;
+		esac
+		;;
+	*) die "command not permitted: '$ACTION'" ;;
+esac
+
+[ -d "$APP_DIR" ] || die "app dir $APP_DIR does not exist"
+[ -r "$ENV_FILE" ] || die "$ENV_FILE missing or unreadable"
+
+# ── Serialize ───────────────────────────────────────────────────────────────
+# Both repositories deploy independently and a merge to each can land at the
+# same moment. Two concurrent `compose up` runs against one project race on
+# container recreation, so hold an exclusive lock for the whole run.
+exec 9>"$LOCK_FILE"
+if ! flock -w 600 -x 9; then
+	die "another deploy has held the lock for 10 minutes; investigate before retrying"
+fi
+
+cd "$APP_DIR"
+
+if [ "$ACTION" = status ]; then
+	"${COMPOSE[@]}" ps
+	log "pinned tags: $(grep -E '^(API|WEB)_IMAGE_TAG=' "$ENV_FILE" | tr '\n' ' ')"
+	if ready; then log "readiness: OK"; else log "readiness: FAILED"; fi
+	exit 0
+fi
+
+# ── Pin the tag in .env ─────────────────────────────────────────────────────
+# Persisted rather than passed inline so that a later `docker compose up -d` by
+# hand, or a reboot, brings back the same images instead of silently drifting to
+# :latest. Rewritten via a 0600 temp file + mv so the secret file is never
+# briefly world-readable and never half-written.
+pin_tag() {
+	local key="$1" value="$2" tmp
+	tmp="$(mktemp "$APP_DIR/.env.XXXXXX")"
+	chmod 600 "$tmp"
+	if grep -qE "^${key}=" "$ENV_FILE"; then
+		sed "s|^${key}=.*|${key}=${value}|" "$ENV_FILE" >"$tmp"
+	else
+		cat "$ENV_FILE" >"$tmp"
+		printf '%s=%s\n' "$key" "$value" >>"$tmp"
+	fi
+	mv "$tmp" "$ENV_FILE"
+	log "pinned ${key}=${value}"
+}
+
+PREV_API="$(grep -E '^API_IMAGE_TAG=' "$ENV_FILE" | cut -d= -f2- || true)"
+PREV_WEB="$(grep -E '^WEB_IMAGE_TAG=' "$ENV_FILE" | cut -d= -f2- || true)"
+
+case "$COMPONENT" in
+	api)  pin_tag API_IMAGE_TAG "$1" ;;
+	web)  pin_tag WEB_IMAGE_TAG "$1" ;;
+	both) pin_tag API_IMAGE_TAG "$1"; pin_tag WEB_IMAGE_TAG "$2" ;;
+esac
+
+log "previous: api=${PREV_API:-unset} web=${PREV_WEB:-unset}"
+
+# ── Roll ────────────────────────────────────────────────────────────────────
+log "pulling images"
+"${COMPOSE[@]}" pull --quiet
+
+# NOT a rolling update. The Discord gateway runs in-process in the api, so two
+# overlapping api containers mean two gateway connections on one bot token and
+# duplicate role grants / welcome DMs to real members. `up -d` recreates
+# stop-then-start, and stop_grace_period gives discord.js time to destroy() the
+# session cleanly.
+log "recreating containers (stop-then-start; migrate runs first)"
+"${COMPOSE[@]}" up -d --remove-orphans
+
+# ── Verify ──────────────────────────────────────────────────────────────────
+# Polled here rather than with `compose up --wait`: the migrate one-shot exits
+# by design, which --wait treats inconsistently across compose versions, and a
+# hand-rolled poll gives a far better failure message.
+log "waiting for readiness at ${READY_PATH}"
+for attempt in $(seq 1 60); do
+	if ready; then
+		log "ready after ~$((attempt * 5))s"
+		"${COMPOSE[@]}" ps --format '{{.Service}}\t{{.Image}}\t{{.Status}}'
+		log "deploy OK"
+		exit 0
+	fi
+	sleep 5
+done
+
+# ── Failed ──────────────────────────────────────────────────────────────────
+# Deliberately NOT auto-rolled-back. Migrations have already run by this point
+# and they are not reversible here, so silently reverting the image would leave
+# an old binary against a new schema — usually worse than staying down. Fail
+# loudly with the evidence and let a human choose.
+log "readiness never came up after 5 minutes; recent api logs follow" >&2
+"${COMPOSE[@]}" logs --tail 60 api >&2 || true
+"${COMPOSE[@]}" logs --tail 30 migrate >&2 || true
+cat >&2 <<EOF
+
+[deploy] FAILED. The new images are running but /api/health/ready never passed.
+[deploy] To roll back (schema permitting), on the box:
+[deploy]   cd $APP_DIR
+[deploy]   sed -i 's|^API_IMAGE_TAG=.*|API_IMAGE_TAG=${PREV_API:-latest}|' .env
+[deploy]   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+EOF
+exit 1
