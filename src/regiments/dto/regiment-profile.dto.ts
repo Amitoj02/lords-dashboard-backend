@@ -43,8 +43,22 @@ export class RegimentProfileDto {
   @ApiProperty({ description: 'Count of non-deleted members in the regiment' })
   memberCount: number;
 
-  /** Build the public projection from a regiment plus its computed member count. */
-  static from(regiment: Regiment, memberCount: number): RegimentProfileDto {
+  @ApiProperty({
+    description:
+      'Whether the mercenary enlistment track is currently offered. The public apply ' +
+      'form hides the Mercenary option when false; the API refuses that track anyway (T-0137)',
+  })
+  allowMercenaries: boolean;
+
+  /**
+   * Build the public projection from a regiment, its computed member count, and
+   * the mercenary-track toggle read from the regiment's settings row (T-0137).
+   */
+  static from(
+    regiment: Regiment,
+    memberCount: number,
+    allowMercenaries: boolean,
+  ): RegimentProfileDto {
     const dto = new RegimentProfileDto();
     dto.id = regiment.id;
     dto.name = regiment.name;
@@ -58,6 +72,7 @@ export class RegimentProfileDto {
     dto.discordServerName = regiment.discordServerName;
     dto.setupComplete = regiment.setupComplete;
     dto.memberCount = memberCount;
+    dto.allowMercenaries = allowMercenaries;
     return dto;
   }
 }

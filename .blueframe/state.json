@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
-  "lastSyncedAt": "2026-07-20T03:40:00Z",
-  "notesForNextSession": "PRs OPEN AND CI GREEN: backend #17 (feat/production-ovh-r2) + frontend [lords-regiment-dashboard #17](https://github.com/Amitoj02/lords-regiment-dashboard/pull/17). SHIP THE TWO TOGETHER - prod compose now references ghcr.io/amitoj02/lords-web, and T-0062 (frontend) carries an open cross-repo contract risk. THIS SESSION: reverse-engineered a full hosting plan (project-plan/PRODUCTION_OVH_R2_PLAN.md) and landed the code half as T-0134/T-0135/T-0136. MIGRATION SQUASH (T-0135): 18 migrations are now ONE InitialSchema. Any DB that ran the old ones must be DROPPED AND RECREATED - typeorm_migrations references deleted files. Verified with migration:generate reporting \"No changes in database schema were found\". THREE STORAGE BUGS FIXED (T-0134), all silent: S3_ACCESS_KEY_ID/SECRET were wired from MINIO_ROOT_USER so a prod .env was IGNORED (every R2 upload would auth as minioadmin); S3_REGION via ${S3_REGION:-auto} picks up the dev .env us-east-1 and breaks R2 signing, so it is now hardcoded; S3_PUBLIC_BASE_URL unset derives the PRIVATE signing endpoint, so every image 404s with nothing in the logs. GOTCHA - GITHUB_TOKEN: the env var is a classic PAT with only repo scope and CANNOT push .github/workflows. The keyring account has workflow scope - push with `env -u GITHUB_TOKEN git push`. DISCORD_GOLIVE.md CORRECTED: permissions integer is 268438528 (was 268437504, missing View Channel), and the integer ALONE does not fix 50001 on a private channel - channel overwrites are applied after guild-level perms and supersede them, so each routed channel (enlistment, audit-log, event-announcement) needs an explicit overwrite. No intent review needed below 10,000 users (threshold changed from 100 servers on 2026-06-10). BLOCKED ON THE HUMAN (T-0032): order the OVH VPS (KYC can stall an order for DAYS - order early), create the Discord production app, bind cdn.lordsofholdfast.com to the R2 bucket, and set the R2 CORS policy (browser presigned PUTs fail without it even though the URL is valid). NOT DONE, see skippedByClaude on T-0134: backup/restore scripts, least-privilege DB users, splitting the bot out of the API process, splitting seed from migrate. Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff; testPlan status MUST be pending|passed|failed.",
-  "nextIdCounter": 137,
+  "lastSyncedCommit": "3de3892b1aa034b295f823aa22e7718e8c006a2e",
+  "lastSyncedAt": "2026-07-20T05:00:00Z",
+  "notesForNextSession": "MERCENARY TRACK EPIC shipped as a PAIR - backend PR (feat/mercenary-track-enforcement) + frontend PR (feat/mercenary-track-ux). MERGE THEM TOGETHER: the frontend apply form reads allowMercenaries off GET /api/regiment, which only exists after T-0137. The frontend field is OPTIONAL and treats absent as permissive, so a frontend-first deploy degrades safely (both cards shown) rather than breaking. T-0133 had THREE holes, not the two the task named: updateMine() let an applicant submit as Member and flip to Mercenary afterwards, bypassing the submit guard entirely. GUARD SHAPE IS LOAD-BEARING: all guards use `settings && settings.allowMercenaries === false`, never a truthiness check. A settings object that OMITS the column (e.g. if a query ever narrows the select) must stay permissive; a truthiness check would 403 every Mercenary submit/edit/approve regiment-wide. Four tests pin this - mutating the guards fails exactly those four. Do not \"simplify\" them. RISK SWEEP: 21 backend risks retired with evidence this session. The 8 still open are undischarged OPERATIONAL preconditions, not code defects - T-0134#3 (8.0 db-data volume must be validated before 8.4), T-0135#0 (any DB that ran the 18 pre-squash migrations must be DROPPED, not migrated - I hit exactly this locally: the e2e DB still had all 18 rows), T-0136#0 (prod host needs a read:packages PAT), T-0134#0/1/2 (throttler swap, S3 checksum mode, /ready 503 - all unpinned by tests), T-0002#0 (encryption transformer still has no key id/version, so rotation is a one-way door). LOCAL E2E: use an isolated DB. I created lords_dashboard_e2e (fresh, squashed InitialSchema applies clean + seeds). Run with NODE_ENV=test DB_DATABASE=lords_dashboard_e2e DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= . Suite is re-runnable (48/48 twice). `npm run build` on the HOST fails on a root-owned dist/ (container bind-mount artifact) - build inside the container instead: docker compose exec api npm run build. BROWSER VERIFY: docker compose restart does NOT re-read .env - use docker compose up -d api. The mock owner persona (snowflake 100000000000000001) does NOT match the seeded owner, which is bound to the real OWNER_DISCORD_ID; repoint members.discord_identity_id temporarily to sign in as Owner, and restore it after. Admin route is /app/admin/applications. Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff; testPlan status MUST be pending|passed|failed.",
+  "nextIdCounter": 138,
   "connections": [],
   "tasks": [
     {
@@ -1699,8 +1699,11 @@
       "regressionRisk": [
         {
           "desc": "DB_HOST now resolves the compose `db` service; any stale .env or host-run tooling using localhost:3306 will fail to connect",
-          "status": "open",
-          "notedAt": "2026-07-11T02:30:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-11T02:30:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The coupling is now explicit and overridden at every layer: docker-compose.yml:86 and docker-compose.prod.yml:55 set `DB_HOST: db` directly in the api service `environment:` block, which takes precedence over any stale `.env`/env_file value, so a containerised run cannot inherit a bad host. .env.example:29-30 documents both forms (`DB_HOST=db` inside the network, `127.0.0.1` + `DB_PORT=3307` from the host) and README.md:52 repeats it for host-run tooling. .github/workflows/ci.yml:34 runs the whole suite host-side with `DB_HOST: 127.0.0.1` and is green, demonstrating the host path works. src/config/env.validation.ts:16 also defaults DB_HOST to `localhost` rather than failing boot."
         }
       ],
       "skippedByClaude": [],
@@ -4015,8 +4018,11 @@
       "regressionRisk": [
         {
           "desc": "Threads a best-effort DM into the applications approve/decline/hold path and the shared discord-sync outbox worker; a DM-side error must never fail or roll back a decision (guarded, enqueued after the approve transaction).",
-          "status": "open",
-          "notedAt": "2026-07-12T22:20:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T22:20:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The hazard is structurally removed in src/applications/applications.service.ts. `enqueueDecisionDm` (line ~547) wraps its entire body \u2014 identity lookup, message rendering, and `discordSync.enqueueApplicationDecision` \u2014 in a try/catch that only logs (`this.logger.error('Failed to enqueue ... decision DM')`), so no DM-side error can propagate. It is invoked at lines 448 (approve), 487 (decline) and 529 (hold), and on the approve path the call sits AFTER `await this.dataSource.transaction(...)` has returned `{ savedApplication, member }` and after the audit write, so it cannot roll the decision back. Missing identity / missing discordUserId return early and silently."
         }
       ],
       "skippedByClaude": [],
@@ -4074,8 +4080,11 @@
       "regressionRisk": [
         {
           "desc": "Audit read path + AuditLogEntryDto.from are shared by every audit consumer; the added actorMember/targetMember relations change the query shape (list, detail, and CSV).",
-          "status": "open",
-          "notedAt": "2026-07-12T22:20:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T22:20:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The changed query shape is pinned by src/audit/audit.service.spec.ts: 'returns the entry projection scoped to the regiment, eager-loading member identities' (line 100), 'resolves avatars to null when the actor has no member (system actor)' (line 148), 'throws NotFound for a missing/wrong-regiment entry' (line 174), plus the CSV path \u2014 'emits the header row and un-paginated, 10k-capped, newest-first read' (line 183), 'emits the actor/target avatar columns (custom, else Discord fallback)' (line 200) and 'quote-escapes commas and quotes and renders nulls as empty cells' (line 226). List, detail and CSV consumers of the actorMember/targetMember relations are all covered."
         }
       ],
       "skippedByClaude": [],
@@ -4140,8 +4149,11 @@
       "regressionRisk": [
         {
           "desc": "Modifies AuditService.record (shared by every mutation) and injects an AuditLogEntry repo into the outbox worker for write-back; a bug affects all audit writes and the drain loop. The pending write is race-guarded (conditional update on IS NULL) so a terminal status is never downgraded.",
-          "status": "open",
-          "notedAt": "2026-07-12T22:20:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T22:20:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "Both halves of the claimed guard are present and exercised. The race guard is real: src/audit/audit.service.ts:130-138 issues a conditional update keyed `{ id: saved.id, discordSyncStatus: IsNull() }` -> Pending, so a terminal status written first by the worker is never downgraded. The worker write-back at src/discord/discord-sync.worker.ts:343-350 (`markAuditSync`) is try/catch-guarded and only logs, and its failure mode is pinned by src/discord/discord-sync.worker.spec.ts:262 'does not re-open a job (or re-run its side effect) when post-success bookkeeping fails'; the terminal-failure write-back is covered at line 108 and the orphan reaper's write-back at line 343. AuditService.record itself is pinned as non-throwing by audit.service.spec.ts:76."
         }
       ],
       "skippedByClaude": [],
@@ -4312,8 +4324,11 @@
       "regressionRisk": [
         {
           "desc": "reconcileRoles + managedRoleIds are the shared bot role-sync core (also drive rank sync and the ban strip); the desired/managed diff now adds AND removes medal roles. Pinned by three new worker specs (medal apply, join-role preserved, banned-member skipped).",
-          "status": "open",
-          "notedAt": "2026-07-12T22:20:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T22:20:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The three pinning specs the note anticipated exist in src/discord/discord-sync.worker.spec.ts under 'role reconcile (RoleSync)': 'assigns the rank role AND every held-medal role' (line 283), 'never re-grants roles to a BANNED member (would undo the ban strip)' (line 302), and 'does NOT strip the assign-only join/Guest role during reconcile' (line 318). The removal half of the diff is also covered by the no-list-roles fallback branch in discord-sync.worker.ts:323-332, which explicitly removes the linked role of every medal not currently held."
         }
       ],
       "skippedByClaude": [],
@@ -4376,8 +4391,11 @@
       "regressionRisk": [
         {
           "desc": "New required storage env vars added to Joi validation: any stale .env / prod env without them will fail app boot until populated (mirror the DB_HOST compose coupling risk T-0029#0).",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The boot-failure hazard no longer exists: every storage var in src/config/env.validation.ts:68-77 now carries a Joi `.default()` (S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY, S3_BUCKET, S3_FORCE_PATH_STYLE, S3_PRESIGN_EXPIRY_SECONDS, S3_MAX_UPLOAD_MB) and S3_PUBLIC_BASE_URL is `.optional()`, so none are required and a stale env cannot fail validation. docker-compose.yml:116+ additionally injects each value with a `${VAR:-default}` fallback, and .env.example:93-131 documents both the MinIO dev set and the R2 prod set."
         }
       ],
       "skippedByClaude": [
@@ -4451,13 +4469,19 @@
       "regressionRisk": [
         {
           "desc": "New shared upload surface consumed by members/events/medals/ranks/gallery; a presign or key-namespacing bug would affect every future uploader and could allow cross-namespace writes if key validation is weak.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The shared upload surface is broadly pinned by src/storage/storage.service.spec.ts (439 lines): namespaced key generation per target (lines 62, 78), content-type rejection (88), image-only enforcement (98), size caps including the gallery video cap from regiment_settings (108, 118), capability 403 (136) and non-enrolled self-service 403 (147), plus getPolicy ceiling clamping (398, 426). Consumer wiring is covered downstream \u2014 e.g. src/members/members.service.spec.ts:379-390 asserts avatarKey/bannerKey are passed through resolveKeyToPublicUrl with the right StorageTarget \u2014 and the icon-policy contract is additionally pinned end-to-end in test/post-mvp.e2e-spec.ts."
         },
         {
           "desc": "StorageService.resolveKeyToPublicUrl is the shared namespace-validation gate consumed by members/events/medals/ranks/gallery uploads; a bypass would let a caller claim another member's or another target's object key. Pinned by storage.service.spec (namespace + path-traversal + URL-overflow) and each consumer spec.",
-          "status": "open",
-          "notedAt": "2026-07-13T05:15:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-13T05:15:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The exact pinning tests named in the note exist in src/storage/storage.service.spec.ts under 'resolveKeyToPublicUrl': accepts a caller-owned namespace key (line 325), \"rejects a key from another member's namespace\" (332), 'rejects a key from a different target namespace' (339), 'rejects a path-traversal key inside the namespace' (346), and 'rejects a long filler tail that is not the generated uuid.ext shape (URL overflow guard)' (353). Consumer-side use is pinned by members.service.spec.ts:385-390."
         }
       ],
       "skippedByClaude": [],
@@ -4526,8 +4550,11 @@
       "regressionRisk": [
         {
           "desc": "Touches the shared self-edit PATCH /members/:id validation path (also used for display-name edits T-0058); a DTO change must not loosen whitelist/forbidNonWhitelisted guarantees.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The whitelist guarantee is intact and the new fields did not loosen it. src/main.ts:35-37 still constructs the global ValidationPipe with `whitelist: true, forbidNonWhitelisted: true`. src/members/dto/update-member.dto.ts exposes exactly three optional, individually-validated fields (inGameName with Min/MaxLength, avatarKey and bannerKey as @IsString @MaxLength(512)) \u2014 role/status/rank remain absent. The keys are not trusted: members.service.ts:178-186 routes both through StorageService.resolveKeyToPublicUrl with the correct StorageTarget, pinned by members.service.spec.ts:379-390."
         }
       ],
       "skippedByClaude": [],
@@ -4658,8 +4685,11 @@
       "regressionRisk": [
         {
           "desc": "Adds a column + DTO field to the shared medal projection consumed by the frontend ranks/medals UI; the FE medal model (glyph/ribbon only) must gain optional imageUrl in lockstep or ignore the new field gracefully.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The frontend gained the field in lockstep: ../lords-regiment-dashboard/src/app/core/models/api.model.ts declares `imageUrl: string | null` on both ApiMedal and ApiMemberMedal, and mapMedal / mapMedalAward copy it onto the domain Medal and MemberMedalAward models. The FE Medal model therefore no longer carries glyph only, so the new column is consumed rather than ignored."
         }
       ],
       "skippedByClaude": [],
@@ -4729,8 +4759,11 @@
       "regressionRisk": [
         {
           "desc": "Adds a column + DTO field to the shared rank projection consumed by the frontend ranks/medals UI; the FE rank model (chevrons only) must gain optional imageUrl in lockstep or ignore it gracefully.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "../lords-regiment-dashboard/src/app/core/models/api.model.ts declares `imageUrl: string | null` on ApiRank and mapRank forwards it to the domain Rank model; member.model.ts also carries `imageUrl` / `rankImageUrl` (mapMember copies `m.rankImageUrl`). The FE rank projection is in lockstep with the new backend column."
         }
       ],
       "skippedByClaude": [],
@@ -4800,8 +4833,11 @@
       "regressionRisk": [
         {
           "desc": "Changes the shared gallery submit path (submit forces pending + soft-delete semantics); enforcement must read live regiment_settings and not regress the existing moderation/like flows.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "src/gallery/gallery.service.spec.ts pins the changed submit path against live settings without regressing moderation: 'forces Pending for a regular member and audits the submission' (line 239), 'auto-approves a trusted admin when the regiment opts in' (265) and its negative 'does NOT auto-approve a non-trusted member even when the setting is on' (285); enforcement reads regiment_settings \u2014 'rejects a submission whose file count exceeds the per-submission limit' (295), 'rejects a file that exceeds its per-type size cap' (308), 'rejects a file whose type is not in the settings allow-list (T-0071)' (325) and 'resolves an uploaded file key to a public URL (T-0071)' (344). The surrounding moderation/like reads remain covered (moderationQueue 467-512, findArchive 513, approve 548)."
         }
       ],
       "skippedByClaude": [],
@@ -4864,13 +4900,19 @@
       "regressionRisk": [
         {
           "desc": "Direct-publish makes EVERY event create enqueue a Discord event-announcement via the shared discord-sync outbox (previously only non-draft creates did); a spike of creates now fans out to Discord. Frontend must stop sending isDraft/calling publish() in lockstep.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The frontend moved in lockstep: a repo-wide grep of ../lords-regiment-dashboard/src/app for `isDraft` or `publish(` returns exactly one hit \u2014 events.service.spec.ts:125, which asserts `expect(req.request.body.isDraft).toBeUndefined()` \u2014 i.e. the client no longer sends isDraft and no publish() call site remains. The backend fan-out is bounded and pinned by src/events/events.service.spec.ts:277 'publishes directly and enqueues exactly one Discord announce (T-0072)'."
         },
         {
           "desc": "Events service create/update + listPublic/getPublic/loadEvent + EventStatusScheduler all share the isDraft filter; draft-write was removed but the column is retained (always false), so projections/filters must stay consistent. Pinned by events.service.spec + post-mvp e2e (publish route 404, create publishes).",
-          "status": "open",
-          "notedAt": "2026-07-13T05:15:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-13T05:15:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "Both pinning tests named in the note exist. src/events/events.service.spec.ts:277 pins that create publishes directly and enqueues exactly one announce, and test/post-mvp.e2e-spec.ts:236 pins 'has no save-as-draft publish route (T-0072): POST /:id/publish is 404'. Projection consistency is preserved: the retained column is written as a constant false \u2014 src/database/migrations/1782177187006-InitialSchema.ts declares `is_draft tinyint NOT NULL DEFAULT 0` \u2014 and the read paths are covered by listPublic (301-338), listForMember (340-421) and getForMember (422-458) specs."
         }
       ],
       "skippedByClaude": [
@@ -4940,8 +4982,11 @@
       "regressionRisk": [
         {
           "desc": "Extends the shared event serialization (includeServer projection) to an authenticated read path; a projection bug could leak server binding to non-enrolled callers. Server password must remain reveal-only.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The projection leak is pinned in both directions by src/events/events.service.spec.ts: 'includes the server binding + myRsvp for an enrolled member' (line 340) versus 'redacts the server binding for a non-enrolled caller (no memberId)' (375) and 'redacts the server binding in the public projection' (318), plus 'reports hasServerPassword=false in the member view when no password is set (T-0106)' (365). Reveal-only is preserved by the revealPassword block (531-577): refuses with no RSVP (532), refuses a declined RSVP (542), 404s when no password is set (551)."
         }
       ],
       "skippedByClaude": [
@@ -5012,8 +5057,11 @@
       "regressionRisk": [
         {
           "desc": "Adds columns + a cadence enum to the shared events schema/DTOs; the generation cron (T-0075) and every event read now depend on these fields being correct.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The schema fields are now in the squashed source of truth \u2014 src/database/migrations/1782177187006-InitialSchema.ts:47 creates `events` with recurrence_cadence enum('daily','weekly','monthly'), recurrence_active, recurrence_rule, is_recurring and recurrence_template_id, and the commit message for 01a5505 records that `migration:generate` reports zero drift against the entity model. Correct write/read of those fields is pinned by src/events/events.service.spec.ts:289 'stores a cadence as an active recurring template (T-0074)' and :514 'permanently stops a recurring template via recurrenceActive=false', and consumed by the generation specs in event-recurrence.scheduler.spec.ts."
         }
       ],
       "skippedByClaude": [],
@@ -5092,13 +5140,19 @@
       "regressionRisk": [
         {
           "desc": "A system-wide background job that CREATES real event rows across every regiment; a bug could spawn duplicate or wrong-timezone occurrences, or fail to stop when a moderator ends a series. Must be idempotent and timezone-correct, and never keep the process alive / block shutdown.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "Every named property is pinned by src/events/event-recurrence.scheduler.spec.ts: timezone correctness across DST ('keeps 20:00 local across the US spring-forward' line 13; 'keeps the local day-of-month + time for a monthly Europe/London template across GMT-BST' line 48), idempotency ('is idempotent: never re-emits a start already present' line 74), monthly anchoring (102), far-past templates (120), horizon bounding (137), and stop-flag honouring ('skips templates whose stop flag is off (no generation)' line 246). Duplicate creation is also prevented at the DB level by UNIQUE INDEX UQ_event_occurrence(recurrence_template_id, starts_at) in InitialSchema.ts:47. Shutdown safety: src/events/event-recurrence.scheduler.ts:127 calls `this.timer.unref()`."
         },
         {
           "desc": "EventRecurrenceScheduler is a new unref'd background timer that materializes rows into the shared events table; a bad sweep could over-generate occurrences. Guarded (logged+swallowed) + bounded (MAX_EMIT) + UNIQUE(recurrence_template_id,starts_at) index + soft-delete dedupe. Pinned by anchor/DST/idempotency/far-past specs.",
-          "status": "open",
-          "notedAt": "2026-07-13T05:15:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-13T05:15:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "All four stated mitigations are verifiable in the landed code: `MAX_EMIT = 500` bounds each sweep (src/events/event-recurrence.scheduler.ts:18, enforced in the emit loop at line 90) alongside `HORIZON_DAYS = 60` (line 15); the timer is unref'd (line 127); and UQ_event_occurrence(recurrence_template_id, starts_at) is now both on the entity (src/events/entities/event.entity.ts:25) and in the squashed migration (InitialSchema.ts:47, dropped in down() at line 390) \u2014 it previously lived only in the deleted 1782470000000-EventOccurrenceUnique migration. The anchor/DST/idempotency/far-past specs are all present in event-recurrence.scheduler.spec.ts (lines 13-148)."
         }
       ],
       "skippedByClaude": [],
@@ -5168,13 +5222,19 @@
       "regressionRisk": [
         {
           "desc": "DiscordConnectionDto is shared by the admin bot-status UI and the FE DiscordConnection interface; new fields must be added in lockstep on the frontend or it must ignore unknown fields.",
-          "status": "open",
-          "notedAt": "2026-07-12T23:45:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-12T23:45:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "The frontend added the fields in lockstep: ../lords-regiment-dashboard/src/app/core/services/discord.service.ts declares a BotStatus interface carrying `wsPing`, `uptimeMs: number | null`, `memoryBytes: number | null` and `cpu: number | null` alongside connected/connectionStatus/readyAt/lastHeartbeatAt, matching src/discord/dto/discord-connection.dto.ts (uptimeMs/memoryBytes/cpu on both DiscordConnectionDto lines 21-25 and BotStatusDto lines 69-73). The admin bot-status component consumes it."
         },
         {
           "desc": "DiscordGatewayStatus interface gained live-metric fields consumed by DiscordConnectionDto + the new BotStatusDto; both real + mock gateways must keep type parity. Pinned by mock-discord-gateway.spec.",
-          "status": "open",
-          "notedAt": "2026-07-13T05:15:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-13T05:15:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "Type parity between the real and mock gateways is pinned by the spec the note names: src/discord/gateway/mock-discord-gateway.spec.ts:19 'returns canned live runtime metrics for type parity (T-0076)', alongside 'reports itself connected with a role + channel catalogue' (line 10). Both DTO consumers read the same DiscordGatewayStatus fields (discord-connection.dto.ts:45-47 and :87)."
         }
       ],
       "skippedByClaude": [
@@ -9018,7 +9078,7 @@
       "id": "T-0133",
       "title": "Enforce RegimentSettings.allowMercenaries in the applications flow",
       "summary": "allowMercenaries exists on RegimentSettings and is read/written via the settings DTOs, but applications.service.ts never consults it. An applicant can submit applicantType 'Mercenary' and be approved onto the Mercenary track even when the regiment has turned mercenaries off, making the toggle cosmetic. Reject or coerce the Mercenary track at submit and/or approve when the setting is disabled.",
-      "status": "planned",
+      "status": "deploy_ready",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -9029,46 +9089,61 @@
       "paths": [
         "src/applications/applications.service.ts",
         "src/applications/applications.service.spec.ts",
-        "test/applications.e2e-spec.ts"
+        "src/regiments/regiments.service.ts",
+        "src/regiments/regiments.service.spec.ts",
+        "test/post-mvp.e2e-spec.ts"
       ],
       "dependsOn": [],
       "blocks": [],
       "questions": [
         {
           "q": "When allowMercenaries is false, reject the submit with a 400 or silently coerce applicantType to Member? And should an already-pending Mercenary application be blocked at approve time if the setting flips off after submission?",
-          "answer": null,
+          "answer": "Reject at BOTH submit and approve; never silently coerce. Confirmed by the user. submit() and updateMine() refuse a Mercenary track with ForbiddenException while the setting is off; approve() refuses an already-pending Mercenary application if the setting flipped off after submission, so the live setting is always the authority. ForbiddenException (403) rather than 400: the two neighbouring settings-driven refusals in this service (\"Recruitment is currently closed\") are 403 and this is the same family.",
           "askedAt": "2026-07-19T00:00:00Z"
         }
       ],
       "testPlan": [
         {
           "desc": "With allowMercenaries=false, submitting applicantType 'Mercenary' is rejected or coerced per the chosen policy",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "With allowMercenaries=true, the Mercenary track still submits and approves onto MemberRole.Mercenary",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "Approving a pending Mercenary application after the setting flips off behaves per the chosen policy",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "Existing applications unit + e2e suites stay green (run e2e locally against a scratch DB, not unit tests alone)",
-          "status": "pending"
+          "status": "passed"
+        },
+        {
+          "desc": "updateMine() refuses a post-submit flip onto a closed track (third hole, not named in the original task)",
+          "status": "passed"
+        },
+        {
+          "desc": "Mutation check: rewriting the guards to a truthiness check fails exactly the four permissive-on-absent-column tests",
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "applications.service create/approve are shared paths used by every intake and enrolment flow; a new settings lookup there can break approval for Member applicants too",
-          "status": "open",
-          "notedAt": "2026-07-19T00:00:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-19T00:00:00Z",
+          "resolvedAt": "2026-07-20T05:00:00Z",
+          "resolvedBy": "claude",
+          "note": "Retired by construction and by test. updateMine/approve only query settings when the track in play is Mercenary, so a Member application never enters the new code; submit() reuses the settings row already loaded for the openRecruitment guard. Pinned by dedicated tests asserting settings.findOne is NOT called when approving a Member with allowMercenaries:false, and by four permissive-on-absent-column tests. Verified against the running API: Member submit returns 201 while the track is closed."
         }
       ],
-      "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "skippedByClaude": [
+        "Did not add @ApiForbiddenResponse decorators to the applications controller routes - neighbouring routes do not document their existing ForbiddenExceptions either, so this would have widened the diff without precedent."
+      ],
+      "lastTouchedCommit": "3de3892b1aa034b295f823aa22e7718e8c006a2e",
       "createdAt": "2026-07-19T00:00:00Z",
-      "updatedAt": "2026-07-19T00:00:00Z",
+      "updatedAt": "2026-07-20T05:00:00Z",
       "history": [
         {
           "at": "2026-07-19T00:00:00Z",
@@ -9076,6 +9151,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-07-20T05:00:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "guards on submit/updateMine/approve; 411 unit + 48 e2e green; PR opened"
         }
       ]
     },
@@ -9318,6 +9400,63 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        }
+      ]
+    },
+    {
+      "id": "T-0137",
+      "title": "Expose allowMercenaries on the public regiment profile",
+      "summary": "The apply form must stop OFFERING the Mercenary track once T-0133 makes the API refuse it, or applicants walk into a 403. GET /settings requires the ManageSettings capability so an Applicant cannot read it; the flag therefore rides on the already-public GET /api/regiment projection. RegimentsService already injects the settings repo (used by getStats), so the read is parallelised with the member count. A missing settings row defaults to true, matching the allow_mercenaries column default and the service-layer guard.",
+      "status": "deploy_ready",
+      "type": "feature",
+      "size": "XS",
+      "sizeWeight": 1,
+      "area": "regiments",
+      "feature": "public-profile",
+      "subfeature": "recruitment-policy",
+      "repo": "",
+      "paths": [
+        "src/regiments/dto/regiment-profile.dto.ts",
+        "src/regiments/regiments.service.ts",
+        "src/regiments/regiments.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0229"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "GET /api/regiment reports allowMercenaries:false when the toggle is off and true when on",
+          "status": "passed"
+        },
+        {
+          "desc": "A missing settings row yields allowMercenaries:true (permissive default)",
+          "status": "passed"
+        },
+        {
+          "desc": "Existing getProfile tests that never stubbed the settings repo stay green",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "RegimentProfileDto.from() gained a third required parameter. Every caller must be updated or the projection silently loses the field; there is exactly one caller today (RegimentsService.getProfile) but the static builder is the shared construction point for the public profile consumed by the anonymous landing page.",
+          "status": "open",
+          "notedAt": "2026-07-20T05:00:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "3de3892b1aa034b295f823aa22e7718e8c006a2e",
+      "createdAt": "2026-07-20T05:00:00Z",
+      "updatedAt": "2026-07-20T05:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T05:00:00Z",
+          "from": null,
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "created and implemented alongside T-0133"
         }
       ]
     }

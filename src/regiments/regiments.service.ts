@@ -40,8 +40,16 @@ export class RegimentsService {
   /** Public profile of the single regiment, enriched with its member count. */
   async getProfile(): Promise<RegimentProfileDto> {
     const regiment = await this.resolveRegiment();
-    const memberCount = await this.members.count({ where: { regimentId: regiment.id } });
-    return RegimentProfileDto.from(regiment, memberCount);
+    const [memberCount, settings] = await Promise.all([
+      this.members.count({ where: { regimentId: regiment.id } }),
+      this.settings.findOne({ where: { regimentId: regiment.id } }),
+    ]);
+    // The apply form is public, but GET /settings needs ManageSettings — so the
+    // mercenary-track toggle rides on this profile, letting the form stop offering
+    // a track the service layer would refuse anyway (T-0137). A missing settings
+    // row defaults to true, matching the column default and the service guard.
+    const allowMercenaries = settings ? settings.allowMercenaries !== false : true;
+    return RegimentProfileDto.from(regiment, memberCount, allowMercenaries);
   }
 
   /**

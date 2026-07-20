@@ -87,6 +87,20 @@ export class ApplicationsService {
       throw new ForbiddenException('Recruitment is currently closed');
     }
 
+    // The mercenary track closes independently of recruitment (T-0133). Refuse
+    // rather than silently coercing to Member, so the applicant learns the track
+    // they picked is unavailable. Reuses the settings row loaded just above; the
+    // `settings &&` / `=== false` shape keeps a missing row permissive, matching
+    // the column default of allow_mercenaries = 1.
+    const applicantType = dto.applicantType ?? ApplicantType.Member;
+    if (
+      applicantType === ApplicantType.Mercenary &&
+      settings &&
+      settings.allowMercenaries === false
+    ) {
+      throw new ForbiddenException('The mercenary track is currently closed');
+    }
+
     const priors = await this.applications.find({
       where: { regimentId: user.regimentId, discordIdentityId: user.identityId },
     });
@@ -104,7 +118,7 @@ export class ApplicationsService {
       discordIdentityId: user.identityId,
       applicantName: dto.applicantName,
       inGameName: dto.inGameName,
-      applicantType: dto.applicantType ?? ApplicantType.Member,
+      applicantType,
       discordTag: dto.discordTag ?? null,
       currentRegiment: dto.currentRegiment,
       howFound: dto.howFound,
@@ -177,6 +191,17 @@ export class ApplicationsService {
     }
     if (application.status !== ApplicationStatus.Pending) {
       throw new ConflictException('Only a pending application can be edited');
+    }
+
+    // Editing is a second door onto the mercenary track: without this an applicant
+    // could submit as a Member and flip to Mercenary afterwards, bypassing the
+    // submit() guard (T-0133). The settings row is only fetched when the patch
+    // actually asks for the Mercenary track, so a Member edit stays a single query.
+    if (dto.applicantType === ApplicantType.Mercenary) {
+      const settings = await this.settings.findOne({ where: { regimentId: user.regimentId } });
+      if (settings && settings.allowMercenaries === false) {
+        throw new ForbiddenException('The mercenary track is currently closed');
+      }
     }
 
     if (dto.applicantName !== undefined) application.applicantName = dto.applicantName;
@@ -340,6 +365,19 @@ export class ApplicationsService {
   ): Promise<ApplicationDto> {
     const application = await this.loadOrFail(user, id);
     this.assertDecidable(application);
+
+    // An application submitted while the mercenary track was open must not enlist
+    // onto it once the track has been closed (T-0133). Scoped to Mercenary
+    // applications so approving a Member costs no extra query and can never be
+    // refused by this guard; a missing settings row stays permissive.
+    if (application.applicantType === ApplicantType.Mercenary) {
+      const settings = await this.settings.findOne({ where: { regimentId: user.regimentId } });
+      if (settings && settings.allowMercenaries === false) {
+        throw new ForbiddenException(
+          'The mercenary track is currently closed - this application cannot be approved onto it',
+        );
+      }
+    }
 
     const { savedApplication, member } = await this.dataSource.transaction(async (manager) => {
       const rankRepo = manager.getRepository(Rank);
