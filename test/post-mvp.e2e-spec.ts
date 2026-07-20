@@ -558,4 +558,127 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(mine.body.blocked).toBe(false);
     });
   });
+
+  // ── Mercenary track enforcement (T-0133/T-0137) ────────────────────────────
+  describe('mercenary track enforcement', () => {
+    const MERC_DISCORD_ID = '900900900900900904';
+    const mercProfile = {
+      id: MERC_DISCORD_ID,
+      username: 'e2e_mercenary_applicant',
+      global_name: 'Merc Candidate',
+      discriminator: '0',
+      avatar: null,
+      email: 'mercenary@example.com',
+    };
+    const validApp = {
+      applicantName: 'Merc Candidate',
+      inGameName: 'MercCandidate1',
+      currentRegiment: 'None',
+      howFound: 'e2e',
+      preferredClasses: 'Line Infantry',
+      skillsToImprove: 'Aim',
+      interestConfirmed: true,
+    };
+    let mercToken: string;
+    let appId: string;
+
+    const cleanupMerc = async (): Promise<void> => {
+      const identity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: MERC_DISCORD_ID } });
+      if (identity) {
+        await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(Member).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+    };
+
+    /** Flip the regiment-wide mercenary track through the real settings route. */
+    const setMercenaryTrack = async (allowMercenaries: boolean): Promise<void> => {
+      await request(server())
+        .patch('/api/settings')
+        .set(bearer(ownerToken))
+        .send({ allowMercenaries })
+        .expect(200);
+    };
+
+    beforeAll(async () => {
+      await cleanupMerc();
+      mercToken = (await signIn(mercProfile)).token;
+      await setMercenaryTrack(false);
+    });
+
+    afterAll(async () => {
+      // Restore the seeded default so the suite stays re-runnable.
+      await setMercenaryTrack(true);
+      await cleanupMerc();
+    });
+
+    it('the public regiment profile advertises the closed track (T-0137)', async () => {
+      // The apply form is anonymous and cannot read /api/settings, so the toggle
+      // rides on the public profile — otherwise it would offer a track the API refuses.
+      const res = await request(server()).get('/api/regiment').expect(200);
+      expect(res.body.allowMercenaries).toBe(false);
+    });
+
+    it('refuses a Mercenary submission while the track is closed (T-0133)', async () => {
+      await request(server())
+        .post('/api/applications')
+        .set(bearer(mercToken))
+        .send({ ...validApp, applicantType: 'Mercenary' })
+        .expect(403);
+    });
+
+    it('still accepts a Member submission while the track is closed (T-0133)', async () => {
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(mercToken))
+        .send(validApp)
+        .expect(201);
+      appId = created.body.id as string;
+      expect(created.body.applicantType).toBe('Member');
+    });
+
+    it('refuses a post-submit flip onto the closed track (T-0133)', async () => {
+      await request(server())
+        .patch('/api/applications/mine')
+        .set(bearer(mercToken))
+        .send({ applicantType: 'Mercenary' })
+        .expect(403);
+
+      // An ordinary edit is untouched by the guard.
+      const patched = await request(server())
+        .patch('/api/applications/mine')
+        .set(bearer(mercToken))
+        .send({ inGameName: 'MercCandidate2' })
+        .expect(200);
+      expect(patched.body.inGameName).toBe('MercCandidate2');
+      expect(patched.body.applicantType).toBe('Member');
+    });
+
+    it('refuses to approve onto a track closed after submission (T-0133)', async () => {
+      // Reopen the track, let the applicant legitimately switch onto it…
+      await setMercenaryTrack(true);
+      const flipped = await request(server())
+        .patch('/api/applications/mine')
+        .set(bearer(mercToken))
+        .send({ applicantType: 'Mercenary' })
+        .expect(200);
+      expect(flipped.body.applicantType).toBe('Mercenary');
+
+      // …then close it again before the officer decides.
+      await setMercenaryTrack(false);
+      await request(server())
+        .post(`/api/applications/${appId}/approve`)
+        .set(bearer(ownerToken))
+        .expect(403);
+
+      // No enlistment happened: the application is still pending.
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(mercToken))
+        .expect(200);
+      expect(mine.body.application.status).toBe('pending');
+    });
+  });
 });

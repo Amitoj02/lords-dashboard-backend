@@ -104,6 +104,42 @@ describe('RegimentsService', () => {
       regimentRepo.find.mockResolvedValue([]);
       await expect(service.getProfile()).rejects.toBeInstanceOf(NotFoundException);
     });
+
+    it('surfaces the mercenary-track toggle to the public apply form (T-0137)', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      memberRepo.count.mockResolvedValue(1);
+
+      settingsRepo.findOne.mockResolvedValue({ regimentId: REGIMENT_ID, allowMercenaries: true });
+      expect((await service.getProfile()).allowMercenaries).toBe(true);
+
+      settingsRepo.findOne.mockResolvedValue({ regimentId: REGIMENT_ID, allowMercenaries: false });
+      expect((await service.getProfile()).allowMercenaries).toBe(false);
+
+      expect(settingsRepo.findOne).toHaveBeenCalledWith({ where: { regimentId: REGIMENT_ID } });
+    });
+
+    it('defaults allowMercenaries to true when there is no settings row (T-0137)', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      memberRepo.count.mockResolvedValue(1);
+      settingsRepo.findOne.mockResolvedValue(null);
+
+      // Permissive default, matching the allow_mercenaries column default and the
+      // service-layer guard in ApplicationsService (T-0133).
+      expect((await service.getProfile()).allowMercenaries).toBe(true);
+    });
+
+    it('pins the permissive-on-absent-column contract: a settings row without allowMercenaries reports true (T-0137)', async () => {
+      // Shape guard. The production expression is deliberately `allowMercenaries !== false`,
+      // not `!!allowMercenaries`: the two only disagree when the column is *absent*
+      // (undefined) on the loaded row, which happens for real the moment any query
+      // narrows its select. Under a truthiness check the public apply form would stop
+      // offering the mercenary track even though the service layer still accepts it.
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      memberRepo.count.mockResolvedValue(1);
+      settingsRepo.findOne.mockResolvedValue({ regimentId: REGIMENT_ID, publicStats: true });
+
+      expect((await service.getProfile()).allowMercenaries).toBe(true);
+    });
   });
 
   describe('getStats', () => {

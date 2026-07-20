@@ -251,6 +251,95 @@ describe('ApplicationsService', () => {
       expect(settings.findOne).not.toHaveBeenCalled();
       expect(applications.save).not.toHaveBeenCalled();
     });
+
+    it('rejects a Mercenary submission when the mercenary track is closed (T-0133)', async () => {
+      settings.findOne!.mockResolvedValue({
+        regimentId: 'regiment-1',
+        openRecruitment: true,
+        allowMercenaries: false,
+      });
+      applications.find!.mockResolvedValue([]);
+
+      await expect(
+        service.submit(APPLICANT, { ...validCreateDto(), applicantType: ApplicantType.Mercenary }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(applications.save).not.toHaveBeenCalled();
+      // The openRecruitment row is reused — no second settings query (T-0133).
+      expect(settings.findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('still accepts Member submissions while the mercenary track is closed (T-0133)', async () => {
+      settings.findOne!.mockResolvedValue({
+        regimentId: 'regiment-1',
+        openRecruitment: true,
+        allowMercenaries: false,
+      });
+      applications.find!.mockResolvedValue([]);
+
+      // Explicitly Member.
+      const explicit = await service.submit(APPLICANT, {
+        ...validCreateDto(),
+        applicantType: ApplicantType.Member,
+      });
+      expect(explicit.status).toBe(ApplicationStatus.Pending);
+
+      // Omitted entirely → defaults to Member and is equally unaffected.
+      const omitted = await service.submit(APPLICANT, validCreateDto());
+      expect(omitted.status).toBe(ApplicationStatus.Pending);
+      expect((applications.create!.mock.calls[1][0] as Partial<Application>).applicantType).toBe(
+        ApplicantType.Member,
+      );
+    });
+
+    it('accepts a Mercenary submission while the track is open (T-0133)', async () => {
+      settings.findOne!.mockResolvedValue({
+        regimentId: 'regiment-1',
+        openRecruitment: true,
+        allowMercenaries: true,
+      });
+      applications.find!.mockResolvedValue([]);
+
+      await service.submit(APPLICANT, {
+        ...validCreateDto(),
+        applicantType: ApplicantType.Mercenary,
+      });
+
+      const created = applications.create!.mock.calls[0][0] as Partial<Application>;
+      expect(created.applicantType).toBe(ApplicantType.Mercenary);
+    });
+
+    it('allows a Mercenary submission when there is no settings row (permissive, T-0133)', async () => {
+      settings.findOne!.mockResolvedValue(null);
+      applications.find!.mockResolvedValue([]);
+
+      await service.submit(APPLICANT, {
+        ...validCreateDto(),
+        applicantType: ApplicantType.Mercenary,
+      });
+
+      const created = applications.create!.mock.calls[0][0] as Partial<Application>;
+      expect(created.applicantType).toBe(ApplicantType.Mercenary);
+    });
+
+    it('pins the permissive-on-absent-column contract: a settings row without allowMercenaries still accepts a Mercenary submission (T-0133)', async () => {
+      // Shape guard. The production check is deliberately `allowMercenaries === false`,
+      // not `!allowMercenaries`: the two only disagree when the column is *absent*
+      // (undefined) on the loaded row, which happens for real the moment any query
+      // narrows its select (e.g. `select: ['openRecruitment']`). Under a truthiness
+      // check that would silently 403 every Mercenary submit regiment-wide. Every
+      // other stub supplies an explicit boolean or null, so this row — with the
+      // column simply missing — is the only input that kills that mutant.
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
+      applications.find!.mockResolvedValue([]);
+
+      await service.submit(APPLICANT, {
+        ...validCreateDto(),
+        applicantType: ApplicantType.Mercenary,
+      });
+
+      const created = applications.create!.mock.calls[0][0] as Partial<Application>;
+      expect(created.applicantType).toBe(ApplicantType.Mercenary);
+    });
   });
 
   describe('getMine', () => {
@@ -337,6 +426,62 @@ describe('ApplicationsService', () => {
         new Date('2026-06-22T18:00:00.000Z').getTime(),
       );
       expect(result.inGameName).toBe('NewName');
+    });
+
+    it('refuses a post-submit flip onto a closed mercenary track (T-0133)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ status: ApplicationStatus.Pending }),
+      );
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', allowMercenaries: false });
+
+      await expect(
+        service.updateMine(APPLICANT, { applicantType: ApplicantType.Mercenary }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(applications.save).not.toHaveBeenCalled();
+    });
+
+    it('allows a flip back to Member without consulting settings (T-0133)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Pending,
+          applicantType: ApplicantType.Mercenary,
+        }),
+      );
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', allowMercenaries: false });
+
+      const result = await service.updateMine(APPLICANT, {
+        applicantType: ApplicantType.Member,
+      });
+
+      expect(result.applicantType).toBe(ApplicantType.Member);
+      // A Member edit must not pay for the mercenary settings lookup.
+      expect(settings.findOne).not.toHaveBeenCalled();
+    });
+
+    it('allows a flip to Mercenary when there is no settings row (permissive, T-0133)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ status: ApplicationStatus.Pending }),
+      );
+      settings.findOne!.mockResolvedValue(null);
+
+      const result = await service.updateMine(APPLICANT, {
+        applicantType: ApplicantType.Mercenary,
+      });
+      expect(result.applicantType).toBe(ApplicantType.Mercenary);
+    });
+
+    it('pins the permissive-on-absent-column contract: a settings row without allowMercenaries still allows a flip to Mercenary (T-0133)', async () => {
+      // See the matching submit() case: `=== false` must not be "simplified" to a
+      // truthiness check, or a narrowed select would refuse every edit onto the track.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ status: ApplicationStatus.Pending }),
+      );
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
+
+      const result = await service.updateMine(APPLICANT, {
+        applicantType: ApplicantType.Mercenary,
+      });
+      expect(result.applicantType).toBe(ApplicantType.Mercenary);
     });
   });
 
@@ -562,6 +707,58 @@ describe('ApplicationsService', () => {
         rankId: 'rank-recruit',
         role: MemberRole.Mercenary,
       });
+    });
+
+    it('refuses to enlist a Mercenary applicant once the track is closed (T-0133)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ applicantType: ApplicantType.Mercenary }),
+      );
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', allowMercenaries: false });
+
+      await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      // Refused before the enlistment transaction opens — no member is created.
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('approves a Member applicant regardless of the mercenary toggle (T-0133)', async () => {
+      // Regression guard: the new settings lookup must never reach Member approvals.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', allowMercenaries: false });
+      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+
+      const result = await service.approve(STAFF, 'app-1', {}, null);
+
+      expect(result.status).toBe(ApplicationStatus.Approved);
+      expect(txMembers.create!.mock.calls[0][0]).toMatchObject({ role: MemberRole.Member });
+      expect(settings.findOne).not.toHaveBeenCalled();
+    });
+
+    it('approves a Mercenary applicant when there is no settings row (permissive, T-0133)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ applicantType: ApplicantType.Mercenary }),
+      );
+      settings.findOne!.mockResolvedValue(null);
+      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      expect(txMembers.create!.mock.calls[0][0]).toMatchObject({ role: MemberRole.Mercenary });
+    });
+
+    it('pins the permissive-on-absent-column contract: a settings row without allowMercenaries still approves a Mercenary applicant (T-0133)', async () => {
+      // See the matching submit() case: `=== false` must not be "simplified" to a
+      // truthiness check, or a narrowed select would refuse every Mercenary approval.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({ applicantType: ApplicantType.Mercenary }),
+      );
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
+      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      expect(txMembers.create!.mock.calls[0][0]).toMatchObject({ role: MemberRole.Mercenary });
     });
 
     it('approves an application that was on hold', async () => {
