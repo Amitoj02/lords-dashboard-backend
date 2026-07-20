@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "4870cd29ce4b74f0e006101b336a73520aafd880",
-  "lastSyncedAt": "2026-07-19T20:45:48Z",
-  "notesForNextSession": "PR #16 (feat/webp-icons-live-applicant-identity) CI was RED and is now fixed in T-0132 (4870cd2) \u2014 watch the run before merging. Two causes, both reproduced locally first: (1) T-0129 eager-loading promotedMember in loadOrFail made TypeORM write promoted_member_id = NULL on approve (a LOADED relation beats the raw FK column on save), which nulled promotedMemberId in the approve response and cascaded into 4 discord e2e failures that derive their member id from it; fix assigns application.promotedMember = member alongside the FK. (2) T-0130 added WebP to ICON_IMAGE_TYPES but left post-mvp e2e's storage-policy assertion on the old PNG+SVG set. LESSON: the previous session shipped T-0129/T-0130 on unit tests alone and marked the shared-code risk resolved without ever running e2e \u2014 run e2e locally before calling a shared-code change verified. LOCAL E2E RECIPE (CI has no .env, so it hides these): drop/recreate a scratch DB, then run BOTH migrate+seed AND jest with DB_DATABASE=<scratch> DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= \u2014 .env otherwise seeds the real owner snowflake (every capability endpoint 403s) and disables the bot mock (wsPing null). Local `npm run build` EACCESes on the root-owned dist/; use `npx tsc -p tsconfig.build.json --noEmit`. STILL SHIP WITH frontend feat/admin-polish-audit-diff-webp-live-identity (T-0212..T-0224). OPEN RISK T-0132#0: the loaded-relation-vs-FK footgun is not audited outside the approve path. BLUEFRAME GOTCHA (T-0131): testPlan item status MUST be pending|passed|failed \u2014 \"done\" silently fails schema validation and blanks the whole repo in the UI (taskCount: 0 at 127.0.0.1:7317/api/repos). Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff.",
-  "nextIdCounter": 133,
+  "lastSyncedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
+  "lastSyncedAt": "2026-07-20T03:40:00Z",
+  "notesForNextSession": "PRs OPEN AND CI GREEN: backend #17 (feat/production-ovh-r2) + frontend [lords-regiment-dashboard #17](https://github.com/Amitoj02/lords-regiment-dashboard/pull/17). SHIP THE TWO TOGETHER - prod compose now references ghcr.io/amitoj02/lords-web, and T-0062 (frontend) carries an open cross-repo contract risk. THIS SESSION: reverse-engineered a full hosting plan (project-plan/PRODUCTION_OVH_R2_PLAN.md) and landed the code half as T-0134/T-0135/T-0136. MIGRATION SQUASH (T-0135): 18 migrations are now ONE InitialSchema. Any DB that ran the old ones must be DROPPED AND RECREATED - typeorm_migrations references deleted files. Verified with migration:generate reporting \"No changes in database schema were found\". THREE STORAGE BUGS FIXED (T-0134), all silent: S3_ACCESS_KEY_ID/SECRET were wired from MINIO_ROOT_USER so a prod .env was IGNORED (every R2 upload would auth as minioadmin); S3_REGION via ${S3_REGION:-auto} picks up the dev .env us-east-1 and breaks R2 signing, so it is now hardcoded; S3_PUBLIC_BASE_URL unset derives the PRIVATE signing endpoint, so every image 404s with nothing in the logs. GOTCHA - GITHUB_TOKEN: the env var is a classic PAT with only repo scope and CANNOT push .github/workflows. The keyring account has workflow scope - push with `env -u GITHUB_TOKEN git push`. DISCORD_GOLIVE.md CORRECTED: permissions integer is 268438528 (was 268437504, missing View Channel), and the integer ALONE does not fix 50001 on a private channel - channel overwrites are applied after guild-level perms and supersede them, so each routed channel (enlistment, audit-log, event-announcement) needs an explicit overwrite. No intent review needed below 10,000 users (threshold changed from 100 servers on 2026-06-10). BLOCKED ON THE HUMAN (T-0032): order the OVH VPS (KYC can stall an order for DAYS - order early), create the Discord production app, bind cdn.lordsofholdfast.com to the R2 bucket, and set the R2 CORS policy (browser presigned PUTs fail without it even though the URL is valid). NOT DONE, see skippedByClaude on T-0134: backup/restore scripts, least-privilege DB users, splitting the bot out of the API process, splitting seed from migrate. Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff; testPlan status MUST be pending|passed|failed.",
+  "nextIdCounter": 137,
   "connections": [],
   "tasks": [
     {
@@ -1908,13 +1908,15 @@
         "T-0006",
         "T-0007",
         "T-0009",
-        "T-0029",
-        "T-0030",
         "T-0010",
         "T-0011",
         "T-0012",
         "T-0013",
         "T-0014",
+        "T-0029",
+        "T-0030",
+        "T-0134",
+        "T-0136",
         "lords-regiment-dashboard:T-0011",
         "lords-regiment-dashboard:T-0012",
         "lords-regiment-dashboard:T-0013",
@@ -1926,7 +1928,7 @@
       "questions": [
         {
           "q": "Hosting target for the MVP: which VPS/provider, domain, TLS issuer (Caddy auto-TLS vs Traefik+LE), and the PROD Discord redirect URI to register? (see T-0028)",
-          "answer": null,
+          "answer": "OVHcloud VPS-1 (2 vCore / 4 GB / 40 GB NVMe, ~$4.54/mo, 2027 range), Beauharnois (BHS) or a US DC - membership is NA-weighted. Domain lordsofholdfast.com (already owned). TLS: Caddy auto-TLS at the origin with Cloudflare in front on Full (strict); NOT Cloudflare Origin CA, whose certs break the moment you grey-cloud during an incident. Media on Cloudflare R2 served from cdn.lordsofholdfast.com (a custom domain - the r2.dev subdomain is rate-limited and dev-only). PROD Discord redirect URI: https://lordsofholdfast.com/api/auth/discord/callback. Full plan in project-plan/PRODUCTION_OVH_R2_PLAN.md.",
           "askedAt": "2026-07-11T02:30:00Z"
         }
       ],
@@ -1944,7 +1946,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-11T04:20:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1966,6 +1968,13 @@
           "to": "blocked",
           "by": "claude",
           "note": "Everything it depends on is built+verified (images, ts-node-free migrate/seed, mock->real Discord seam, no-stub-data guard). BLOCKED ON OWNER: needs the real DigitalOcean droplet + a Discord production app. Runbook: project-plan/DEPLOY.md."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "blocked",
+          "to": "blocked",
+          "by": "claude",
+          "note": "Hosting target decided (OVH VPS-1 + Cloudflare R2 + Caddy). Code-side prep landed in T-0134/T-0135/T-0136. STILL BLOCKED: needs the human to order the VPS (OVH KYC can stall an order for days) and create the Discord production app."
         }
       ]
     },
@@ -7283,7 +7292,7 @@
       "id": "T-0108",
       "title": "Track last_seen_at on every authenticated request",
       "summary": "Today members.last_seen_at is only stamped at Discord sign-in (auth.service.ts) and application acceptance, so it means 'last logged in', not 'last accessed the site'. Bump last_seen_at whenever a resolved member makes any authenticated request, via a throttled fire-and-forget update at the SessionContextService.resolve choke point. Keep the login stamp as a floor.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -7339,7 +7348,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7354,6 +7363,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7361,7 +7377,7 @@
       "id": "T-0109",
       "title": "Tests: last_seen_at advances on authenticated requests",
       "summary": "Unit-test the throttled last-seen bump in SessionContextService (writes once per window, skips Applicant sessions, tolerates DB errors) and add an e2e assertion that last_seen_at advances after an authenticated request rather than only at login.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
@@ -7396,7 +7412,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7411,6 +7427,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7418,7 +7441,7 @@
       "id": "T-0110",
       "title": "Media link resolver + Medal.tv thumbnail proxy (server-side)",
       "summary": "Add a server-side media service that resolves an external gallery link (YouTube / Medal.tv / direct image / direct video) into a provider + embedUrl + thumbnailUrl shape, plus a Medal.tv thumbnail proxy that reads the clip og:image (or the unofficial api-v2.medal.tv/content/:id JSON) and caches the bytes behind a stable URL. Medal media/thumbnail URLs are signed and expiring and the clip page/api are not CORS-enabled, so this must live in NestJS - the browser cannot fetch them.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -7478,7 +7501,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7493,6 +7516,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7500,7 +7530,7 @@
       "id": "T-0111",
       "title": "Add YOUTUBE_API_KEY env + typed config plumbing",
       "summary": "Register an optional YOUTUBE_API_KEY secret across the three-file config pattern - Joi schema in env.validation.ts (allow empty so the app still boots), a typed accessor in configuration.ts, and .env.example - plus the docker-compose files that inject env. No functional use yet; this unblocks the YouTube Data API enrichment.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "S",
       "sizeWeight": 2,
@@ -7545,7 +7575,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7560,6 +7590,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7567,7 +7604,7 @@
       "id": "T-0112",
       "title": "YouTube Data API v3 enrichment (title/duration) - optional, key-gated",
       "summary": "When YOUTUBE_API_KEY is present, enrich a resolved or submitted YouTube link via videos.list (part=snippet,contentDetails, 1 quota unit, cached) to return the canonical title, duration and authoritative thumbnail; degrade gracefully to the static i.ytimg.com thumbnail when the key is absent or the call fails. Wire it into the media resolver from T-0110.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -7609,7 +7646,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7624,6 +7661,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7631,7 +7675,7 @@
       "id": "T-0113",
       "title": "Finalize self-service account deletion (execute + cancel)",
       "summary": "The existing request -> confirm deletion flow sets status to Confirmed but never removes the member: no code transitions to Executed/Cancelled and nothing triggers the member soft-delete. Implement the terminal execute step (soft-delete + anonymise PII, audit, set executedAt) and a cancel transition/endpoint, so the frontend dedicated deletion page performs a real deletion end-to-end.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -7686,7 +7730,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7701,6 +7745,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7708,7 +7759,7 @@
       "id": "T-0114",
       "title": "Add submitter avatar to the gallery author projection",
       "summary": "The gallery author reference (GalleryMemberRefDto) is only { memberId, name }, so the API never returns the submitter's profile picture and the frontend card can only show initials. Add an avatarUrl field populated from the author member's avatarUrl with a Discord-avatar fallback (mirroring member.dto), and load the author.discordIdentity relation in the gallery projection query so the fallback resolves.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -7758,7 +7809,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-17T00:00:00Z",
-      "updatedAt": "2026-07-17T00:00:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-17T00:00:00Z",
@@ -7773,6 +7824,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Implemented + verified; CI green (lint/build/unit/e2e), browser-verified."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7780,7 +7838,7 @@
       "id": "T-0115",
       "title": "Add PATCH /gallery/:id to edit caption and tags (moderator)",
       "summary": "The gallery controller has no update route. Add PATCH /gallery/:id guarded by @RequireCapability(ModerateGallery) with a new UpdateGalleryItemDto (optional caption <=512 chars, optional tags[] deduped/capped at 10) that updates the caption column and replaces the gallery_tags rows, writes a gallery.update audit entry, and returns the projected GalleryItemDto. The stored media files are not editable via this endpoint.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -7830,7 +7888,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
       "createdAt": "2026-07-18T03:48:15Z",
-      "updatedAt": "2026-07-18T04:56:34Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T03:48:15Z",
@@ -7845,6 +7903,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7852,7 +7917,7 @@
       "id": "T-0116",
       "title": "Delete the MinIO object(s) when a gallery item is removed",
       "summary": "DELETE /gallery/:id currently soft-removes the row only, and StorageService has no delete capability (it only imports PutObjectCommand for presigned uploads). Add StorageService.deleteObject (S3 DeleteObjectCommand, resolving the object key from GalleryFile.url via the publicBaseUrl prefix) and call it from gallery.service.remove() to purge every gallery_files object from MinIO alongside the softRemove, tolerating already-missing objects. Keeps the existing gallery.delete audit row.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -7901,7 +7966,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
       "createdAt": "2026-07-18T03:48:15Z",
-      "updatedAt": "2026-07-18T04:56:34Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T03:48:15Z",
@@ -7916,6 +7981,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7923,7 +7995,7 @@
       "id": "T-0117",
       "title": "Add actor (and target) avatar URLs to the audit read projection",
       "summary": "AuditLogEntryDto returns no avatar for the actor. Load the nested actorMember.discordIdentity (and targetMember.discordIdentity) relation on the audit list / findOne / CSV read paths and add actorAvatarUrl (= actorMember.avatarUrl ?? actorMember.discordIdentity?.avatarUrl ?? null) to the DTO, so the frontend audit page can render real actor avatars with a Discord fallback.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -7967,7 +8039,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "2e082cbb33c1059dc3e2efbc85b6f309fc3fe277",
       "createdAt": "2026-07-18T03:48:15Z",
-      "updatedAt": "2026-07-18T04:56:34Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T03:48:15Z",
@@ -7982,6 +8054,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "implemented + verified; CI green (lint/build/346 unit/39 e2e)"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -7989,7 +8068,7 @@
       "id": "T-0120",
       "title": "Accept an editable title on PATCH /gallery/:id (moderator edit)",
       "summary": "Extend the moderator edit endpoint to accept an optional title (1-160 chars) on UpdateGalleryItemDto and persist it in GalleryService.update alongside caption and tags. Edit stays gated on Capability.ModerateGallery; update the DTO/Swagger docs that currently describe the title as immutable.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -8039,7 +8118,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T19:03:51Z",
-      "updatedAt": "2026-07-18T19:03:51Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T19:03:51Z",
@@ -8047,6 +8126,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8054,7 +8140,7 @@
       "id": "T-0121",
       "title": "Allow the post author or a moderator to delete a gallery post",
       "summary": "Relax DELETE /gallery/:id so the authenticated author of a post can delete it, in addition to holders of moderate_gallery. Inject AuthzService into GalleryService and enforce item.authorMemberId === user.memberId || authz.can(regimentId, role, ModerateGallery) inside remove(), throwing ForbiddenException otherwise (mirrors the EventsService inline authz pattern).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8105,7 +8191,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T19:03:51Z",
-      "updatedAt": "2026-07-18T19:03:51Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T19:03:51Z",
@@ -8113,6 +8199,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8120,7 +8213,7 @@
       "id": "T-0122",
       "title": "Remove the rank `chevrons` column (ranks now use a custom uploaded icon)",
       "summary": "Ranks drop the chevron-quantity insignia in favour of the already-present `imageUrl` icon. Remove `chevrons` from the Rank entity, the create DTO (@Min/@Max), the response DTO (prop + assignment), RanksService (create write :80, update write :125, audit snapshot :345), the rank seed and specs; add a drop-column migration (timestamp > 1782530000000, modeled on MedalRankImages.down()); and expose the linked rank's `imageUrl` on the member projection where `chevrons` is denormalised today (members.service.ts, members/dto/member.dto.ts). Update the stale SCHEMA.md ranks table.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8175,7 +8268,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T21:18:15Z",
-      "updatedAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T21:18:15Z",
@@ -8183,6 +8276,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; remove the ranks chevron-quantity column + all references; rank icons already ride on the existing imageUrl column."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8190,7 +8290,7 @@
       "id": "T-0123",
       "title": "Remove the medal `ribbon` colour column + MedalRibbon enum (medals now use a custom uploaded image)",
       "summary": "Medals drop the ribbon-colour enum in favour of the already-present `imageUrl`. Remove `ribbon` from the Medal entity (:31-32), the `MedalRibbon` enum (common/enums/index.ts:39-45), the create DTO (@IsEnum), the response DTO (prop + assignment), MedalsService (create :90, update :132, audit snapshot :346), the medal seed and specs; add a drop-column/drop-enum migration; and on the members side swap `MemberMedalSummary.ribbon` for the awarded medal's `imageUrl` (members.service.ts:838, member.dto.ts:29-30). Keep `glyph`/disk-letter for now (see question). Update the stale SCHEMA.md.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8251,7 +8351,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T21:18:15Z",
-      "updatedAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T21:18:15Z",
@@ -8259,6 +8359,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; remove the medal ribbon-colour column + enum + all references (incl. the members-side summary); medal images already ride on the existing imageUrl column."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8266,7 +8373,7 @@
       "id": "T-0124",
       "title": "Restrict rank/medal icon uploads to SVG + PNG and serve SVGs safely",
       "summary": "Constrain the existing `rank-image`/`medal-image` presigned-upload targets to `image/svg+xml` and `image/png` only: add svg to the storage mime map (storage.service.ts:21-25, which today is png/jpeg/webp), restrict these two targets' allowed types (drop jpeg/webp), and reflect it in the request-upload DTO mime regex and the `GET /api/storage/policy` payload. Because a user-uploaded SVG served same-origin is a stored-XSS vector, decide and apply a safe-serving posture (see question).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8315,7 +8422,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T21:18:15Z",
-      "updatedAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T21:18:15Z",
@@ -8323,6 +8430,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; tighten the existing rank-image/medal-image upload targets to svg+png and make SVG serving XSS-safe."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8330,7 +8444,7 @@
       "id": "T-0125",
       "title": "Enforce a 250px max dimension on rank/medal icon uploads",
       "summary": "Reject rank/medal icons whose largest raster dimension exceeds 250px (aspect ratio irrelevant). Uploads are presigned PUT, so the API never sees the bytes - a dimension cap needs a new enforcement mechanism (see question). SVGs are vector/scalable, so decide whether the cap applies to their intrinsic/viewBox size or is waived. May add an image-size/sharp dependency depending on the chosen mechanism.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8377,7 +8491,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T21:18:15Z",
-      "updatedAt": "2026-07-18T21:18:15Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T21:18:15Z",
@@ -8385,6 +8499,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; enforce the 250px icon-dimension cap - mechanism TBD because presigned uploads bypass the API."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8392,7 +8513,7 @@
       "id": "T-0126",
       "title": "Stop writing an audit log when an event server password is revealed",
       "summary": "revealPassword() (events.service.ts:605-632) records an audit entry (`event.password.reveal`, events.service.ts:623-629) on every reveal. Remove/gate that audit.record() call so revealing the server password no longer creates an audit log. Keep the seeded `event.password.reveal` action (audit-actions.seed.ts:83-84) so existing rows still resolve.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "bug",
       "size": "XS",
       "sizeWeight": 1,
@@ -8435,7 +8556,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T23:04:04Z",
-      "updatedAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T23:04:04Z",
@@ -8443,6 +8564,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; drop the audit.record() call in revealPassword so reveals aren't audited."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8450,7 +8578,7 @@
       "id": "T-0127",
       "title": "Expose an event RSVP roster with member name, avatar and RSVP choice",
       "summary": "The frontend Attendees section needs per-person RSVP data, but the check-in AttendeeDto (dto/attendee.dto.ts:5-24) only carries memberId/name/checkedInAt and there's no endpoint listing RSVPs with member info (EventRsvp.status at entities/event-rsvp.entity.ts:26-27; member.avatarUrl at member.entity.ts:63). Add an event RSVP-roster read (e.g. GET /events/:id/rsvps) returning {memberId, name, avatarUrl, status} by joining EventRsvp->member.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8497,7 +8625,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T23:04:04Z",
-      "updatedAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T23:04:04Z",
@@ -8505,6 +8633,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; add an event-scoped RSVP roster projection (name/avatar/choice) for the FE Attendees section."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8512,7 +8647,7 @@
       "id": "T-0128",
       "title": "Include the applicant blocked flag in the admin applications projection",
       "summary": "The admin applications list/detail (ApplicationDto, dto/application.dto.ts:10-100; findAll/findOne, applications.service.ts:290-316) never loads the discord identity, so it can't tell if an applicant is blocked (applicationsBlockedAt lives on discord_identities, discord-identity.entity.ts:75). Add a `blocked` boolean to ApplicationDto and populate it by joining the application's discordIdentityId -> identity.applicationsBlockedAt so the admin UI can conditionally show Block vs Re-enable.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -8558,7 +8693,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-18T23:04:04Z",
-      "updatedAt": "2026-07-18T23:04:04Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-18T23:04:04Z",
@@ -8566,6 +8701,13 @@
           "to": "planned",
           "by": "claude",
           "note": "created via bf-plan; surface the applicant blocked flag on the admin applications DTO via an identity join."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8573,7 +8715,7 @@
       "id": "T-0129",
       "title": "Expose live applicant identity on the admin application projection",
       "summary": "Extend ApplicationDto with the applicant's live identity \u2014 currentAvatarUrl and currentDisplayName \u2014 derived from the promoted member (so post-approval profile edits are reflected) and falling back to the linked Discord identity's avatarUrl/globalName. Load the promotedMember relation in the admin queue findAll/findOne queries (discordIdentity is already joined); promotedMemberId is already exposed to drive the profile deep-link.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -8622,7 +8764,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
       "createdAt": "2026-07-19T01:00:00Z",
-      "updatedAt": "2026-07-19T20:45:48Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-19T01:00:00Z",
@@ -8644,6 +8786,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Risk note amended: the eager-load regressed the approve write path (fixed in T-0132)."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8651,7 +8800,7 @@
       "id": "T-0130",
       "title": "Accept WebP for rank/medal icon uploads",
       "summary": "Extend the rank/medal icon accepted-type policy from PNG+SVG to PNG+SVG+WebP (ICON_IMAGE_TYPES) so the presign flow accepts image/webp and stores a .webp key. WebP is raster, so parse its pixel dimensions from the RIFF header (VP8/VP8L/VP8X) in assertIconWithinDimensions \u2014 reading 32 header bytes and trying PNG then WebP \u2014 to keep the 250px-per-side cap enforced server-side (SVG stays exempt). Discovered while implementing the frontend WebP acceptance (FE T-0214/T-0215): without this the FE would 400 on every WebP icon upload.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -8700,7 +8849,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "364d05e052d128867bb67d23b4f0f4abf1902b71",
       "createdAt": "2026-07-19T03:32:11Z",
-      "updatedAt": "2026-07-19T20:45:48Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-19T03:32:11Z",
@@ -8715,6 +8864,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Follow-up in T-0132: post-mvp e2e storage-policy assertion still expected the pre-WebP icon set and failed CI."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8722,7 +8878,7 @@
       "id": "T-0131",
       "title": "Fix invalid testPlan status values breaking Blueframe state validation",
       "summary": "The T-0129/T-0130 test plans recorded verified items with status \"done\", which is not a member of the testPlan status enum (pending|passed|failed). state.json therefore failed schema validation and the Blueframe server at 127.0.0.1:7317 reported the repo with taskCount: 0, surfacing no tasks at all. Remapped the 8 affected entries to \"passed\" (all were verified acceptance criteria on deploy_ready tasks); no other fields changed.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "bug",
       "size": "XS",
       "sizeWeight": 1,
@@ -8754,7 +8910,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3c813d3c246bb7b518491401c5b5511f2dd38035",
       "createdAt": "2026-07-19T04:10:00Z",
-      "updatedAt": "2026-07-19T04:10:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-19T04:10:00Z",
@@ -8769,6 +8925,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Remapped 8 testPlan \"done\" -> \"passed\"; server now loads the repo (taskCount restored)."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ]
     },
@@ -8776,10 +8939,10 @@
       "id": "T-0132",
       "title": "Fix CI: approve dropped the promotion FK; icon-policy e2e left stale",
       "summary": "PR #16 CI failed on 6 e2e tests from two causes. (1) T-0129 added promotedMember to loadOrFail's relations; TypeORM gives a LOADED relation precedence over the raw FK column on save, so the hydrated promotedMember=null overwrote promotedMemberId and approve wrote promoted_member_id = NULL. POST /applications/:id/approve returned promotedMemberId: null, and discord.e2e \u2014 which derives its member id from that response \u2014 404d every downstream ban/suspend/rank call. Fixed by assigning the relation alongside the FK, which also lets the approve response carry the new member's live identity. (2) T-0130 intentionally added image/webp to ICON_IMAGE_TYPES and updated the unit spec, but the post-mvp e2e storage-policy assertion still expected PNG+SVG only; updated to PNG+SVG+WebP (jpeg still excluded).",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
-      "sizeWeight": 1,
+      "sizeWeight": 2,
       "area": "applications",
       "feature": "review",
       "repo": "",
@@ -8825,7 +8988,7 @@
       ],
       "lastTouchedCommit": "4870cd2",
       "createdAt": "2026-07-19T20:45:48Z",
-      "updatedAt": "2026-07-19T20:45:48Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
       "history": [
         {
           "at": "2026-07-19T20:45:48Z",
@@ -8840,9 +9003,323 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "Fixed both causes; reproduced each failure locally first. 388 unit + 43 e2e green, lint + tsc clean. Pushed as 4870cd2."
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "verified present on main (merge 95c31f8); absorbed by the Developer Sun"
         }
       ],
       "subfeature": "live-identity"
+    },
+    {
+      "id": "T-0133",
+      "title": "Enforce RegimentSettings.allowMercenaries in the applications flow",
+      "summary": "allowMercenaries exists on RegimentSettings and is read/written via the settings DTOs, but applications.service.ts never consults it. An applicant can submit applicantType 'Mercenary' and be approved onto the Mercenary track even when the regiment has turned mercenaries off, making the toggle cosmetic. Reject or coerce the Mercenary track at submit and/or approve when the setting is disabled.",
+      "status": "planned",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "intake",
+      "subfeature": "mercenary-track",
+      "repo": "",
+      "paths": [
+        "src/applications/applications.service.ts",
+        "src/applications/applications.service.spec.ts",
+        "test/applications.e2e-spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "When allowMercenaries is false, reject the submit with a 400 or silently coerce applicantType to Member? And should an already-pending Mercenary application be blocked at approve time if the setting flips off after submission?",
+          "answer": null,
+          "askedAt": "2026-07-19T00:00:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "With allowMercenaries=false, submitting applicantType 'Mercenary' is rejected or coerced per the chosen policy",
+          "status": "pending"
+        },
+        {
+          "desc": "With allowMercenaries=true, the Mercenary track still submits and approves onto MemberRole.Mercenary",
+          "status": "pending"
+        },
+        {
+          "desc": "Approving a pending Mercenary application after the setting flips off behaves per the chosen policy",
+          "status": "pending"
+        },
+        {
+          "desc": "Existing applications unit + e2e suites stay green (run e2e locally against a scratch DB, not unit tests alone)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "applications.service create/approve are shared paths used by every intake and enrolment flow; a new settings lookup there can break approval for Member applicants too",
+          "status": "open",
+          "notedAt": "2026-07-19T00:00:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-19T00:00:00Z",
+      "updatedAt": "2026-07-19T00:00:00Z",
+      "history": [
+        {
+          "at": "2026-07-19T00:00:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0134",
+      "title": "Production hardening for OVHcloud VPS-1 + Cloudflare R2",
+      "summary": "Retarget the prod stack from DigitalOcean+MinIO to OVH VPS-1 + Cloudflare R2. Fixes three silent-failure storage bugs (S3_ACCESS_KEY_ID/SECRET were sourced from MINIO_ROOT_USER so a prod .env was ignored; S3_REGION would inherit the dev us-east-1 and break R2 signing; S3_PUBLIC_BASE_URL derived the private signing endpoint). Adds Caddy as the only port-publishing container (the old web:8080 publish was world-open because Docker DNAT bypasses ufw), moves MySQL 8.0->8.4 (EOL 2026-04-21) with 4GB tuning, drops MinIO from prod, and pins the API to one replica because the Discord gateway runs in-process. Also fixes rate limiting behind a proxy (CF-Connecting-IP), splits /health into live/ready, gates Swagger out of production, and makes permanent Discord 4xx codes fail terminally on the first attempt instead of burning five.",
+      "status": "deploy_ready",
+      "type": "infra",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "ovh-r2",
+      "repo": "",
+      "paths": [
+        "docker-compose.yml",
+        "docker-compose.prod.yml",
+        "Caddyfile",
+        "mysql/conf.d/tuning.cnf",
+        ".env.example",
+        "src/storage/storage.service.ts",
+        "src/common/guards/cf-aware-throttler.guard.ts",
+        "src/app.module.ts",
+        "src/main.ts",
+        "src/health/health.controller.ts",
+        "src/discord/discord-sync.worker.ts",
+        "project-plan/PRODUCTION_OVH_R2_PLAN.md",
+        "project-plan/DISCORD_GOLIVE.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "prod compose renders with all required vars and only caddy publishes ports",
+          "status": "passed"
+        },
+        {
+          "desc": "replicas:0 actually excludes minio from a prod up (verified by dry-run)",
+          "status": "passed"
+        },
+        {
+          "desc": "permanent Discord codes (50013/50001/10011/10007/50028) fail on attempt 1; 429 and network errors still retry",
+          "status": "passed"
+        },
+        {
+          "desc": "full suite green after the changes (395 unit + 43 e2e)",
+          "status": "passed"
+        },
+        {
+          "desc": "POST-DEPLOY: an avatar upload round-trips presign -> R2 CORS -> PUT -> cdn. serving",
+          "status": "pending"
+        },
+        {
+          "desc": "POST-DEPLOY: /api/health/ready returns 503 when the db container is stopped",
+          "status": "pending"
+        },
+        {
+          "desc": "POST-DEPLOY: /api/docs is NOT reachable in production",
+          "status": "pending"
+        },
+        {
+          "desc": "POST-DEPLOY: two consecutive deploys + hard refresh do not white-screen (index.html not cached)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Swaps the global APP_GUARD ThrottlerGuard for CfAwareThrottlerGuard - affects EVERY route. If CF-Connecting-IP is absent (direct origin access, local dev) it falls back to req.ip, but a misconfigured edge would key every client on one tracker and throttle the whole regiment at 120/min.",
+          "status": "open",
+          "notedAt": "2026-07-20T03:40:00Z"
+        },
+        {
+          "desc": "S3Client now sets requestChecksumCalculation/responseChecksumValidation=WHEN_REQUIRED for ALL storage consumers (members/events/medals/ranks/gallery). Presigned PUTs are structurally unaffected (the presigner sets applyChecksum:false) but any future direct PutObject changes behaviour.",
+          "status": "open",
+          "notedAt": "2026-07-20T03:40:00Z"
+        },
+        {
+          "desc": "Adds /api/health/live and /api/health/ready and repoints the container healthcheck at /live. Any external monitor, uptime check or runbook still pointing at bare /api/health keeps working (it is retained and still always 200), but /ready now returns 503 on db loss - a monitor treating any non-200 as down will start alerting on db blips it previously ignored.",
+          "status": "open",
+          "notedAt": "2026-07-20T03:40:00Z"
+        },
+        {
+          "desc": "MySQL 8.0 -> 8.4 on the shared db service, plus a new mounted my.cnf. performance_schema=OFF and max_connections=60 are global; mysql_native_password is disabled by default in 8.4. An existing db-data volume created by 8.0 must be validated before this is used against real data.",
+          "status": "open",
+          "notedAt": "2026-07-20T03:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did NOT split the Discord bot out of the API process - the proper fix for the one-replica constraint. Documented and enforced by comment + replicas:1 instead.",
+        "Did NOT add the backup/restore scripts (mysqldump -> R2 via rclone) or the restore drill; they are specified in PRODUCTION_OVH_R2_PLAN.md section 5 but not written.",
+        "Did NOT create the least-privilege DB users (lords_app for DML, lords_migrate for DDL); the API still connects as root.",
+        "Did NOT split seed from migrate, so seed:prod still runs on every up and re-runs the regiment.seed setupComplete reset when OWNER_DISCORD_ID is set.",
+        "Did NOT add a distributed lock before client.login(); single-instance is enforced by compose only."
+      ],
+      "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
+      "createdAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        }
+      ]
+    },
+    {
+      "id": "T-0135",
+      "title": "Squash 18 migrations into InitialSchema; align UQ_event_occurrence with the entity",
+      "summary": "Production is greenfield (T-0028), so the 18-migration forward history will never be replayed. Collapsing it into a single InitialSchema keeps the prod migrate one-shot to one step. Also promotes the recurring-occurrence uniqueness guard onto RegimentEvent as UQ_event_occurrence(recurrence_template_id, starts_at) so the entity matches the schema the migration already created (T-0075) and migration:generate stops drifting.",
+      "status": "deploy_ready",
+      "type": "chore",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "migrations",
+      "repo": "",
+      "paths": [
+        "src/database/migrations/1782177187006-InitialSchema.ts",
+        "src/events/entities/event.entity.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "fresh-DB migration:run + seed succeed against the squashed migration",
+          "status": "passed"
+        },
+        {
+          "desc": "migration:generate reports \"No changes in database schema were found\" - zero entity/schema drift",
+          "status": "passed"
+        },
+        {
+          "desc": "full suite green against the squashed schema (395 unit + 43 e2e)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Rewrites the single source of truth for the schema. Any database that already ran the 18 deleted migrations has typeorm_migrations rows referencing files that no longer exist - it must be dropped and recreated, not migrated forward. This affects every local dev DB and any CI cache.",
+          "status": "open",
+          "notedAt": "2026-07-20T03:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did NOT write a compatibility shim for databases that already ran the old migrations - greenfield prod makes it unnecessary, and dev DBs are disposable."
+      ],
+      "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
+      "createdAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        }
+      ]
+    },
+    {
+      "id": "T-0136",
+      "title": "GHCR release pipeline for api + web images; correct stub-era docs",
+      "summary": "Adds a Release workflow to each repo building --target prod and pushing ghcr.io/<owner>/lords-api and lords-web tagged with the commit SHA and latest, so prod compose references images instead of the ../lords-regiment-dashboard relative build context (which cannot resolve on a server) and rollback is an IMAGE_TAG change. Building in CI also keeps the Angular production build off a 4 GB box running a live MySQL. Also corrects CLAUDE.md, which still described the frontend services as RxJS of() stubs - untrue since T-0026 and an invitation to re-wire live code.",
+      "status": "deploy_ready",
+      "type": "infra",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "ci-cd",
+      "repo": "",
+      "paths": [
+        ".github/workflows/release.yml",
+        "CLAUDE.md"
+      ],
+      "dependsOn": [
+        "T-0134"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "release workflow yaml is valid and CI stays green on the branch",
+          "status": "passed"
+        },
+        {
+          "desc": "POST-MERGE: the workflow actually pushes lords-api to GHCR on a push to main (or via workflow_dispatch)",
+          "status": "pending"
+        },
+        {
+          "desc": "POST-MERGE: the VPS can docker login ghcr.io and pull the private package with a read:packages PAT",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Both repos are PRIVATE, so the published packages are private too. The production host needs a PAT with read:packages or every docker compose pull fails with an auth error rather than a 404.",
+          "status": "open",
+          "notedAt": "2026-07-20T03:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did NOT add the deploy job (SSH to the VPS, pull, up -d) - there is no VPS yet. Only the image publish half exists.",
+        "The Release workflow only triggers on push to main, so it is untested until this PR merges; workflow_dispatch is wired so it can be exercised manually afterwards."
+      ],
+      "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
+      "createdAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T03:40:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-07-20T03:40:00Z",
+          "from": "planned",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        }
+      ]
     }
   ]
 }

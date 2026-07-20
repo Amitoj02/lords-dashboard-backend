@@ -14,12 +14,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 services:
   db:
-    image: mysql:8.0
+    # 8.4 LTS, not 8.0 — MySQL 8.0 reached End of Life on 2026-04-21 and receives
+    # no further security patches. 8.4 has Premier support to ~2029.
+    image: mysql:8.4
     environment:
       MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-devpassword}
       MYSQL_DATABASE: ${DB_DATABASE:-lords_dashboard}
     volumes:
       - db-data:/var/lib/mysql
+      - ./mysql/conf.d:/etc/mysql/conf.d:ro
     healthcheck:
       # Use 127.0.0.1 (TCP), NOT localhost (unix socket): the app connects over
       # TCP, and the socket accepts pings before the TCP listener is ready — so a
@@ -105,19 +108,26 @@ services:
       DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
       DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
       DISCORD_BOT_MOCK: ${DISCORD_BOT_MOCK:-true}
-      # Object storage (MinIO). S3_ENDPOINT is the browser-reachable endpoint used
-      # to sign presigned upload URLs — the dev override maps MinIO to :9100.
-      # PROD overrides these (real endpoint + credentials) via docker-compose.prod.yml.
+      # Object storage. S3_ENDPOINT is the browser-reachable endpoint used to SIGN
+      # presigned upload URLs; S3_PUBLIC_BASE_URL is where objects are SERVED from.
+      # Dev keeps both on MinIO :9100. Prod splits them: signing goes to
+      # <account>.r2.cloudflarestorage.com (presigned URLs do NOT work against an
+      # R2 custom domain) while serving goes to cdn.lordsofholdfast.com.
       S3_ENDPOINT: ${S3_ENDPOINT:-http://localhost:9100}
       S3_REGION: ${S3_REGION:-us-east-1}
-      S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
-      S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      # Fall back to the MinIO root credentials for dev, but let an explicit
+      # S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY win. Without this indirection those
+      # two vars are silently ignored — a prod .env setting them against R2 would
+      # have had no effect and every upload would have authenticated as minioadmin.
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-${MINIO_ROOT_USER:-minioadmin}}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-${MINIO_ROOT_PASSWORD:-minioadmin}}
       S3_BUCKET: ${S3_BUCKET:-lords-media}
       S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-http://localhost:9100/lords-media}
       # Optional YouTube Data API key for gallery link enrichment (see .env.example).
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
     healthcheck:
-      test: ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/api/health']
+      test:
+        ['CMD', 'wget', '--no-verbose', '--tries=1', '--spider', 'http://localhost:3000/api/health']
       interval: 10s
       timeout: 5s
       retries: 10

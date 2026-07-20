@@ -5,28 +5,22 @@ export class InitialSchema1782177187006 implements MigrationInterface {
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(
-      `CREATE TABLE \`discord_identities\` (\`id\` varchar(36) NOT NULL, \`discord_user_id\` varchar(20) NOT NULL, \`discord_tag\` varchar(64) NULL, \`discord_username\` varchar(64) NULL, \`global_name\` varchar(64) NULL, \`email\` varchar(255) NULL, \`avatar_url\` varchar(512) NULL, \`access_token\` text NULL, \`refresh_token\` text NULL, \`token_expires_at\` datetime(6) NULL, \`scopes\` varchar(255) NULL, \`guild_member\` tinyint NOT NULL DEFAULT 0, \`last_sign_in_at\` datetime(6) NULL, \`last_sign_in_ip\` varchar(45) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_e4fe01b5499a8292b386bfafdf\` (\`discord_user_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`discord_identities\` (\`id\` varchar(36) NOT NULL, \`discord_user_id\` varchar(20) NOT NULL, \`discord_tag\` varchar(64) NULL, \`discord_username\` varchar(64) NULL, \`global_name\` varchar(64) NULL, \`email\` varchar(255) NULL, \`avatar_url\` varchar(512) NULL, \`access_token\` text NULL, \`refresh_token\` text NULL, \`token_expires_at\` datetime(6) NULL, \`scopes\` varchar(255) NULL, \`guild_member\` tinyint NOT NULL DEFAULT 0, \`last_sign_in_at\` datetime(6) NULL, \`last_sign_in_ip\` varchar(45) NULL, \`sessions_valid_from\` datetime(6) NULL, \`applications_blocked_at\` datetime(6) NULL, \`applications_blocked_by_member_id\` char(12) NULL, \`applications_blocked_reason\` varchar(255) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_e4fe01b5499a8292b386bfafdf\` (\`discord_user_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`ranks\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`name\` varchar(60) NOT NULL, \`chevrons\` tinyint UNSIGNED NOT NULL DEFAULT '0', \`precedence\` int NOT NULL, \`discord_role_name\` varchar(80) NULL, \`discord_role_id\` varchar(20) NULL, \`linked\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_50b2f0a10137279e0b70416a9a\` (\`regiment_id\`, \`precedence\`), UNIQUE INDEX \`IDX_1f397ff9017de3ba6ac31a0699\` (\`regiment_id\`, \`name\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`ranks\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`name\` varchar(60) NOT NULL, \`image_url\` varchar(512) NULL, \`precedence\` int NOT NULL, \`discord_role_name\` varchar(80) NULL, \`discord_role_id\` varchar(20) NULL, \`linked\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_50b2f0a10137279e0b70416a9a\` (\`regiment_id\`, \`precedence\`), UNIQUE INDEX \`IDX_1f397ff9017de3ba6ac31a0699\` (\`regiment_id\`, \`name\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`members\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`discord_identity_id\` varchar(36) NULL, \`rank_id\` char(12) NOT NULL, \`name\` varchar(120) NOT NULL, \`in_game_name\` varchar(120) NULL, \`role\` enum ('Owner', 'Admin', 'Moderator', 'Member', 'Mercenary', 'Applicant') NOT NULL DEFAULT 'Applicant', \`status\` enum ('Active', 'Inactive', 'Pending') NOT NULL DEFAULT 'Pending', \`platform\` enum ('steam', 'xbox', 'ps') NULL, \`timezone\` varchar(40) NULL, \`discord_linked\` tinyint NOT NULL DEFAULT 0, \`public_profile\` tinyint NOT NULL DEFAULT 1, \`avatar_url\` varchar(512) NULL, \`banner_url\` varchar(512) NULL, \`standing\` varchar(40) NULL, \`joined_at\` datetime(6) NULL, \`last_seen_at\` datetime(6) NULL, \`suspended_until\` datetime(6) NULL, \`banned_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`deleted_at\` datetime(6) NULL, INDEX \`IDX_accd93971fb3c5cd788335d015\` (\`role\`), INDEX \`IDX_d75eefa29c161d6add2a30a10e\` (\`status\`), UNIQUE INDEX \`REL_6e0b49ba170f0a110c27d8b5d9\` (\`discord_identity_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`members\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`discord_identity_id\` varchar(36) NULL, \`rank_id\` char(12) NOT NULL, \`in_game_name\` varchar(120) NOT NULL, \`role\` enum ('Owner', 'Admin', 'Moderator', 'Member', 'Mercenary', 'Applicant') NOT NULL DEFAULT 'Applicant', \`status\` enum ('Active', 'Inactive', 'Pending') NOT NULL DEFAULT 'Pending', \`discord_linked\` tinyint NOT NULL DEFAULT 0, \`public_profile\` tinyint NOT NULL DEFAULT 1, \`avatar_url\` varchar(512) NULL, \`banner_url\` varchar(512) NULL, \`standing\` varchar(40) NULL, \`joined_at\` datetime(6) NULL, \`last_seen_at\` datetime(6) NULL, \`suspended_until\` datetime(6) NULL, \`banned_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`deleted_at\` datetime(6) NULL, INDEX \`IDX_accd93971fb3c5cd788335d015\` (\`role\`), INDEX \`IDX_d75eefa29c161d6add2a30a10e\` (\`status\`), UNIQUE INDEX \`REL_6e0b49ba170f0a110c27d8b5d9\` (\`discord_identity_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
       `CREATE TABLE \`accent_tones\` (\`key\` varchar(20) NOT NULL, \`label\` varchar(40) NOT NULL, \`hex\` char(7) NOT NULL, \`sort_order\` tinyint UNSIGNED NOT NULL, PRIMARY KEY (\`key\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`regiments\` (\`id\` char(12) NOT NULL, \`name\` varchar(120) NOT NULL, \`short_tag\` varchar(6) NOT NULL, \`mission_statement\` varchar(400) NULL, \`accent_tone\` varchar(20) NOT NULL DEFAULT 'brass', \`crest_url\` varchar(512) NULL, \`banner_url\` varchar(512) NULL, \`established_year\` smallint UNSIGNED NULL, \`discord_invite_url\` varchar(255) NULL, \`discord_server_id\` varchar(20) NULL, \`discord_server_name\` varchar(120) NULL, \`setup_step\` tinyint UNSIGNED NOT NULL DEFAULT '1', \`setup_complete\` tinyint NOT NULL DEFAULT 0, \`owner_member_id\` char(12) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`dissolved_at\` datetime(6) NULL, UNIQUE INDEX \`IDX_3ada956a6b22140bbfacd7fbd4\` (\`short_tag\`), UNIQUE INDEX \`IDX_73aa91c5cbb4f2aa08b950453e\` (\`discord_server_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`regiments\` (\`id\` char(12) NOT NULL, \`name\` varchar(120) NOT NULL, \`mission_statement\` varchar(400) NULL, \`accent_tone\` varchar(20) NOT NULL DEFAULT 'brass', \`crest_url\` varchar(512) NULL, \`banner_url\` varchar(512) NULL, \`established_year\` smallint UNSIGNED NULL, \`established_at\` date NULL, \`discord_invite_url\` varchar(255) NULL, \`discord_server_id\` varchar(20) NULL, \`discord_server_name\` varchar(120) NULL, \`setup_step\` tinyint UNSIGNED NOT NULL DEFAULT '1', \`setup_complete\` tinyint NOT NULL DEFAULT 0, \`owner_member_id\` char(12) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`dissolved_at\` datetime(6) NULL, UNIQUE INDEX \`IDX_73aa91c5cbb4f2aa08b950453e\` (\`discord_server_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`regiment_settings\` (\`regiment_id\` char(12) NOT NULL, \`public_roster\` tinyint NOT NULL DEFAULT 1, \`public_gallery\` tinyint NOT NULL DEFAULT 1, \`public_events\` tinyint NOT NULL DEFAULT 1, \`public_stats\` tinyint NOT NULL DEFAULT 1, \`open_recruitment\` tinyint NOT NULL DEFAULT 1, \`show_officers_mess_on_landing\` tinyint NOT NULL DEFAULT 1, \`allow_mercenaries\` tinyint NOT NULL DEFAULT 1, \`auto_approve_trusted_members\` tinyint NOT NULL DEFAULT 0, \`gallery_max_image_size_mb\` int NOT NULL DEFAULT '12', \`gallery_max_video_size_mb\` int NOT NULL DEFAULT '80', \`gallery_max_items_per_submission\` int NOT NULL DEFAULT '10', \`gallery_allowed_image_types\` json NULL, \`gallery_allowed_video_types\` json NULL, \`event_default_timezone\` varchar(40) NOT NULL DEFAULT 'UTC', \`event_default_start_time\` varchar(5) NULL, \`event_default_notify_before\` json NULL, \`audit_retention_months\` int NOT NULL DEFAULT '12', \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), PRIMARY KEY (\`regiment_id\`)) ENGINE=InnoDB`,
-    );
-    await queryRunner.query(
-      `CREATE TABLE \`notifications\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`title\` varchar(160) NOT NULL, \`body\` text NOT NULL, \`tone\` enum ('info', 'warn', 'ok') NOT NULL DEFAULT 'info', \`author_label\` varchar(120) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
-    );
-    await queryRunner.query(
-      `CREATE TABLE \`notification_reads\` (\`notification_id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`read_at\` datetime(6) NOT NULL, INDEX \`IDX_9615bdb2455ce385890ba0c20c\` (\`member_id\`), PRIMARY KEY (\`notification_id\`, \`member_id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`regiment_settings\` (\`regiment_id\` char(12) NOT NULL, \`public_gallery\` tinyint NOT NULL DEFAULT 1, \`public_events\` tinyint NOT NULL DEFAULT 1, \`public_stats\` tinyint NOT NULL DEFAULT 1, \`open_recruitment\` tinyint NOT NULL DEFAULT 1, \`show_officers_mess_on_landing\` tinyint NOT NULL DEFAULT 1, \`allow_mercenaries\` tinyint NOT NULL DEFAULT 1, \`auto_approve_trusted_members\` tinyint NOT NULL DEFAULT 0, \`gallery_max_image_size_mb\` int NOT NULL DEFAULT '12', \`gallery_max_video_size_mb\` int NOT NULL DEFAULT '80', \`gallery_max_items_per_submission\` int NOT NULL DEFAULT '10', \`gallery_allowed_image_types\` json NULL, \`gallery_allowed_video_types\` json NULL, \`event_default_timezone\` varchar(40) NOT NULL DEFAULT 'UTC', \`event_default_start_time\` varchar(5) NULL, \`event_default_notify_before\` json NULL, \`audit_retention_months\` int NOT NULL DEFAULT '12', \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), PRIMARY KEY (\`regiment_id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
       `CREATE TABLE \`service_record_entries\` (\`id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`occurred_at\` datetime(6) NOT NULL, \`type\` varchar(40) NOT NULL, \`event\` varchar(160) NOT NULL, \`note\` text NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
@@ -35,25 +29,22 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `CREATE TABLE \`account_deletion_requests\` (\`id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`confirm_token\` varchar(64) NOT NULL, \`acknowledge_permanent\` tinyint NOT NULL, \`acknowledge_data_downloaded\` tinyint NOT NULL, \`discord_reauthenticated_at\` datetime(6) NULL, \`status\` enum ('pending_discord_confirmation', 'confirmed', 'executed', 'cancelled') NOT NULL DEFAULT 'pending_discord_confirmation', \`requested_at\` datetime(6) NOT NULL, \`confirmed_at\` datetime(6) NULL, \`executed_at\` datetime(6) NULL, INDEX \`IDX_dc0c2c9924dd5f65f6053692cb\` (\`member_id\`), UNIQUE INDEX \`IDX_71f22dbfcf5f7842fb2eae4318\` (\`confirm_token\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`medals\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`title\` varchar(120) NOT NULL, \`glyph\` varchar(4) NOT NULL, \`ribbon\` enum ('blue', 'red', 'gold', 'green', 'tricolor') NOT NULL, \`description\` varchar(400) NULL, \`precedence\` int NOT NULL DEFAULT '0', \`discord_role_name\` varchar(80) NULL, \`discord_role_id\` varchar(20) NULL, \`linked\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_d8af5991441b8ae4af4262d2a1\` (\`regiment_id\`, \`title\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`medals\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`title\` varchar(120) NOT NULL, \`glyph\` varchar(4) NOT NULL, \`description\` varchar(400) NULL, \`image_url\` varchar(512) NULL, \`precedence\` int NOT NULL DEFAULT '0', \`discord_role_name\` varchar(80) NULL, \`discord_role_id\` varchar(20) NULL, \`linked\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_d8af5991441b8ae4af4262d2a1\` (\`regiment_id\`, \`title\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`member_medals\` (\`id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`medal_id\` char(12) NOT NULL, \`detail\` varchar(255) NULL, \`awarded_by_member_id\` char(12) NULL, \`awarded_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), INDEX \`IDX_6e382b4b28b63e0f14cd52a999\` (\`medal_id\`), UNIQUE INDEX \`IDX_b2d56e7f424f02f8f74187ca03\` (\`member_id\`, \`medal_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`member_medals\` (\`id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`medal_id\` char(12) NOT NULL, \`detail\` varchar(255) NULL, \`awarded_by_member_id\` char(12) NULL, \`awarded_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), INDEX \`IDX_6e382b4b28b63e0f14cd52a999\` (\`medal_id\`), INDEX \`IDX_b2d56e7f424f02f8f74187ca03\` (\`member_id\`, \`medal_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`events\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`created_by_member_id\` char(12) NULL, \`title\` varchar(160) NOT NULL, \`description\` text NULL, \`banner_url\` varchar(512) NULL, \`starts_at\` datetime(6) NOT NULL, \`ends_at\` datetime(6) NULL, \`timezone\` varchar(40) NOT NULL DEFAULT 'UTC', \`is_recurring\` tinyint NOT NULL DEFAULT 0, \`recurrence_rule\` varchar(120) NULL, \`server_name\` varchar(120) NULL, \`server_password\` text NULL, \`server_region\` varchar(40) NULL, \`status\` enum ('upcoming', 'ongoing', 'previous') NOT NULL DEFAULT 'upcoming', \`expected_attendance\` int NULL, \`attendance_goal\` int NULL, \`outcome\` varchar(160) NULL, \`twitch_url\` varchar(255) NULL, \`started_at\` datetime(6) NULL, \`in_line_count\` int NULL, \`is_draft\` tinyint NOT NULL DEFAULT 0, \`is_archived\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`deleted_at\` datetime(6) NULL, INDEX \`IDX_da080c835c9fc4e0aa5e8fe264\` (\`starts_at\`), INDEX \`IDX_9decac599b25b3df4f32ded9d3\` (\`regiment_id\`, \`status\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`gallery_items\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`author_member_id\` char(12) NOT NULL, \`moderated_by_member_id\` char(12) NULL, \`title\` varchar(160) NOT NULL, \`caption\` varchar(512) NULL, \`type\` enum ('image', 'video', 'link') NOT NULL, \`link_url\` varchar(512) NULL, \`thumbnail_url\` varchar(512) NULL, \`status\` enum ('pending', 'approved', 'declined') NOT NULL DEFAULT 'pending', \`decline_reason\` varchar(255) NULL, \`is_draft\` tinyint NOT NULL DEFAULT 0, \`submitted_at\` datetime(6) NOT NULL, \`approved_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`deleted_at\` datetime(6) NULL, INDEX \`IDX_d0a278020390abed3249ad08f1\` (\`author_member_id\`), INDEX \`IDX_3842078cc96a817511673e5c4c\` (\`regiment_id\`, \`status\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`gallery_items\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`author_member_id\` char(12) NOT NULL, \`event_id\` char(12) NULL, \`moderated_by_member_id\` char(12) NULL, \`title\` varchar(160) NOT NULL, \`caption\` varchar(512) NULL, \`type\` enum ('image', 'video', 'link') NOT NULL, \`link_url\` varchar(512) NULL, \`thumbnail_url\` varchar(512) NULL, \`status\` enum ('pending', 'approved', 'declined') NOT NULL DEFAULT 'pending', \`decline_reason\` varchar(255) NULL, \`is_draft\` tinyint NOT NULL DEFAULT 0, \`submitted_at\` datetime(6) NOT NULL, \`approved_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`deleted_at\` datetime(6) NULL, INDEX \`IDX_d0a278020390abed3249ad08f1\` (\`author_member_id\`), INDEX \`IDX_3842078cc96a817511673e5c4c\` (\`regiment_id\`, \`status\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`gallery_tags\` (\`gallery_item_id\` char(12) NOT NULL, \`tag\` varchar(40) NOT NULL, PRIMARY KEY (\`gallery_item_id\`, \`tag\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
       `CREATE TABLE \`gallery_likes\` (\`gallery_item_id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`liked_at\` datetime(6) NOT NULL, INDEX \`IDX_f3c93346d0faf9f58558cb6629\` (\`member_id\`), PRIMARY KEY (\`gallery_item_id\`, \`member_id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`gallery_tagged_members\` (\`gallery_item_id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, INDEX \`IDX_d47e98c3f94f6471564389b8db\` (\`member_id\`), PRIMARY KEY (\`gallery_item_id\`, \`member_id\`)) ENGINE=InnoDB`,
-    );
-    await queryRunner.query(
-      `CREATE TABLE \`gallery_files\` (\`id\` char(12) NOT NULL, \`gallery_item_id\` char(12) NOT NULL, \`file_name\` varchar(255) NOT NULL, \`url\` varchar(512) NULL, \`media_type\` enum ('image', 'video') NOT NULL, \`size_bytes\` bigint UNSIGNED NULL, \`width\` int NULL, \`height\` int NULL, \`duration_seconds\` int NULL, \`caption\` varchar(255) NULL, \`thumbnail_color\` char(7) NULL, PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`events\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`created_by_member_id\` char(12) NULL, \`title\` varchar(160) NOT NULL, \`description\` text NULL, \`banner_url\` varchar(512) NULL, \`starts_at\` datetime(6) NOT NULL, \`ends_at\` datetime(6) NULL, \`timezone\` varchar(40) NOT NULL DEFAULT 'UTC', \`is_recurring\` tinyint NOT NULL DEFAULT 0, \`recurrence_rule\` varchar(120) NULL, \`recurrence_cadence\` enum ('daily', 'weekly', 'monthly') NULL, \`recurrence_active\` tinyint NOT NULL DEFAULT 0, \`recurrence_template_id\` char(12) NULL, \`server_name\` varchar(120) NULL, \`server_password\` text NULL, \`server_region\` varchar(40) NULL, \`status\` enum ('upcoming', 'ongoing', 'previous') NOT NULL DEFAULT 'upcoming', \`expected_attendance\` int NULL, \`attendance_goal\` int NULL, \`outcome\` varchar(160) NULL, \`twitch_url\` varchar(255) NULL, \`started_at\` datetime(6) NULL, \`in_line_count\` int NULL, \`is_draft\` tinyint NOT NULL DEFAULT 0, \`is_archived\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), \`deleted_at\` datetime(6) NULL, INDEX \`IDX_da080c835c9fc4e0aa5e8fe264\` (\`starts_at\`), INDEX \`IDX_66cd3fae3f7bf4d9cf2d0c1330\` (\`recurrence_template_id\`), UNIQUE INDEX \`UQ_event_occurrence\` (\`recurrence_template_id\`, \`starts_at\`), INDEX \`IDX_9decac599b25b3df4f32ded9d3\` (\`regiment_id\`, \`status\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
       `CREATE TABLE \`event_tags\` (\`event_id\` char(12) NOT NULL, \`tag\` varchar(40) NOT NULL, PRIMARY KEY (\`event_id\`, \`tag\`)) ENGINE=InnoDB`,
@@ -71,7 +62,16 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `CREATE TABLE \`event_attendees\` (\`event_id\` char(12) NOT NULL, \`member_id\` char(12) NOT NULL, \`checked_in_at\` datetime(6) NULL, INDEX \`IDX_25b3ba40ac3341413d909d1b9f\` (\`member_id\`), PRIMARY KEY (\`event_id\`, \`member_id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
+      `CREATE TABLE \`discord_sync_jobs\` (\`id\` varchar(36) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`job_type\` varchar(40) NOT NULL, \`status\` enum ('pending', 'processing', 'succeeded', 'failed') NOT NULL DEFAULT 'pending', \`payload\` json NULL, \`attempts\` int NOT NULL DEFAULT '0', \`max_attempts\` int NOT NULL DEFAULT '5', \`last_error\` varchar(512) NULL, \`scheduled_at\` datetime(6) NOT NULL, \`processed_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), INDEX \`IDX_13de71d00d0afbcc4a650751da\` (\`regiment_id\`), INDEX \`IDX_ca927a405b1f7582b02238a4f8\` (\`status\`, \`scheduled_at\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+    );
+    await queryRunner.query(
       `CREATE TABLE \`discord_connections\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`bot_version\` varchar(20) NULL, \`connection_status\` enum ('idle', 'checking', 'connected', 'error') NOT NULL DEFAULT 'idle', \`bot_role_position\` int NULL, \`total_roles\` int NULL, \`roles_under_authority\` int NULL, \`members_visible\` int NULL, \`last_heartbeat_at\` datetime(6) NULL, \`last_full_sync_at\` datetime(6) NULL, \`uptime_seconds\` bigint UNSIGNED NULL, \`permissions\` json NULL, \`required_permissions\` json NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), UNIQUE INDEX \`IDX_47d36dfd5800e747e436901476\` (\`regiment_id\`), UNIQUE INDEX \`REL_47d36dfd5800e747e436901476\` (\`regiment_id\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE \`discord_bot_settings\` (\`regiment_id\` char(12) NOT NULL, \`bot_enabled\` tinyint NOT NULL DEFAULT 0, \`welcome_channel_id\` varchar(20) NULL, \`enlistment_channel_id\` varchar(20) NULL, \`enlistment_channel_name\` varchar(120) NULL, \`audit_log_channel_id\` varchar(20) NULL, \`audit_log_channel_name\` varchar(120) NULL, \`event_announcement_channel_id\` varchar(20) NULL, \`event_announcement_channel_name\` varchar(120) NULL, \`welcome_message\` varchar(512) NULL, \`join_role_id\` varchar(20) NULL, \`join_role_name\` varchar(120) NOT NULL DEFAULT 'Guest', \`ban_role_id\` varchar(20) NULL, \`ban_role_name\` varchar(120) NULL, \`sync_roles_on_change\` tinyint NOT NULL DEFAULT 1, \`apply_ban_role_on_ban\` tinyint NOT NULL DEFAULT 0, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), PRIMARY KEY (\`regiment_id\`)) ENGINE=InnoDB`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE \`gallery_files\` (\`id\` char(12) NOT NULL, \`gallery_item_id\` char(12) NOT NULL, \`file_name\` varchar(255) NOT NULL, \`url\` varchar(512) NULL, \`media_type\` enum ('image', 'video') NOT NULL, \`size_bytes\` bigint UNSIGNED NULL, \`width\` int NULL, \`height\` int NULL, \`duration_seconds\` int NULL, \`caption\` varchar(255) NULL, \`thumbnail_color\` char(7) NULL, PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
       `CREATE TABLE \`bot_operations\` (\`id\` char(12) NOT NULL, \`discord_connection_id\` char(12) NOT NULL, \`occurred_at\` datetime(6) NOT NULL, \`operation\` varchar(255) NOT NULL, \`success\` tinyint NOT NULL, \`resolvable\` tinyint NOT NULL DEFAULT 0, PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
@@ -86,7 +86,7 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `CREATE TABLE \`audit_actions\` (\`code\` varchar(64) NOT NULL, \`label\` varchar(120) NOT NULL, \`default_severity\` enum ('info', 'warn', 'err') NOT NULL DEFAULT 'info', PRIMARY KEY (\`code\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
-      `CREATE TABLE \`applications\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`discord_identity_id\` varchar(36) NULL, \`promoted_member_id\` char(12) NULL, \`decided_by_member_id\` char(12) NULL, \`applicant_name\` varchar(120) NOT NULL, \`discord_tag\` varchar(64) NULL, \`in_game_name\` varchar(120) NOT NULL, \`platform\` enum ('steam', 'xbox', 'ps') NOT NULL, \`applicant_type\` enum ('Applicant', 'Mercenary') NOT NULL DEFAULT 'Applicant', \`timezone\` varchar(40) NULL, \`why_join\` text NOT NULL, \`how_found\` enum ('discord', 'friend', 'youtube', 'reddit', 'ingame', 'other') NOT NULL, \`prior_experience\` varchar(600) NULL, \`age_confirmed\` tinyint NOT NULL DEFAULT 0, \`age_confirmed_at\` datetime(6) NULL, \`status\` enum ('pending', 'approved', 'declined', 'held') NOT NULL DEFAULT 'pending', \`is_reapplication\` tinyint NOT NULL DEFAULT 0, \`discord_in_server\` tinyint NOT NULL DEFAULT 0, \`mutual_events_count\` int NOT NULL DEFAULT '0', \`moderator_note\` text NULL, \`discord_dm_message\` text NULL, \`decline_reason\` varchar(255) NULL, \`is_draft\` tinyint NOT NULL DEFAULT 0, \`submitted_at\` datetime(6) NOT NULL, \`decided_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), INDEX \`IDX_e00fbd700a2bfe9ef811efc0c4\` (\`discord_identity_id\`), INDEX \`IDX_83bce80883215e6643c60560a2\` (\`regiment_id\`, \`status\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
+      `CREATE TABLE \`applications\` (\`id\` char(12) NOT NULL, \`regiment_id\` char(12) NOT NULL, \`discord_identity_id\` varchar(36) NULL, \`promoted_member_id\` char(12) NULL, \`decided_by_member_id\` char(12) NULL, \`applicant_name\` varchar(120) NOT NULL, \`discord_tag\` varchar(64) NULL, \`in_game_name\` varchar(120) NOT NULL, \`applicant_type\` enum ('Member', 'Mercenary') NOT NULL DEFAULT 'Member', \`current_regiment\` varchar(255) NOT NULL DEFAULT '', \`how_found\` varchar(500) NOT NULL DEFAULT '', \`preferred_classes\` varchar(500) NOT NULL DEFAULT '', \`skills_to_improve\` varchar(1000) NOT NULL DEFAULT '', \`interest_confirmed\` tinyint NOT NULL DEFAULT 0, \`representative_note\` varchar(500) NULL, \`status\` enum ('pending', 'approved', 'declined', 'held') NOT NULL DEFAULT 'pending', \`is_reapplication\` tinyint NOT NULL DEFAULT 0, \`discord_in_server\` tinyint NOT NULL DEFAULT 0, \`mutual_events_count\` int NOT NULL DEFAULT '0', \`moderator_note\` text NULL, \`discord_dm_message\` text NULL, \`decline_reason\` varchar(255) NULL, \`is_draft\` tinyint NOT NULL DEFAULT 0, \`submitted_at\` datetime(6) NOT NULL, \`decided_at\` datetime(6) NULL, \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6), INDEX \`IDX_e00fbd700a2bfe9ef811efc0c4\` (\`discord_identity_id\`), INDEX \`IDX_83bce80883215e6643c60560a2\` (\`regiment_id\`, \`status\`), PRIMARY KEY (\`id\`)) ENGINE=InnoDB`,
     );
     await queryRunner.query(
       `ALTER TABLE \`ranks\` ADD CONSTRAINT \`FK_4a7114fb3ec445a0e8482e416b2\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
@@ -110,15 +110,6 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`regiment_settings\` ADD CONSTRAINT \`FK_9171904809f0f0cf9616a8c3e6f\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`notifications\` ADD CONSTRAINT \`FK_cff35d7cc13dc54da053b8cd4a2\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`notification_reads\` ADD CONSTRAINT \`FK_30122217fe6ea5e114793efd4d5\` FOREIGN KEY (\`notification_id\`) REFERENCES \`notifications\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`notification_reads\` ADD CONSTRAINT \`FK_9615bdb2455ce385890ba0c20c3\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
-    );
-    await queryRunner.query(
       `ALTER TABLE \`service_record_entries\` ADD CONSTRAINT \`FK_41979f5d8a5c9653fa276f634a0\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
@@ -140,22 +131,16 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`member_medals\` ADD CONSTRAINT \`FK_ec0c2e763602b5d97cbe63a60b3\` FOREIGN KEY (\`awarded_by_member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`events\` ADD CONSTRAINT \`FK_3ea6f200e3bcc5f1aaa4d32abfd\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`events\` ADD CONSTRAINT \`FK_5653becd652fbf5121c492731f5\` FOREIGN KEY (\`created_by_member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
-    );
-    await queryRunner.query(
       `ALTER TABLE \`gallery_items\` ADD CONSTRAINT \`FK_262b6bfcb33dafa6106dbe0063b\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
       `ALTER TABLE \`gallery_items\` ADD CONSTRAINT \`FK_d0a278020390abed3249ad08f1b\` FOREIGN KEY (\`author_member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_items\` ADD CONSTRAINT \`FK_ec38fd08b3f1bde8837007116c1\` FOREIGN KEY (\`event_id\`) REFERENCES \`events\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
+      `ALTER TABLE \`gallery_items\` ADD CONSTRAINT \`FK_e65bb1b281373c77cfa918009f6\` FOREIGN KEY (\`moderated_by_member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_items\` ADD CONSTRAINT \`FK_e65bb1b281373c77cfa918009f6\` FOREIGN KEY (\`moderated_by_member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
+      `ALTER TABLE \`gallery_tags\` ADD CONSTRAINT \`FK_f8381df818e4d87d44a464c1a9e\` FOREIGN KEY (\`gallery_item_id\`) REFERENCES \`gallery_items\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
       `ALTER TABLE \`gallery_likes\` ADD CONSTRAINT \`FK_6de095f29df1df6546f362f84c8\` FOREIGN KEY (\`gallery_item_id\`) REFERENCES \`gallery_items\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
@@ -164,13 +149,10 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`gallery_likes\` ADD CONSTRAINT \`FK_f3c93346d0faf9f58558cb66295\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_tagged_members\` ADD CONSTRAINT \`FK_3f343805c2130e43853509b0fd7\` FOREIGN KEY (\`gallery_item_id\`) REFERENCES \`gallery_items\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+      `ALTER TABLE \`events\` ADD CONSTRAINT \`FK_3ea6f200e3bcc5f1aaa4d32abfd\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_tagged_members\` ADD CONSTRAINT \`FK_d47e98c3f94f6471564389b8dbc\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`gallery_files\` ADD CONSTRAINT \`FK_39e1b66e44c5d9d2aef7f9e5cd8\` FOREIGN KEY (\`gallery_item_id\`) REFERENCES \`gallery_items\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+      `ALTER TABLE \`events\` ADD CONSTRAINT \`FK_5653becd652fbf5121c492731f5\` FOREIGN KEY (\`created_by_member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE SET NULL ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
       `ALTER TABLE \`event_tags\` ADD CONSTRAINT \`FK_640b9db5340d03f53d02a4dca1d\` FOREIGN KEY (\`event_id\`) REFERENCES \`events\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
@@ -194,7 +176,16 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`event_attendees\` ADD CONSTRAINT \`FK_25b3ba40ac3341413d909d1b9f9\` FOREIGN KEY (\`member_id\`) REFERENCES \`members\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
+      `ALTER TABLE \`discord_sync_jobs\` ADD CONSTRAINT \`FK_13de71d00d0afbcc4a650751daa\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
       `ALTER TABLE \`discord_connections\` ADD CONSTRAINT \`FK_47d36dfd5800e747e4369014761\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`discord_bot_settings\` ADD CONSTRAINT \`FK_76e29201ad287045981344ba64c\` FOREIGN KEY (\`regiment_id\`) REFERENCES \`regiments\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`gallery_files\` ADD CONSTRAINT \`FK_39e1b66e44c5d9d2aef7f9e5cd8\` FOREIGN KEY (\`gallery_item_id\`) REFERENCES \`gallery_items\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
     );
     await queryRunner.query(
       `ALTER TABLE \`bot_operations\` ADD CONSTRAINT \`FK_1dbe93fbca29c2f7c70162f1d34\` FOREIGN KEY (\`discord_connection_id\`) REFERENCES \`discord_connections\`(\`id\`) ON DELETE CASCADE ON UPDATE NO ACTION`,
@@ -254,7 +245,16 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`bot_operations\` DROP FOREIGN KEY \`FK_1dbe93fbca29c2f7c70162f1d34\``,
     );
     await queryRunner.query(
+      `ALTER TABLE \`gallery_files\` DROP FOREIGN KEY \`FK_39e1b66e44c5d9d2aef7f9e5cd8\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`discord_bot_settings\` DROP FOREIGN KEY \`FK_76e29201ad287045981344ba64c\``,
+    );
+    await queryRunner.query(
       `ALTER TABLE \`discord_connections\` DROP FOREIGN KEY \`FK_47d36dfd5800e747e4369014761\``,
+    );
+    await queryRunner.query(
+      `ALTER TABLE \`discord_sync_jobs\` DROP FOREIGN KEY \`FK_13de71d00d0afbcc4a650751daa\``,
     );
     await queryRunner.query(
       `ALTER TABLE \`event_attendees\` DROP FOREIGN KEY \`FK_25b3ba40ac3341413d909d1b9f9\``,
@@ -278,13 +278,10 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`event_tags\` DROP FOREIGN KEY \`FK_640b9db5340d03f53d02a4dca1d\``,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_files\` DROP FOREIGN KEY \`FK_39e1b66e44c5d9d2aef7f9e5cd8\``,
+      `ALTER TABLE \`events\` DROP FOREIGN KEY \`FK_5653becd652fbf5121c492731f5\``,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_tagged_members\` DROP FOREIGN KEY \`FK_d47e98c3f94f6471564389b8dbc\``,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`gallery_tagged_members\` DROP FOREIGN KEY \`FK_3f343805c2130e43853509b0fd7\``,
+      `ALTER TABLE \`events\` DROP FOREIGN KEY \`FK_3ea6f200e3bcc5f1aaa4d32abfd\``,
     );
     await queryRunner.query(
       `ALTER TABLE \`gallery_likes\` DROP FOREIGN KEY \`FK_f3c93346d0faf9f58558cb66295\``,
@@ -293,22 +290,16 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `ALTER TABLE \`gallery_likes\` DROP FOREIGN KEY \`FK_6de095f29df1df6546f362f84c8\``,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_items\` DROP FOREIGN KEY \`FK_e65bb1b281373c77cfa918009f6\``,
+      `ALTER TABLE \`gallery_tags\` DROP FOREIGN KEY \`FK_f8381df818e4d87d44a464c1a9e\``,
     );
     await queryRunner.query(
-      `ALTER TABLE \`gallery_items\` DROP FOREIGN KEY \`FK_ec38fd08b3f1bde8837007116c1\``,
+      `ALTER TABLE \`gallery_items\` DROP FOREIGN KEY \`FK_e65bb1b281373c77cfa918009f6\``,
     );
     await queryRunner.query(
       `ALTER TABLE \`gallery_items\` DROP FOREIGN KEY \`FK_d0a278020390abed3249ad08f1b\``,
     );
     await queryRunner.query(
       `ALTER TABLE \`gallery_items\` DROP FOREIGN KEY \`FK_262b6bfcb33dafa6106dbe0063b\``,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`events\` DROP FOREIGN KEY \`FK_5653becd652fbf5121c492731f5\``,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`events\` DROP FOREIGN KEY \`FK_3ea6f200e3bcc5f1aaa4d32abfd\``,
     );
     await queryRunner.query(
       `ALTER TABLE \`member_medals\` DROP FOREIGN KEY \`FK_ec0c2e763602b5d97cbe63a60b3\``,
@@ -330,15 +321,6 @@ export class InitialSchema1782177187006 implements MigrationInterface {
     );
     await queryRunner.query(
       `ALTER TABLE \`service_record_entries\` DROP FOREIGN KEY \`FK_41979f5d8a5c9653fa276f634a0\``,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`notification_reads\` DROP FOREIGN KEY \`FK_9615bdb2455ce385890ba0c20c3\``,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`notification_reads\` DROP FOREIGN KEY \`FK_30122217fe6ea5e114793efd4d5\``,
-    );
-    await queryRunner.query(
-      `ALTER TABLE \`notifications\` DROP FOREIGN KEY \`FK_cff35d7cc13dc54da053b8cd4a2\``,
     );
     await queryRunner.query(
       `ALTER TABLE \`regiment_settings\` DROP FOREIGN KEY \`FK_9171904809f0f0cf9616a8c3e6f\``,
@@ -380,6 +362,8 @@ export class InitialSchema1782177187006 implements MigrationInterface {
     );
     await queryRunner.query(`DROP TABLE \`role_permissions\``);
     await queryRunner.query(`DROP TABLE \`bot_operations\``);
+    await queryRunner.query(`DROP TABLE \`gallery_files\``);
+    await queryRunner.query(`DROP TABLE \`discord_bot_settings\``);
     await queryRunner.query(
       `DROP INDEX \`REL_47d36dfd5800e747e436901476\` ON \`discord_connections\``,
     );
@@ -387,6 +371,13 @@ export class InitialSchema1782177187006 implements MigrationInterface {
       `DROP INDEX \`IDX_47d36dfd5800e747e436901476\` ON \`discord_connections\``,
     );
     await queryRunner.query(`DROP TABLE \`discord_connections\``);
+    await queryRunner.query(
+      `DROP INDEX \`IDX_ca927a405b1f7582b02238a4f8\` ON \`discord_sync_jobs\``,
+    );
+    await queryRunner.query(
+      `DROP INDEX \`IDX_13de71d00d0afbcc4a650751da\` ON \`discord_sync_jobs\``,
+    );
+    await queryRunner.query(`DROP TABLE \`discord_sync_jobs\``);
     await queryRunner.query(`DROP INDEX \`IDX_25b3ba40ac3341413d909d1b9f\` ON \`event_attendees\``);
     await queryRunner.query(`DROP TABLE \`event_attendees\``);
     await queryRunner.query(`DROP TABLE \`event_notify_offsets\``);
@@ -395,19 +386,17 @@ export class InitialSchema1782177187006 implements MigrationInterface {
     await queryRunner.query(`DROP INDEX \`IDX_b9e8884da00efd9fbc13f3b540\` ON \`event_rsvps\``);
     await queryRunner.query(`DROP TABLE \`event_rsvps\``);
     await queryRunner.query(`DROP TABLE \`event_tags\``);
-    await queryRunner.query(`DROP TABLE \`gallery_files\``);
-    await queryRunner.query(
-      `DROP INDEX \`IDX_d47e98c3f94f6471564389b8db\` ON \`gallery_tagged_members\``,
-    );
-    await queryRunner.query(`DROP TABLE \`gallery_tagged_members\``);
+    await queryRunner.query(`DROP INDEX \`IDX_9decac599b25b3df4f32ded9d3\` ON \`events\``);
+    await queryRunner.query(`DROP INDEX \`UQ_event_occurrence\` ON \`events\``);
+    await queryRunner.query(`DROP INDEX \`IDX_66cd3fae3f7bf4d9cf2d0c1330\` ON \`events\``);
+    await queryRunner.query(`DROP INDEX \`IDX_da080c835c9fc4e0aa5e8fe264\` ON \`events\``);
+    await queryRunner.query(`DROP TABLE \`events\``);
     await queryRunner.query(`DROP INDEX \`IDX_f3c93346d0faf9f58558cb6629\` ON \`gallery_likes\``);
     await queryRunner.query(`DROP TABLE \`gallery_likes\``);
+    await queryRunner.query(`DROP TABLE \`gallery_tags\``);
     await queryRunner.query(`DROP INDEX \`IDX_3842078cc96a817511673e5c4c\` ON \`gallery_items\``);
     await queryRunner.query(`DROP INDEX \`IDX_d0a278020390abed3249ad08f1\` ON \`gallery_items\``);
     await queryRunner.query(`DROP TABLE \`gallery_items\``);
-    await queryRunner.query(`DROP INDEX \`IDX_9decac599b25b3df4f32ded9d3\` ON \`events\``);
-    await queryRunner.query(`DROP INDEX \`IDX_da080c835c9fc4e0aa5e8fe264\` ON \`events\``);
-    await queryRunner.query(`DROP TABLE \`events\``);
     await queryRunner.query(`DROP INDEX \`IDX_b2d56e7f424f02f8f74187ca03\` ON \`member_medals\``);
     await queryRunner.query(`DROP INDEX \`IDX_6e382b4b28b63e0f14cd52a999\` ON \`member_medals\``);
     await queryRunner.query(`DROP TABLE \`member_medals\``);
@@ -421,14 +410,8 @@ export class InitialSchema1782177187006 implements MigrationInterface {
     );
     await queryRunner.query(`DROP TABLE \`account_deletion_requests\``);
     await queryRunner.query(`DROP TABLE \`service_record_entries\``);
-    await queryRunner.query(
-      `DROP INDEX \`IDX_9615bdb2455ce385890ba0c20c\` ON \`notification_reads\``,
-    );
-    await queryRunner.query(`DROP TABLE \`notification_reads\``);
-    await queryRunner.query(`DROP TABLE \`notifications\``);
     await queryRunner.query(`DROP TABLE \`regiment_settings\``);
     await queryRunner.query(`DROP INDEX \`IDX_73aa91c5cbb4f2aa08b950453e\` ON \`regiments\``);
-    await queryRunner.query(`DROP INDEX \`IDX_3ada956a6b22140bbfacd7fbd4\` ON \`regiments\``);
     await queryRunner.query(`DROP TABLE \`regiments\``);
     await queryRunner.query(`DROP TABLE \`accent_tones\``);
     await queryRunner.query(`DROP INDEX \`REL_6e0b49ba170f0a110c27d8b5d9\` ON \`members\``);

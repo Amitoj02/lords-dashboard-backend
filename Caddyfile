@@ -1,0 +1,85 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Edge for the Lords Regiment Dashboard. Caddy is the ONLY container that
+# publishes host ports; everything else is reachable only on the compose network.
+#
+# Caddy handles ACME automatically (including Let's Encrypt's move to 64- then
+# 45-day certificates via ARI), so there is no certbot, no renewal timer and no
+# reload hook. The caddy_data volume MUST persist — it holds certificates and
+# keys, and losing it re-issues on every deploy, which walks straight into Let's
+# Encrypt's 5-duplicate-certificates-per-7-days limit.
+# ─────────────────────────────────────────────────────────────────────────────
+{
+	email {$ACME_EMAIL}
+
+	# Trust Cloudflare so the real client IP survives to the API. Caddy ignores
+	# inbound X-Forwarded-For from untrusted peers by default, which is what stops
+	# a client forging the address used for logs and rate limiting.
+	#
+	# ⚠️ Refresh this list from https://www.cloudflare.com/ips-v4 and /ips-v6 —
+	# it changes. A stale list silently breaks real-IP restoration.
+	servers {
+		trusted_proxies static \
+			173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 \
+			141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 \
+			197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 \
+			104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 \
+			2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 \
+			2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers Cf-Connecting-Ip X-Forwarded-For
+	}
+}
+
+(security) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		-Server
+	}
+}
+
+{$SITE_ADDRESS} {
+	import security
+
+	# CSP derived from what the frontend actually loads.
+	#
+	# - style-src needs 'unsafe-inline' because Angular injects component styles at
+	#   runtime. This is an INFRASTRUCTURE limit, not a framework one: Angular has
+	#   supported nonces via ngCspNonce/CSP_NONCE since v16, but a nonce must be
+	#   unique per request and a statically-served build has nothing to mint one.
+	# - connect-src must include the R2 *signing* endpoint, not the CDN domain:
+	#   presigned PUTs go to <account>.r2.cloudflarestorage.com and only ever work
+	#   against that host. Uploads fail with an opaque CSP error otherwise.
+	# - Medal thumbnails are proxied same-origin by the API, so medal.tv is needed
+	#   only in frame-src, not img-src.
+	header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: {$CDN_ORIGIN} https://i.ytimg.com https://cdn.discordapp.com; media-src 'self' {$CDN_ORIGIN}; connect-src 'self' {$R2_S3_ORIGIN}; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://medal.tv; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"
+
+	encode zstd gzip
+
+	# handle blocks are mutually exclusive, so /api/* can never fall through to the
+	# SPA fallback below and return index.html for a missing endpoint.
+	handle /api/* {
+		reverse_proxy api:3000
+	}
+
+	# Everything else goes to the `web` image, which is a self-contained nginx
+	# serving the Angular build. Deliberately NOT served from a shared volume:
+	# a named volume populated from the image would not refresh on redeploy, so
+	# the site would silently keep serving the previous release's bundle.
+	# Keeping the SPA inside its own versioned image makes a rollback a tag change.
+	# nginx.conf in the frontend repo owns the history-API fallback and the
+	# long-cache headers for hashed assets.
+	handle {
+		reverse_proxy web:80
+
+		# index.html must NEVER be cached. A stale index.html referencing hashed
+		# chunks that no longer exist is the classic white-screen-after-deploy bug,
+		# which is why it is enforced here at the origin AS WELL AS in a Cloudflare
+		# Cache Rule — belt and braces.
+		@html path / /index.html
+		header @html Cache-Control "no-cache, no-store, must-revalidate"
+	}
+}

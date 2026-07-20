@@ -1,28 +1,47 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# PROD overlay — built images, no bind mounts, restart policies, TLS-terminating
-# nginx web that also reverse-proxies /api to the api container (same origin).
+# PROD overlay — OVHcloud VPS-1 (2 vCore / 4 GB / 40 GB) + Cloudflare R2.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# Secrets come from the host environment (a root .env or the shell), NEVER from
-# the committed dev defaults. Required in prod: DB_PASSWORD, JWT_SECRET,
-# ENCRYPTION_KEY (64 hex), DISCORD_CLIENT_ID/SECRET, DISCORD_MOCK=false,
-# WEB_ORIGIN=https://your.domain. See project-plan/DEPLOY.md.
+# Images come from GHCR (built in CI — an Angular production build spawns several
+# V8 isolates and is a genuine OOM risk on a 4 GB box alongside a live MySQL), so
+# nothing is built here. Pin IMAGE_TAG to a commit SHA; rollback is a tag change.
+#
+# Secrets come from the host environment (a 0600 .env beside this file), NEVER
+# from the committed dev defaults. Required: DB_PASSWORD, JWT_SECRET,
+# ENCRYPTION_KEY (64 hex), DISCORD_CLIENT_ID/SECRET, WEB_ORIGIN, and the S3_*
+# block pointing at R2. See project-plan/PRODUCTION_OVH_R2_PLAN.md.
+#
+# NOTE ON PORTS: only `caddy` publishes. Docker's port publishing writes DNAT
+# rules in the nat table, which are evaluated BEFORE ufw's INPUT chain — so a
+# published port is reachable from the internet even when ufw denies it. Any
+# `ports:` entry added below is world-open regardless of the firewall.
 # ─────────────────────────────────────────────────────────────────────────────
 services:
   db:
     restart: unless-stopped
-    # No host port is published in prod: the dev override (which maps 3307) is
-    # not loaded for prod, so only the compose network reaches MySQL.
+    # No host port in prod: only the compose network reaches MySQL.
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  # MinIO is DEV-ONLY. Production object storage is Cloudflare R2, which has no
+  # ACL concept — the `mc anonymous set download` bootstrap has no R2 equivalent.
+  # Public reads are served from a custom domain bound to the bucket instead.
+  # `replicas: 0` keeps these out of the prod stack without deleting the dev ones.
+  minio:
+    deploy:
+      replicas: 0
+  minio-init:
+    deploy:
+      replicas: 0
 
   # One-shot: apply migrations + seed using the compiled JS (no ts-node), then
-  # exit. The api waits for this to complete successfully before starting.
+  # exit. The api waits for this to complete successfully before starting, so two
+  # processes can never be mid-migration simultaneously.
   migrate:
-    build:
-      context: .
-      target: prod
-    # Retry the (idempotent) migrate + seed until the db accepts connections —
-    # covers any residual TCP-readiness race after the healthcheck.
+    image: ghcr.io/amitoj02/lords-api:${IMAGE_TAG:-latest}
     command: >-
       sh -c "for i in $$(seq 1 15); do
         npm run migration:run:prod && npm run seed:prod && exit 0;
@@ -42,19 +61,55 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       # Provision a real Owner on first boot from the configured Discord id.
       OWNER_DISCORD_ID: ${OWNER_DISCORD_ID:-}
-      OWNER_NAME: ${OWNER_NAME:-Regiment Owner}
     restart: 'no'
     networks: [lords]
 
   api:
-    build:
-      target: prod
+    image: ghcr.io/amitoj02/lords-api:${IMAGE_TAG:-latest}
     restart: unless-stopped
+    # ⚠️ MUST STAY AT ONE REPLICA.
+    # The Discord gateway (RealDiscordGateway) runs in-process via onModuleInit,
+    # so a second replica opens a SECOND gateway connection on the same bot token.
+    # Discord then delivers GuildMemberAdd to both, and real members get duplicate
+    # welcome DMs and duplicate role grants. This also means deploys must be
+    # stop-then-start, not rolling — a rolling deploy overlaps old and new
+    # containers and reproduces the same duplication on every release.
+    # Splitting the bot into its own service is the proper fix (see the plan).
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          # NOTE: do NOT add NODE_OPTIONS=--max-old-space-size here. Node has been
+          # cgroup-aware since v12.7.0 and V8 already defaults old-space to
+          # clamp(limit/2, 256MB, 2GB) = 256MB at this limit. Raising it to the
+          # commonly-advised "70-75% of the limit" leaves too little for non-heap
+          # RSS and makes OOMKill MORE likely, not less.
+          memory: 512m
     depends_on:
       db:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # SIGTERM must have time to let discord.js destroy() the gateway cleanly,
+    # otherwise a redeploy can leave a zombie session briefly double-processing.
+    stop_grace_period: 30s
+    healthcheck:
+      # Liveness only — a DB blip must not mark the API unhealthy and trigger a
+      # restart storm. Readiness (which does check the DB) is what the external
+      # uptime monitor watches, at /api/health/ready.
+      test:
+        [
+          'CMD',
+          'wget',
+          '--no-verbose',
+          '--tries=1',
+          '--spider',
+          'http://localhost:3000/api/health/live',
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     environment:
       NODE_ENV: production
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
@@ -74,14 +129,67 @@ services:
       DISCORD_CALLBACK_URL: ${WEB_ORIGIN}/api/auth/discord/callback
       FRONTEND_AUTH_SUCCESS_REDIRECT: ${WEB_ORIGIN}/auth/callback
       FRONTEND_AUTH_FAILURE_REDIRECT: ${WEB_ORIGIN}/login
+      # ── Cloudflare R2 ──────────────────────────────────────────────────────
+      # Two DIFFERENT hosts, and they are not interchangeable:
+      #   S3_ENDPOINT        signs presigned PUTs. Presigned URLs work ONLY
+      #                      against <account>.r2.cloudflarestorage.com — never a
+      #                      custom domain.
+      #   S3_PUBLIC_BASE_URL serves objects. Must be the custom domain bound to
+      #                      the bucket; the r2.dev subdomain is rate-limited and
+      #                      documented as development-only.
+      # Leaving S3_PUBLIC_BASE_URL unset silently derives {endpoint}/{bucket},
+      # which is not publicly readable — every avatar, icon and gallery image
+      # would 401 with no error anywhere in the API logs.
+      S3_ENDPOINT: ${S3_ENDPOINT:?set S3_ENDPOINT e.g. https://<account>.r2.cloudflarestorage.com}
+      # Hardcoded, NOT ${S3_REGION:-auto}: R2 requires the literal string "auto",
+      # and compose interpolation would otherwise pick up a stale S3_REGION from
+      # the host .env (the dev default is us-east-1) and silently break signing.
+      S3_REGION: auto
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID (R2 token id)}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY (R2 token secret)}
+      S3_BUCKET: ${S3_BUCKET:-lords-media}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:?set S3_PUBLIC_BASE_URL e.g. https://cdn.lordsofholdfast.com}
+      S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
       # Optional YouTube Data API key for gallery link enrichment.
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
 
   web:
-    build:
-      target: prod
+    image: ghcr.io/amitoj02/lords-web:${IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - api
+    # No published ports — reachable only via caddy on the compose network.
+
+  # TLS terminator and the only container exposed to the internet.
+  caddy:
+    image: caddy:2.11.4
+    restart: unless-stopped
     ports:
-      - '${WEB_HTTP_PORT:-8080}:80'
+      - '80:80'
+      - '443:443'
+      # NO 443/udp — OVH drops QUIC at the network edge regardless of firewall
+      # configuration, so HTTP/3 cannot work on this host. HTTP/2 only.
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # NOT a cache: holds certificates, private keys and OCSP staples. Losing it
+      # re-issues certs on every deploy and hits Let's Encrypt's
+      # 5-duplicate-certificates-per-7-days limit.
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS e.g. "lordsofholdfast.com, www.lordsofholdfast.com"}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for Let's Encrypt}
+      CDN_ORIGIN: ${S3_PUBLIC_BASE_URL:?set S3_PUBLIC_BASE_URL}
+      R2_S3_ORIGIN: ${S3_ENDPOINT:?set S3_ENDPOINT}
+    depends_on:
+      - api
+      - web
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    networks: [lords]
+
+volumes:
+  caddy-data:
+  caddy-config:

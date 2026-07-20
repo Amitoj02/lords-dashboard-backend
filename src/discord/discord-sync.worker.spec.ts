@@ -126,6 +126,61 @@ describe('DiscordSyncWorker', () => {
     await expect(worker.drain()).resolves.toBe(0);
   });
 
+  describe('permanent Discord errors are not retried', () => {
+    /** A DiscordAPIError-shaped rejection: discord.js exposes a numeric `code`. */
+    const discordError = (code: number, message: string): Error =>
+      Object.assign(new Error(message), { code });
+
+    // Retrying these can never succeed — the role is gone, the bot sits below the
+    // target role, or the channel is invisible. Burning all 5 attempts wastes the
+    // invalid-request budget that Discord bans an IP over (10k per 10 min), and
+    // that ban would take down OAuth sign-in as well as the bot.
+    it.each([
+      [50013, 'Missing Permissions — bot role below target'],
+      [50001, 'Missing Access — cannot see the channel'],
+      [10011, 'Unknown Role — mapped role deleted'],
+      [10007, 'Unknown Member — left the guild'],
+      [50028, 'Invalid Role — managed/booster role'],
+    ])('fails terminally on the FIRST attempt for code %i', async (code, message) => {
+      const j = job({ attempts: 0, maxAttempts: 5 });
+      jobsRepo.find.mockResolvedValue([j]);
+      gateway.assignRole.mockRejectedValue(discordError(code, message));
+
+      await worker.drain();
+
+      expect(j.status).toBe(DiscordSyncJobStatus.Failed);
+      expect(j.attempts).toBe(1);
+      expect(operationsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, resolvable: true }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'discord.sync.failed' }),
+      );
+    });
+
+    it('still retries a transient failure that carries no Discord error code', async () => {
+      const j = job({ attempts: 0, maxAttempts: 5 });
+      jobsRepo.find.mockResolvedValue([j]);
+      gateway.assignRole.mockRejectedValue(new Error('socket hang up'));
+
+      await worker.drain();
+
+      expect(j.status).toBe(DiscordSyncJobStatus.Pending);
+      expect(j.attempts).toBe(1);
+    });
+
+    it('still retries a rate limit (429) — that is exactly what backoff is for', async () => {
+      const j = job({ attempts: 0, maxAttempts: 5 });
+      jobsRepo.find.mockResolvedValue([j]);
+      gateway.assignRole.mockRejectedValue(discordError(429, 'Too Many Requests'));
+
+      await worker.drain();
+
+      expect(j.status).toBe(DiscordSyncJobStatus.Pending);
+      expect(j.attempts).toBe(1);
+    });
+  });
+
   describe('sensitive ban-role re-check at execution time', () => {
     const banJob = () =>
       job({
