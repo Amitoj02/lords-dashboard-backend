@@ -1,0 +1,261 @@
+# Infrastructure map
+
+**What exists, where it lives, and which credential opens it.** This is the
+"where is everything" reference. For *how to operate* it — deploying, rolling
+back, restoring — see [`deploy/README.md`](../deploy/README.md). For *why* the
+architecture is shaped this way, see
+[`project-plan/PRODUCTION_OVH_R2_PLAN.md`](../project-plan/PRODUCTION_OVH_R2_PLAN.md).
+
+> This file contains **no secret values** and must never contain any. It records
+> where each secret lives so it can be found and rotated, nothing more.
+
+---
+
+## Live since 2026-07-20
+
+First production deploy: workflow run `29781571948`, both images at `:latest`.
+
+Verified at go-live:
+
+| Check | Result |
+|---|---|
+| `https://lordsofholdfast.com` + `www` | 200, valid TLS via Cloudflare → Caddy → Let's Encrypt |
+| `/api/health/ready` | `{"status":"ok","database":"up"}` |
+| Least-privilege DB account | `database: up` proves `lords_app` authenticated on a real first boot |
+| `/api/docs` | 404 — Swagger correctly gated out of production |
+| SPA | served, `<title>Lords Regiment Dashboard</title>` |
+
+**Not yet verified** (see [Open items](#open-items)): a real avatar upload
+round-trip, and backups/restore against real R2.
+
+---
+
+## The systems
+
+| System | What it does | Credential lives in | Cost |
+|---|---|---|---|
+| **OVH VPS-1** | Runs everything: API, SPA, MySQL, Caddy | SSH key `~/.ssh/lords_ovh_deploy` (your laptop) | ~$4.54/mo |
+| **Cloudflare DNS + CDN** | DNS, TLS termination at the edge, WAF, caching | Your Cloudflare account | Free |
+| **Cloudflare R2 — `lords-media`** | User uploads: avatars, banners, rank/medal icons, gallery | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` in `~/lords/.env` on the box | ~$0 (free tier) |
+| **Cloudflare R2 — `lords-backups`** | Nightly database dumps | `~/.config/rclone/rclone.conf` on the box | ~$0 |
+| **GHCR** | Private container images `lords-api`, `lords-web` | `~/.docker/config.json` on the box (PAT with `read:packages`) | Free |
+| **GitHub Actions** | Builds images on merge; deploys on manual trigger | `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_KNOWN_HOSTS` in the `production` environment | Free |
+| **Discord** | Identity provider (OAuth2) + the Quartermaster bot | `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` in `~/lords/.env` | Free |
+
+**Host:** `144.217.85.166` · Debian 13 · 2 vCore / 4 GB / 40 GB NVMe
+**Access:** `ssh ovh-lords` (user `deploy`; root login and password auth disabled)
+
+---
+
+## Request paths
+
+**A page load**
+
+```
+browser → Cloudflare (TLS, cache, WAF)
+        → Caddy :443 on the VPS (origin TLS, CSP, security headers)
+        → /api/*  → api:3000     (NestJS)
+        → /*      → web:80       (nginx serving the Angular build)
+```
+
+Single origin by design. The SPA's `apiBaseUrl` is the relative string `/api`,
+so the build is host-agnostic, there is no CORS, and the OAuth callback lands
+same-site. **Do not split the API onto an `api.` subdomain** — it would break
+the current auth model for no gain.
+
+**An image upload**
+
+```
+browser → API: "give me a presigned PUT"
+        → API signs against  <ACCOUNT_ID>.r2.cloudflarestorage.com
+        → browser PUTs DIRECTLY to that host (never through the VPS)
+        → later reads come from  cdn.lordsofholdfast.com
+```
+
+Two different hosts, and they are **not interchangeable**. Presigned URLs work
+only against `r2.cloudflarestorage.com`; public reads only work through the
+custom domain. `S3_ENDPOINT` signs, `S3_PUBLIC_BASE_URL` serves. Getting these
+backwards produces images that upload fine and then 401 forever, with nothing in
+the API logs.
+
+**A deploy**
+
+```
+merge to main → GitHub Actions builds + pushes to GHCR   (nothing live changes)
+manual run    → Actions → Deploy to production
+              → ssh deploy@vps  (key is bound to a forced command)
+              → lords-deploy: flock → pin tags in .env → pull → up -d → poll ready
+```
+
+**A backup**
+
+```
+03:30 UTC (systemd USER timer)
+  → mysqldump --single-transaction --quick   (inside the db container)
+  → zstd
+  → rclone → r2:lords-backups
+  → heartbeat ping (success path only)
+```
+
+---
+
+## On the box
+
+```
+/home/deploy/
+├── lords/                       the stack
+│   ├── .env                     0600 — EVERY application secret
+│   ├── backup.env               0600 — backup tuning + heartbeat URL
+│   ├── docker-compose.yml       base (shared with dev)
+│   ├── docker-compose.prod.yml  prod overlay
+│   ├── Caddyfile                TLS, CSP, routing
+│   ├── mysql/conf.d/tuning.cnf  MySQL sized for a shared 4 GB box
+│   ├── mysql/init/              first-boot DB account creation
+│   └── deploy/                  synced from this repo
+├── bin/
+│   ├── lords-deploy             the CI key's forced command
+│   ├── lords-backup             run by the timer
+│   ├── lords-restore-drill
+│   └── rclone
+└── .config/
+    ├── rclone/rclone.conf       0600 — R2 backup credentials
+    └── systemd/user/            lords-backup.{service,timer}
+```
+
+**Nothing here needs root.** The `deploy` account owns the docker socket and
+`loginctl enable-linger deploy` is set, which is why backups are a systemd
+*user* timer rather than a system one. The only root-owned parts of the box are
+the Phase 3 basics installed by hand: docker, ufw, sshd hardening, the 2 GB
+swapfile, unattended-upgrades (auto-reboot 04:30) and qemu-guest-agent.
+
+`sudo` on the box **requires a password** — don't plan automation that needs it.
+
+### Containers
+
+| Service | Image | Memory | Ports |
+|---|---|---|---|
+| `caddy` | `caddy:2.11.4` | 128m | **80, 443 — the only published ports** |
+| `api` | `ghcr.io/amitoj02/lords-api` | 512m | none |
+| `web` | `ghcr.io/amitoj02/lords-web` | none | none |
+| `db` | `mysql:8.4` | 1g | none |
+| `migrate` | `ghcr.io/amitoj02/lords-api` | — | one-shot, exits before `api` starts |
+
+Only Caddy publishes ports, deliberately. Docker's port publishing writes DNAT
+rules in the `nat` table, which are evaluated **before** ufw's INPUT chain — so
+any `ports:` entry is reachable from the internet *even when ufw denies it*.
+Adding one is equivalent to opening a firewall hole.
+
+`api` is pinned to **one replica** and deploys are **stop-then-start, never
+rolling**: the Discord gateway runs in-process, so two overlapping containers
+would open two gateway connections on one bot token and deliver duplicate
+welcome DMs and role grants to real members.
+
+---
+
+## Database accounts
+
+Nothing that serves traffic connects as root.
+
+| Account | Privileges | Used by |
+|---|---|---|
+| `lords_app` | `SELECT, INSERT, UPDATE, DELETE` on `lords_dashboard` | the long-lived API |
+| `lords_migrate` | `ALL` on `lords_dashboard` | the one-shot `migrate` |
+| `root` | everything | healthcheck and `mysqldump` only |
+
+An RCE in the API cannot `DROP` a table, read `mysql.user`, or `GRANT` itself
+anything.
+
+> ⚠️ Created by `mysql/init/01-app-users.sh`, which MySQL runs **only when the
+> data directory is empty**. Editing `APP_DB_PASSWORD` in `.env` afterwards does
+> *not* change MySQL — rotation needs an explicit `ALTER USER`. See the runbook.
+
+---
+
+## Credential inventory
+
+Where each secret lives, and what it can do if leaked. **No values here.**
+
+| Secret | Location | Blast radius | Rotatable? |
+|---|---|---|---|
+| `ENCRYPTION_KEY` | `~/lords/.env` | Decrypts stored Discord tokens + event passwords | ❌ **ONE-WAY DOOR** — see below |
+| `JWT_SECRET` | `~/lords/.env` | Mint any session | ✅ everyone re-signs in |
+| `DB_PASSWORD` (root) | `~/lords/.env` | Full DB | ✅ `ALTER USER` + `.env` |
+| `APP_DB_PASSWORD` | `~/lords/.env` | DML on one schema | ✅ `ALTER USER` + `.env` |
+| `MIGRATE_DB_PASSWORD` | `~/lords/.env` | DDL on one schema | ✅ same |
+| `DISCORD_CLIENT_SECRET` | `~/lords/.env` | Impersonate the OAuth app | ✅ Discord portal |
+| `DISCORD_BOT_TOKEN` | `~/lords/.env` | Act as the bot in the guild | ✅ Discord portal |
+| R2 media token | `~/lords/.env` | Read/write `lords-media` only | ✅ R2 dashboard |
+| R2 backups token | `~/.config/rclone/rclone.conf` | Read/write `lords-backups` only | ✅ R2 dashboard |
+| GHCR PAT | `~/.docker/config.json` | Pull private images | ✅ GitHub settings |
+| CI deploy key | `~/.ssh/lords_ci_deploy` + GitHub secret | **Roll images only** — forced command | ✅ regenerate + re-add |
+| Your SSH key | `~/.ssh/lords_ovh_deploy` (laptop) | Full box access as `deploy` | ✅ swap `authorized_keys` |
+
+**`ENCRYPTION_KEY` cannot be rotated.** The transformer carries no key id or
+version, so there is no way to decrypt existing ciphertext with a new key —
+rotating it makes every stored Discord refresh token and event password
+permanently unreadable. Back it up somewhere you will still have in a year.
+Making this rotatable is tracked as an open regression risk (T-0002#0).
+
+### The CI deploy key is deliberately near-useless
+
+Bound to a forced command in `authorized_keys`:
+
+```
+command="/home/deploy/bin/lords-deploy",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty,restrict ssh-ed25519 AAAA... github-actions@lords-deploy
+```
+
+`$SSH_ORIGINAL_COMMAND` is **parsed against an allowlist, never executed**.
+Verified: arbitrary commands, `.env` reads, shell requests, docker escapes,
+`;`-injection via the tag and path traversal in the tag are all rejected.
+A compromise of GitHub Actions can roll images and nothing else.
+
+---
+
+## What survives what
+
+Knowing this is the difference between a clean guild switch and a confusing mess.
+
+| Action | Database | R2 media | Certs | `.env` |
+|---|---|---|---|---|
+| `up -d` / redeploy | kept | kept | kept | kept |
+| `down` | kept | kept | kept | kept |
+| **`down -v`** | **destroyed** | kept | kept | kept |
+| Rebuild the box | destroyed | kept | destroyed | destroyed |
+
+Everything guild-coupled lives in the **database**: bot settings (channel and
+role IDs), rank/medal `discordRoleName` + `linked` flags, members, identities,
+applications. So `down -v` is the correct and complete way to switch Discord
+guilds — but R2 objects survive it and become orphaned. Purge them separately:
+
+```bash
+rclone delete r2:lords-media       # only when intentionally resetting
+```
+
+---
+
+## Open items
+
+| Item | Status |
+|---|---|
+| Avatar upload round-trip (presign → CORS → PUT → cdn) | **unverified** — the most likely thing to break |
+| Backups against real R2 | **never run** — enable the timer, then run the drill |
+| Restore drill + recorded RTO | **never run** — a backup you have not restored is a hypothesis |
+| Better Stack heartbeat + `/api/health/ready` monitor | not set up |
+| Legal pages (privacy policy, delete-my-account, retention job) | **required before public sign-in** — plan Phase 7 |
+| Discord bot rollout into the 576-member guild | plan Phase 6, seven-step ladder, not started |
+| `GuildMemberAdd` does not filter by guild | a bot in two guilds cross-fires onboarding |
+| Guild membership is recorded but never enforced | see below |
+
+### Guild membership is not enforced
+
+`guildMember` is resolved at sign-in, stored on the identity, and shown in the
+admin member detail — but **no guard ever reads it**. A user who is not in the
+Discord server can sign in, apply, be approved and use the site fully; a member
+who leaves keeps access indefinitely, and the bot has no `GuildMemberRemove`
+handler at all. Access is governed by `member.role` → the capability matrix,
+plus ban/suspend (enforced at login *and* per request).
+
+If enforcement is ever added, note the trap: `resolveGuildMembership` falls back
+to `false` on a bot timeout, so a naive gate would lock out the whole regiment
+whenever the gateway hiccups. It must distinguish *"confirmed not a member"*
+from *"could not check"*.

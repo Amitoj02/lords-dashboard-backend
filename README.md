@@ -4,10 +4,22 @@ REST API for the **Lords Regiment Dashboard** (a _Holdfast: Nations at War_ regi
 dashboard). Built with **NestJS 11 + TypeORM + MySQL**, it backs the
 [`lords-regiment-dashboard`](../lords-regiment-dashboard) Angular frontend.
 
-> First milestone: project skeleton, the full normalized database schema (see [`SCHEMA.md`](./SCHEMA.md)),
-> and **Sign in with Discord**. Feature modules (members, events, gallery, applications, audit,
-> settings) are scaffolded in the schema and built on top of this foundation. The Discord _bot_ is out
-> of scope — only its reported status is modelled.
+**Live at [lordsofholdfast.com](https://lordsofholdfast.com) since 2026-07-20.** All feature modules
+(members/roster, ranks & medals, events, gallery, applications, audit, settings) are built and wired,
+and the Angular frontend consumes every one of them. The Quartermaster Discord bot — role sync,
+join onboarding and channel announcements — is implemented in-process and ships behind two
+independent switches (`DISCORD_BOT_MOCK` and the `botEnabled` database flag), so it stays dormant
+until deliberately enabled.
+
+### Documentation
+
+| | |
+|---|---|
+| [`CONTRIBUTING.md`](./CONTRIBUTING.md) | **Start here.** Developer flow: local setup, testing, migrations, seeding rules, how code reaches production |
+| [`SCHEMA.md`](./SCHEMA.md) | The complete normalized schema — 28 tables, enums, the authorization matrix, auth model |
+| [`docs/INFRASTRUCTURE.md`](./docs/INFRASTRUCTURE.md) | What runs where, request/upload/deploy/backup paths, credential inventory |
+| [`deploy/README.md`](./deploy/README.md) | Production runbook — deploy, roll back, restore, troubleshoot |
+| [`project-plan/PRODUCTION_OVH_R2_PLAN.md`](./project-plan/PRODUCTION_OVH_R2_PLAN.md) | Why the production architecture is shaped the way it is |
 
 ## Tech stack
 
