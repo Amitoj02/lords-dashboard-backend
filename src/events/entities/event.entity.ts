@@ -17,6 +17,12 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
 /** A scheduled regiment event/operation (table `events`). */
 @Entity('events')
 @Index(['regimentId', 'status'])
+// Uniqueness guard for materialized recurring-event occurrences (T-0075): two
+// concurrent generation sweeps (or a second app instance) can never double-create
+// the same occurrence. Templates and one-off events carry recurrenceTemplateId =
+// NULL, and MySQL treats NULLs as distinct in a unique index, so only real
+// occurrences are constrained.
+@Index('UQ_event_occurrence', ['recurrenceTemplateId', 'startsAt'], { unique: true })
 export class RegimentEvent extends ShortIdEntity {
   @Column({ type: 'char', length: 12 })
   regimentId: string;
