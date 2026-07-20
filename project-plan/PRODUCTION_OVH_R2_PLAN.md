@@ -136,7 +136,9 @@ Also: delete `minio` and `minio-init` from the prod path entirely, and keep the 
 - **Remove the world-open port publish.** `docker-compose.prod.yml` currently does `ports: ["${WEB_HTTP_PORT:-8080}:80"]` on all interfaces, and **ufw cannot block it** — Docker's DNAT happens in the `nat` table before ufw's chains. Only Caddy publishes, on 80/443.
 - Add `caddy` service with persistent `caddy_data` volume (holds certs — losing it re-issues on every deploy and hits Let's Encrypt's 5-duplicate-certs-per-7-days limit).
 - Per-container memory limits: `db: 1g`, `api: 512m`, `caddy: 128m`. **Do not set `NODE_OPTIONS=--max-old-space-size`** — Node has been cgroup-aware since v12.7.0 and V8 already defaults to `clamp(limit/2, 256MB, 2GB)`. Raising it to "70–75% of the limit" (common advice) *increases* OOM risk.
-- Split `migrate` from `seed`, or guard the seed: `regiment.seed.ts:13` sets `setupComplete: !isRealDeploy`, and `seed:prod` runs on **every** `up`. Once redeploys are routine, this resets the owner's first-run setup flag each time.
+- ~~Split `migrate` from `seed`, or guard the seed~~ **DONE, and it was worse than described.** `seed:prod` runs on every `up`, and *every* seeder used a merge-upsert — not just the `setupComplete` flag. A second deploy would also have overwritten the regiment name/mission/accent, **unlinked every rank and medal from its real Discord role** (`linked: false`), flipped `botEnabled` back off, reset the whole permission matrix, and nulled the Owner's Discord profile, `joinedAt` and `lastSeenAt`. Nothing would have failed loudly; the configuration would simply have reverted.
+
+  Fixed by splitting the seeders into two tiers: code-owned reference catalogs (accent tones, audit actions) still refresh every deploy, while everything the admin owns is gated on a greenfield database. Role permissions provision row-by-row on the immutable `(role, capability)` enum pair, so a capability added in a later release still gets its default grant without touching admin edits. Verified end-to-end against MySQL 8.4; 8 unit tests pin the split.
 
 ### 1.3 Reverse proxy
 
@@ -169,8 +171,10 @@ Never use `trust proxy: true` — it lets any client forge the IP your logs, ban
 
 - **Gate `/api/docs`.** Swagger is currently served unconditionally, including in production.
 - **`/api/health` returns 200 even when the DB is down** — the compose healthcheck can't detect a DB outage. Split into `/health/live` (no deps, for Docker) and `/health/ready` (DB + Discord gateway, for the external monitor).
-- **Stop connecting as `root`.** Create `lords_app` (DML only) for the API and `lords_migrate` (DDL) used only by the one-shot.
-- `dist/` and `dist.root-owned/` are root-owned in the working tree and will break host-side builds. Irrelevant once CI builds images, but clean them up.
+- ~~**Stop connecting as `root`.**~~ **DONE.** `mysql/init/01-app-users.sh` creates `lords_app` (DML only, used by the long-lived API) and `lords_migrate` (DDL, used only by the one-shot that exits before the API starts) on first boot. 13 behavioural checks confirm the boundary: `lords_app` is denied `CREATE`, `DROP`, `GRANT`, `mysql.user` and every other schema.
+
+  Two traps worth recording. First, the script is **sourced**, not executed, by the mysql entrypoint — so a bare `set -euo pipefail` applies to the entrypoint's own shell, and `set -u` kills `docker_process_sql` (which tests `"$1"` with no args) at line 248. Init aborted there, MySQL started perfectly healthy, and *the accounts were silently absent*. Second, `docker-entrypoint-initdb.d` runs **only when the data directory is empty**, so changing `APP_DB_PASSWORD` in `.env` later does nothing to MySQL — rotation needs an explicit `ALTER USER`. Both are documented in `deploy/README.md`.
+- `dist/` and `dist.root-owned/` are root-owned in the working tree and will break host-side builds. Irrelevant once CI builds images. **Still present** — removing them needs local root, so it is left for a human (`sudo rm -rf dist dist.root-owned`).
 
 ### 1.6 Bot single-instance guard
 
@@ -234,7 +238,9 @@ Order VPS-1 with **Debian 13**, then:
 7. `unattended-upgrades` with `Automatic-Reboot "true"` at 04:30. Safe only because every service has `restart: unless-stopped` — **verify that's true after the compose restructure.**
 8. **`apt install qemu-guest-agent`** — without it OVH's snapshots are crash-consistent, which matters for MySQL.
 9. **OVH Edge Network Firewall: either author rules carefully or leave it empty.** It's stateless, IPv4-only, 20 rules max, and is **force-enabled during a detected DDoS and cannot be disabled until the attack ends**. Rules that omit established/return TCP will break legitimate traffic exactly when you can't turn them off. It also doesn't see intra-OVH traffic — keep ufw regardless.
-10. `install -m 0600 -o deploy` the `.env`. Generate real secrets: `openssl rand -hex 32` for `ENCRYPTION_KEY` (64 hex), `openssl rand -base64 48` for `JWT_SECRET`.
+10. ~~`install -m 0600 -o deploy` the `.env`.~~ **DONE — automated as `deploy/bootstrap.sh`**, which is idempotent and re-runnable. It syncs the helper scripts to `~/bin`, installs rclone without root, generates all five secrets on the box with `openssl rand` (hex throughout, including `JWT_SECRET` — the DB passwords get interpolated into single-quoted SQL literals by the initdb script, where base64's `/` and `+` are fine but a quote or backslash would not be, so hex sidesteps the whole question), writes a 0600 `.env`, installs the systemd user units, and reports exactly which values still need a human.
+
+    It deliberately re-checks for `‹REQUIRED›` markers **separately from** `docker compose config`: compose only asserts that a `${VAR:?}` is non-empty, and placeholder text is non-empty, so a `.env` full of placeholders passes `compose config` and then fails at runtime as an invalid Discord client or a 401 from R2.
 
 ---
 
@@ -248,6 +254,12 @@ Both repos are **private**, so GHCR images are private and the VPS needs a token
 - Deploy job SSHes in and runs `pull` + `up -d --wait`.
 
 **You provide, as GitHub Environment secrets on a protected `production` environment:** `DEPLOY_HOST`, `DEPLOY_SSH_KEY`, `GHCR_TOKEN` (a PAT with `read:packages`).
+
+> ⚠️ **Corrected at execution time.** A protected environment with *required reviewers* is not available on a **private repo on the GitHub Free plan** — the API rejects it with `Failed to create the environment protection rule. Please ensure the billing plan supports the required reviewers protection rule.` The `production` environment itself works fine and still scopes the secrets; only the approval gate is paywalled.
+>
+> The gate is instead a **`workflow_dispatch`-only deploy workflow**, which gives the same guarantee for free: merging publishes an image (touching nothing live), and production changes only when a human runs the workflow. `GHCR_TOKEN` turned out not to be needed as a CI secret either — the box holds its own `docker login ghcr.io` credential, and CI never pulls.
+>
+> One workflow rolls **both** images and lives in the backend repo, which also discharges the lockstep requirement below by construction rather than by discipline.
 
 Lock the deploy key down so a stolen CI credential can't get a shell:
 
@@ -346,7 +358,7 @@ You're a data controller for Discord IDs, usernames, avatars, in-game names, and
 | O2 | Is Cloudflare's Customer DPA in force for a **free** account? You're about to name them as a processor | Before publishing the policy |
 | O3 | Does OVH's DPA auto-apply to a low-cost VPS account? | Same |
 | O4 | Does R2 need an active paid subscription to use the free tier? | Before promising $0 |
-| O5 | Does `deploy.resources.limits.memory` apply under plain `docker compose up`? Verify with `docker inspect --format '{{.HostConfig.Memory}}'`; fall back to `mem_limit` if zero | Before prod traffic |
+| ~~O5~~ | ~~Does `deploy.resources.limits.memory` apply under plain `docker compose up`?~~ **RESOLVED — yes.** Verified on the box (Compose v5.3.1): `docker inspect --format '{{.HostConfig.Memory}}' lords-db-1` → `1073741824`, and the container's own `/sys/fs/cgroup/memory.max` agrees. No `mem_limit` fallback needed. | ✅ |
 | O6 | Effective `heap_size_limit` in the api container — cgroup detection can fail | Before prod traffic |
 | O7 | Does R2 accept `STREAMING-UNSIGNED-PAYLOAD-TRAILER`? One scratch-bucket test. Mitigated by buffering image bodies + `WHEN_REQUIRED` | Before migrating |
 | O8 | Does Cloudflare Free allow 3 Cache Rules? | Phase 2 |
