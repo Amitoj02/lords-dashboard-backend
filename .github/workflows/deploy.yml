@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Roll production to a chosen pair of image tags.
+#
+# MANUALLY TRIGGERED, ON PURPOSE. Merging to main builds and publishes images
+# (release.yml, in each repo) — which touches nothing live. Putting those images
+# in front of real people is a separate, deliberate act.
+#
+# The intended gate was a protected `production` environment with required
+# reviewers, but that protection rule needs GitHub Pro on a private repository.
+# workflow_dispatch gives the same guarantee for free: production only ever
+# changes when a human goes to the Actions tab and runs this.
+#
+# ONE workflow rolls BOTH images, and it lives here rather than being duplicated
+# in the frontend repo, because the two must ship together — the SPA and the API
+# share a contract, and a frontend deployed ahead of its backend is exactly the
+# breakage the plan's cross-repo coupling note warns about.
+#
+# Rollback is this same workflow with an older sha.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Deploy to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_tag:
+        description: 'lords-api tag — a commit sha from this repo, or "latest"'
+        required: true
+        default: latest
+      web_tag:
+        description: 'lords-web tag — a commit sha from lords-regiment-dashboard, or "latest"'
+        required: true
+        default: latest
+
+concurrency:
+  # A second deploy must never start while one is mid-roll. lords-deploy also
+  # holds an flock on the box, so this is belt and braces — but failing fast in
+  # CI gives a far clearer signal than blocking on a lock for ten minutes.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Roll production
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate tags
+        # The box re-validates these — it must, since it cannot trust its caller —
+        # but rejecting a typo here costs two seconds instead of a failed deploy.
+        run: |
+          for tag in "${{ inputs.api_tag }}" "${{ inputs.web_tag }}"; do
+            if ! [[ "$tag" =~ ^([0-9a-f]{7,40}|latest)$ ]]; then
+              echo "::error::'$tag' is not a commit sha or 'latest'"
+              exit 1
+            fi
+          done
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Pinned, not accept-new: TOFU on a fresh runner every time is no
+          # verification at all.
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy
+        # This key is bound to a forced command on the box, so the string below is
+        # not executed — it is parsed against an allowlist. A compromise of this
+        # runner can roll images and nothing else.
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 \
+            deploy@${{ secrets.DEPLOY_HOST }} \
+            "deploy both ${{ inputs.api_tag }} ${{ inputs.web_tag }}"
+
+      - name: Report state
+        if: always()
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=20 \
+            deploy@${{ secrets.DEPLOY_HOST }} status || true
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Production deploy — ${{ job.status }}"
+            echo ''
+            echo "| image | tag |"
+            echo "|---|---|"
+            echo "| lords-api | \`${{ inputs.api_tag }}\` |"
+            echo "| lords-web | \`${{ inputs.web_tag }}\` |"
+            echo ''
+            echo 'Rollback: re-run this workflow with the previous pair of tags.'
+          } >> "$GITHUB_STEP_SUMMARY"

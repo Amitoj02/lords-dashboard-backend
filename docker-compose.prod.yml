@@ -5,7 +5,13 @@
 #
 # Images come from GHCR (built in CI — an Angular production build spawns several
 # V8 isolates and is a genuine OOM risk on a 4 GB box alongside a live MySQL), so
-# nothing is built here. Pin IMAGE_TAG to a commit SHA; rollback is a tag change.
+# nothing is built here.
+#
+# The api and web images are built from DIFFERENT repositories and therefore have
+# DIFFERENT commit SHAs, so they get one tag variable each. A single shared
+# IMAGE_TAG could only ever be correct for one of them; pinning a rollback would
+# have silently resolved to a non-existent tag on the other image.
+# Rollback is a tag change: API_IMAGE_TAG=<previous-sha> docker compose up -d
 #
 # Secrets come from the host environment (a 0600 .env beside this file), NEVER
 # from the committed dev defaults. Required: DB_PASSWORD, JWT_SECRET,
@@ -21,6 +27,17 @@ services:
   db:
     restart: unless-stopped
     # No host port in prod: only the compose network reaches MySQL.
+    volumes:
+      # Runs ONLY on first boot of an empty db-data volume. Creates the two
+      # least-privilege accounts the api and migrate services connect as, so
+      # nothing serving traffic holds root.
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      # Consumed by 01-app-users.sh, not by the mysql image itself.
+      APP_DB_USERNAME: ${APP_DB_USERNAME:-lords_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
+      MIGRATE_DB_USERNAME: ${MIGRATE_DB_USERNAME:-lords_migrate}
+      MIGRATE_DB_PASSWORD: ${MIGRATE_DB_PASSWORD:?set MIGRATE_DB_PASSWORD}
     deploy:
       resources:
         limits:
@@ -41,7 +58,7 @@ services:
   # exit. The api waits for this to complete successfully before starting, so two
   # processes can never be mid-migration simultaneously.
   migrate:
-    image: ghcr.io/amitoj02/lords-api:${IMAGE_TAG:-latest}
+    image: ghcr.io/amitoj02/lords-api:${API_IMAGE_TAG:-latest}
     command: >-
       sh -c "for i in $$(seq 1 15); do
         npm run migration:run:prod && npm run seed:prod && exit 0;
@@ -54,8 +71,10 @@ services:
       NODE_ENV: production
       DB_HOST: db
       DB_PORT: '3306'
-      DB_USERNAME: root
-      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      # DDL account: this one-shot owns the schema, then exits before the api
+      # starts. The long-lived api never holds these privileges.
+      DB_USERNAME: ${MIGRATE_DB_USERNAME:-lords_migrate}
+      DB_PASSWORD: ${MIGRATE_DB_PASSWORD:?set MIGRATE_DB_PASSWORD}
       DB_DATABASE: ${DB_DATABASE:-lords_dashboard}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set a 64-hex ENCRYPTION_KEY}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
@@ -65,7 +84,7 @@ services:
     networks: [lords]
 
   api:
-    image: ghcr.io/amitoj02/lords-api:${IMAGE_TAG:-latest}
+    image: ghcr.io/amitoj02/lords-api:${API_IMAGE_TAG:-latest}
     restart: unless-stopped
     # ⚠️ MUST STAY AT ONE REPLICA.
     # The Discord gateway (RealDiscordGateway) runs in-process via onModuleInit,
@@ -112,7 +131,10 @@ services:
       start_period: 40s
     environment:
       NODE_ENV: production
-      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD}
+      # DML-only account — overrides the `root` baked into the dev base file.
+      # An RCE in this process cannot DROP a table or read mysql.user.
+      DB_USERNAME: ${APP_DB_USERNAME:-lords_app}
+      DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set a 64-hex ENCRYPTION_KEY}
       DISCORD_MOCK: ${DISCORD_MOCK:-false}
@@ -154,7 +176,7 @@ services:
       YOUTUBE_API_KEY: ${YOUTUBE_API_KEY:-}
 
   web:
-    image: ghcr.io/amitoj02/lords-web:${IMAGE_TAG:-latest}
+    image: ghcr.io/amitoj02/lords-web:${WEB_IMAGE_TAG:-latest}
     restart: unless-stopped
     depends_on:
       - api

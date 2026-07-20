@@ -8,8 +8,10 @@ export async function seedRegiment(ds: DataSource): Promise<void> {
   // with setup INCOMPLETE so the real Owner is guided into first-run setup
   // (T-0037/T-0056). The dev fixture (no OWNER_DISCORD_ID) is treated as already
   // set up, so dev/e2e sign-ins land straight on the dashboard.
-  // NOTE: seed is a first-deploy provisioning tool — re-running it with
-  // OWNER_DISCORD_ID set after the Owner has finished setup would reset the flag.
+  // NOTE: seed is a first-deploy provisioning tool. Re-running it after the
+  // Owner has finished setup would reset this flag and overwrite the name and
+  // mission statement they customized — which is exactly why MainSeeder gates
+  // this seeder on a greenfield database and never calls it twice.
   const isRealDeploy = !!process.env.OWNER_DISCORD_ID?.trim();
   await ensure(
     ds.getRepository(Regiment),

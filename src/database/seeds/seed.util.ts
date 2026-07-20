@@ -12,13 +12,18 @@ export const OWNER_IDENTITY_ID = '00000000-0000-4000-8000-000000000020';
 export const OWNER_DISCORD_USER_ID = '100000000000000001';
 
 /**
- * Idempotent upsert-by-natural-key: find the row, merge new data and save; or
- * create it. Used by all seeders so `npm run seed` is safe to re-run.
+ * Upsert-by-natural-key: find the row, merge new data and save; or create it.
+ *
+ * ⚠️ Idempotent is NOT the same as non-destructive. Re-running this hands the
+ * hardcoded defaults back to an existing row, so it belongs ONLY on code-owned
+ * reference catalogs (accent tones, audit actions) where the seed file is the
+ * source of truth and refreshing on deploy is the point. For anything an admin
+ * can edit in the UI, use `provision` — `seed:prod` runs on EVERY deploy.
  *
  * `insertOnly` fields are applied ONLY when the row is first created and are
  * never merged over an existing row on re-seed — so a value the owner has since
  * customized (e.g. their display name) survives `npm run seed` (T-0057). Omit it
- * for the plain merge-upsert behaviour every other seeder relies on.
+ * for the plain merge-upsert behaviour the reference catalogs rely on.
  */
 export async function ensure<T extends ObjectLiteral>(
   repo: Repository<T>,
@@ -37,4 +42,28 @@ export async function ensure<T extends ObjectLiteral>(
     ...(insertOnly as object),
   } as DeepPartial<T>);
   return repo.save(entity);
+}
+
+/**
+ * Insert-only: create the row if it is missing, and do NOTHING at all when it
+ * already exists (not even a no-op UPDATE, so `updated_at` is left alone).
+ *
+ * Use this for any row the ADMIN owns after provisioning. `ensure` merges its
+ * `data` over the existing row, which is correct for a code-owned reference
+ * catalog and destructive for anything editable in the UI — re-seeding would
+ * quietly hand back the defaults and discard the admin's configuration.
+ *
+ * Only safe when `where` is an IMMUTABLE key. Keying on something the admin can
+ * rename (a rank's `name`, a medal's `title`) would fail to find the renamed row
+ * and provision a duplicate — which is why those catalogs are gated on a
+ * greenfield database in MainSeeder rather than provisioned row by row.
+ */
+export async function provision<T extends ObjectLiteral>(
+  repo: Repository<T>,
+  where: FindOptionsWhere<T>,
+  data: DeepPartial<T>,
+): Promise<T> {
+  const existing = await repo.findOne({ where });
+  if (existing) return existing;
+  return repo.save(repo.create({ ...(where as object), ...(data as object) } as DeepPartial<T>));
 }
