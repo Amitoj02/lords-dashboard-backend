@@ -196,6 +196,17 @@ export class StorageService {
         accessKeyId: this.cfg.accessKeyId,
         secretAccessKey: this.cfg.secretAccessKey,
       },
+      // AWS SDK v3.729.0 (2025-01-15) made CRC32 request checksums the default
+      // ("WHEN_SUPPORTED"), which briefly broke every non-AWS S3 backend —
+      // R2, MinIO, Backblaze B2 and Spaces all rejected x-amz-checksum-crc32.
+      // Cloudflare fixed the header case server-side on 2025-02-03, but the SDK
+      // default was never reverted, and the *streaming* path is still fragile:
+      // a Node Readable body takes the aws-chunked / STREAMING-UNSIGNED-PAYLOAD-
+      // TRAILER route, whose acceptance by R2 is unconfirmed. Pinning both knobs
+      // to WHEN_REQUIRED keeps local MinIO dev and prod R2 on one identical code
+      // path and costs nothing — the presigned-PUT flow below never needs them.
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
     });
   }
 

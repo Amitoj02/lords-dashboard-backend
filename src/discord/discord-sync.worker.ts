@@ -36,6 +36,47 @@ const TICK_MS = 3_000;
 const BACKOFF_MS = [5_000, 30_000, 120_000, 600_000, 1_800_000];
 
 /**
+ * Discord JSON error codes that will NEVER succeed on retry, so burning the
+ * remaining attempts is pure waste — and worse than waste at scale.
+ *
+ * Discord bans an IP that emits 10,000 invalid requests (401/403/429) in 10
+ * minutes, and that ban is IP-level: it would take down the bot AND Discord
+ * OAuth sign-in simultaneously, since both leave from the same VPS. The drain is
+ * already bounded (BATCH_SIZE 20 per 3s tick, escalating backoff), so the
+ * realistic worst case — a mispositioned bot role 403ing a full 576-member
+ * reconcile — lands around 2,900 invalid requests spread over 30+ minutes and
+ * stays under the threshold. This keeps that headroom rather than spending it:
+ * a permanent failure now fails on the FIRST attempt instead of the fifth,
+ * cutting invalid-request volume by 5x and surfacing the real problem
+ * (role hierarchy, missing channel overwrite) to an admin immediately.
+ *
+ * @see https://docs.discord.com/developers/topics/opcodes-and-status-codes
+ */
+const PERMANENT_DISCORD_ERROR_CODES = new Set([
+  10003, // Unknown Channel — routed channel deleted or never existed
+  10007, // Unknown Member — left the guild
+  10011, // Unknown Role — mapped role deleted
+  10013, // Unknown User
+  50001, // Missing Access — bot cannot see the channel (needs a channel overwrite)
+  50013, // Missing Permissions — bot role sits below the target role
+  50028, // Invalid Role — includes managed roles (Booster/bot/integration)
+  50033, // Invalid Recipient
+  50007, // Cannot send messages to this user — DMs closed
+]);
+
+/**
+ * True when an error is a Discord API failure that retrying cannot fix.
+ *
+ * discord.js surfaces these as DiscordAPIError with a numeric/string `code`.
+ * Anything else — network blips, 5xx, gateway churn, 429 — stays retryable.
+ */
+function isPermanentDiscordError(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  const numeric = typeof code === 'string' ? Number(code) : code;
+  return typeof numeric === 'number' && PERMANENT_DISCORD_ERROR_CODES.has(numeric);
+}
+
+/**
  * Drains the {@link DiscordSyncJob} outbox on an interval and applies each job
  * through the {@link DiscordGateway}. Successes/failures are recorded to
  * bot_operations; terminal failures become resolvable operations and an audit
@@ -354,7 +395,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
   private async handleFailure(job: DiscordSyncJob, error: Error): Promise<void> {
     job.attempts += 1;
     job.lastError = error.message.slice(0, 500);
-    if (job.attempts < job.maxAttempts) {
+    if (job.attempts < job.maxAttempts && !isPermanentDiscordError(error)) {
       const backoff = BACKOFF_MS[Math.min(job.attempts - 1, BACKOFF_MS.length - 1)];
       job.status = DiscordSyncJobStatus.Pending;
       job.scheduledAt = new Date(Date.now() + backoff);

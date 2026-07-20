@@ -1,7 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { CfAwareThrottlerGuard } from './common/guards/cf-aware-throttler.guard';
 import { ApplicationsModule } from './applications/applications.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthModule } from './auth/auth.module';
@@ -56,7 +57,9 @@ import { StorageModule } from './storage/storage.module';
   ],
   providers: [
     // Throttle every route globally; individual routes can override with @Throttle/@SkipThrottle.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Behind Cloudflare the default guard would key every request on the proxy IP,
+    // collapsing all traffic into one bucket — see CfAwareThrottlerGuard.
+    { provide: APP_GUARD, useClass: CfAwareThrottlerGuard },
   ],
 })
 export class AppModule {}

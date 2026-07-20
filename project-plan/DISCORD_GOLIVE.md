@@ -14,12 +14,43 @@ all environment configuration + a Developer-Portal setup.
      the bot at sign-in, so the consent screen never asks "know what servers you're in").
 3. **Bot** → add a bot, copy the **Bot Token**. Enable the **SERVER MEMBERS INTENT**
    (privileged) — the bot needs it to see members and manage roles.
-4. Invite the bot to the guild with the `bot` scope and only the **Manage Roles** +
-   **Send Messages** permissions (`permissions=268437504`). Kick Members is **not**
-   required — an app-side ban strips managed roles and applies a "Ban" role instead of
-   kicking (see §4).
+   No application or review is needed: as of 10 June 2026 the privileged-intent
+   review threshold is **10,000 unique reachable users** (it used to be 100 servers),
+   and a single guild of ~576 is well under it. Just toggle it on. App *verification*
+   is a separate thing, triggered at 100 **servers** — also not applicable.
+   **Keep "Requires OAuth2 Code Grant" OFF** on this tab: it forces an authorization-code
+   handshake this backend does not implement for the bot-install flow, and the install
+   then fails silently with "Integration requires code grant" — the bot never appears.
+4. Invite the bot to the guild with the `bot` scope and the **Manage Roles** +
+   **Send Messages** + **View Channel** permissions (`permissions=268438528`).
+   Kick Members is **not** required — an app-side ban strips managed roles and applies
+   a "Ban" role instead of kicking (see §4).
+
+   > ⚠️ **The permissions integer alone does NOT grant channel access.** It sets the
+   > bot's *guild-level* base permissions, and Discord applies channel overwrites
+   > **after** those, superseding them. So for any routed channel that is staff-only
+   > (a deny overwrite on `@everyone` for View Channel — likely for enlistments and
+   > the audit-log mirror in a regiment server), the bot still gets
+   > **`50001 Missing Access`** no matter how large the integer is.
+   >
+   > **You must add a channel-level permission overwrite** granting the bot's role
+   > View Channel + Send Messages on **each** channel it posts to: enlistments,
+   > audit-log, and event-announcements. Do this for the channels configured in §3.
+   >
+   > (The previous value here, `268437504`, additionally omitted View Channel, which
+   > only worked while `@everyone` retained View Channel at the guild level.)
 5. In the guild, **drag the bot's role ABOVE every role it will manage** (a bot can only
    assign/remove roles below its own highest role) and note the **Guild (Server) ID**.
+   Position is a second, independent gate from `Manage Roles`, and being below the
+   target role is the single most common bot-deployment failure — it surfaces as
+   `50013 Missing Permissions`. Position is also *mutable*: any admin who later creates
+   a role above the bot silently breaks sync for that role, so treat `botRolePosition`
+   from `getStatus()` as something to **alert on**, not just display.
+
+   **Exclude managed roles from every mapping.** Booster roles, other bots' roles and
+   integration roles have `managed: true` and can never be assigned by a bot — regardless
+   of position, and even if the bot owns the guild. Filter on `role.managed === true`
+   up front rather than discovering it as an error at sync time.
 
 ## 2. Environment (set these, then restart the API)
 ```env

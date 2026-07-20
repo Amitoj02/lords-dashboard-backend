@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# MySQL 8.4 tuning for a SHARED 4 GB host (OVH VPS-1: 2 vCore / 4 GB / 40 GB).
+#
+# The usual "give MySQL 50-70% of RAM" advice assumes MySQL owns the box. Here it
+# shares 4 GB with the NestJS API (which also hosts the Discord gateway), Caddy,
+# and the Docker daemon itself. The dataset for one regiment of <600 members is
+# tens of megabytes, so the goal is a small, predictable footprint rather than a
+# large cache — every megabyte MySQL does not take is a megabyte the API cannot
+# be OOM-killed for.
+#
+# Docker's OOM killer does not adjust container priority (only the daemon's), so
+# under host memory pressure the largest RSS wins — which would be MySQL on
+# default settings. Keeping it small makes the API the safe survivor.
+# ─────────────────────────────────────────────────────────────────────────────
+[mysqld]
+
+# --- Buffer pool: holds this entire dataset in RAM many times over.
+innodb_buffer_pool_size       = 512M
+innodb_buffer_pool_instances  = 1
+innodb_log_buffer_size        = 16M
+innodb_redo_log_capacity      = 128M
+
+# --- The single biggest default-memory trap on a small box.
+# temptable_max_ram defaults to 1 GiB on 8.0, and on 8.4+ to 3% of RAM with a
+# 1 GB FLOOR — a quarter of this machine, reserved for internal temp tables,
+# before anything spills to disk. Cap it explicitly.
+temptable_max_ram             = 64M
+
+# --- performance_schema preallocates instrumentation buffers we never read.
+# (8.4 autoscales more than older versions, so measure before assuming a large
+# saving — but there is no reason to pay for it on a single-regiment dashboard.)
+performance_schema            = OFF
+
+# --- Per-connection buffers multiply by max_connections; that product is the
+# classic sleeper OOM. 60 connections is far above what one API instance opens.
+max_connections               = 60
+sort_buffer_size              = 512K
+read_buffer_size              = 128K
+read_rnd_buffer_size          = 256K
+join_buffer_size              = 256K
+binlog_cache_size             = 32K
+thread_cache_size             = 16
+
+# --- Durability. Not IO-bound at this scale, so keep the safe settings.
+innodb_flush_method            = O_DIRECT
+innodb_flush_log_at_trx_commit = 1
+
+# --- Disable what is unused on a 40 GB disk.
+# log_bin costs disk and IO and buys nothing without replicas. Turn it back ON
+# if point-in-time recovery is ever wanted (that is the upgrade path, not
+# XtraBackup — see the backup section of PRODUCTION_OVH_R2_PLAN.md).
+skip_name_resolve             = ON
+log_bin                       = OFF
+table_definition_cache        = 400
+table_open_cache              = 400
+
+character-set-server          = utf8mb4
+collation-server              = utf8mb4_unicode_ci
