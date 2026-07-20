@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "3de3892b1aa034b295f823aa22e7718e8c006a2e",
-  "lastSyncedAt": "2026-07-20T05:00:00Z",
-  "notesForNextSession": "MERCENARY TRACK EPIC shipped as a PAIR - backend PR (feat/mercenary-track-enforcement) + frontend PR (feat/mercenary-track-ux). MERGE THEM TOGETHER: the frontend apply form reads allowMercenaries off GET /api/regiment, which only exists after T-0137. The frontend field is OPTIONAL and treats absent as permissive, so a frontend-first deploy degrades safely (both cards shown) rather than breaking. T-0133 had THREE holes, not the two the task named: updateMine() let an applicant submit as Member and flip to Mercenary afterwards, bypassing the submit guard entirely. GUARD SHAPE IS LOAD-BEARING: all guards use `settings && settings.allowMercenaries === false`, never a truthiness check. A settings object that OMITS the column (e.g. if a query ever narrows the select) must stay permissive; a truthiness check would 403 every Mercenary submit/edit/approve regiment-wide. Four tests pin this - mutating the guards fails exactly those four. Do not \"simplify\" them. RISK SWEEP: 21 backend risks retired with evidence this session. The 8 still open are undischarged OPERATIONAL preconditions, not code defects - T-0134#3 (8.0 db-data volume must be validated before 8.4), T-0135#0 (any DB that ran the 18 pre-squash migrations must be DROPPED, not migrated - I hit exactly this locally: the e2e DB still had all 18 rows), T-0136#0 (prod host needs a read:packages PAT), T-0134#0/1/2 (throttler swap, S3 checksum mode, /ready 503 - all unpinned by tests), T-0002#0 (encryption transformer still has no key id/version, so rotation is a one-way door). LOCAL E2E: use an isolated DB. I created lords_dashboard_e2e (fresh, squashed InitialSchema applies clean + seeds). Run with NODE_ENV=test DB_DATABASE=lords_dashboard_e2e DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= . Suite is re-runnable (48/48 twice). `npm run build` on the HOST fails on a root-owned dist/ (container bind-mount artifact) - build inside the container instead: docker compose exec api npm run build. BROWSER VERIFY: docker compose restart does NOT re-read .env - use docker compose up -d api. The mock owner persona (snowflake 100000000000000001) does NOT match the seeded owner, which is bound to the real OWNER_DISCORD_ID; repoint members.discord_identity_id temporarily to sign in as Owner, and restore it after. Admin route is /app/admin/applications. Keep this file ASCII-escaped (ensure_ascii) or every em-dash line shows as a spurious diff; testPlan status MUST be pending|passed|failed.",
-  "nextIdCounter": 138,
+  "lastSyncedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+  "lastSyncedAt": "2026-07-20T20:15:00Z",
+  "notesForNextSession": "PRODUCTION IS PROVISIONED BUT NOT LIVE. Branch feat/prod-deploy-automation (T-0138..T-0142) is in review; the frontend has a one-line companion change to its release.yml summary. THE BOX: ssh ovh-lords (deploy@144.217.85.166). Everything lives under ~/lords and ~/bin and NOTHING needs root - the deploy account owns the docker socket and loginctl linger is on, which is why backups are a systemd USER timer. sudo on that box DOES require a password, so do not plan work that needs it. Re-run ~/lords/deploy/bootstrap.sh any time; it is idempotent and never overwrites .env, backup.env or rclone.conf, and it prints exactly which values are still placeholders. BLOCKED ON THE OWNER, nothing else: (1) 8 placeholder values in ~/lords/.env - ACME_EMAIL, DISCORD_CLIENT_ID/SECRET/GUILD_ID, OWNER_DISCORD_ID, S3_ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY; (2) docker login ghcr.io with a read:packages PAT (both repos are private, so a missing PAT fails every pull with an AUTH error, not a 404 - that is T-0136#0); (3) the lords-backups R2 token in ~/.config/rclone/rclone.conf, then 'systemctl --user enable --now lords-backup.timer'; (4) the DEPLOY_SSH_KEY GitHub secret - I set DEPLOY_HOST and DEPLOY_KNOWN_HOSTS but deliberately did not move a private key myself: ssh ovh-lords 'cat ~/.ssh/lords_ci_deploy' | gh secret set DEPLOY_SSH_KEY --env production --repo Amitoj02/lords-dashboard-backend ; (5) Cloudflare apex A -> 144.217.85.166 and www CNAME, both Proxied (cdn. is already bound to R2). DEPLOYS ARE MANUAL BY DESIGN: required-reviewer environment protection needs GitHub Pro on a private repo (the API rejects it with a billing error), so the gate is a workflow_dispatch-only workflow - backend repo, Actions, 'Deploy to production', with an api_tag and a web_tag. ONE workflow rolls BOTH images because the two repos share a contract. BIGGEST FIND THIS SESSION: seed:prod runs on EVERY deploy and every seeder merged its defaults over live rows, so the SECOND deploy would have unlinked every rank and medal from its real Discord role, reset the permission matrix, flipped bot_enabled off, un-completed first-run setup and nulled the Owner's Discord profile and last_seen_at - silently. T-0138 splits the seeders into refresh-always reference catalogs vs greenfield-only provisioning. If you add a seeder, decide which tier it is in; the tests do not decide for you, and tier 2 will NEVER run against the existing production database. The prod db volume was destroyed after smoke-testing precisely so the first real deploy provisions greenfield with the REAL OWNER_DISCORD_ID - if you boot the stack before that value is filled in, the regiment gets provisioned against a placeholder and the greenfield gate means it will never re-provision. Drop the volume if that happens. DO NOT set DISCORD_BOT_MOCK=false yet - go live with the web app first; the bot's Phase 6 ladder into the 576-member guild is a separate, partly irreversible exercise. STILL UNVERIFIED: backups and the restore drill have never run against real R2 (T-0142's risk), and the full stack has never been up end to end. Run ~/bin/lords-restore-drill once creds exist and record the RTO in deploy/README.md. LOCAL: unchanged - isolated e2e DB lords_dashboard_e2e, NODE_ENV=test DB_HOST=127.0.0.1 DB_PORT=3307 DB_PASSWORD=devroot DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= ; 411 unit + 48 e2e green. dist/ and dist.root-owned/ are still root-owned and still break host builds (sudo rm -rf them). Keep this file ASCII-escaped and testPlan status pending|passed|failed.",
+  "nextIdCounter": 143,
   "connections": [],
   "tasks": [
     {
@@ -1894,8 +1894,8 @@
     {
       "id": "T-0032",
       "title": "MVP production deploy (unified prod compose)",
-      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs \u2014 register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost \u2014 a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025).",
-      "status": "blocked",
+      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs \u2014 register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost \u2014 a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025). [2026-07-20] The server half is DONE: the OVH VPS-1 exists at 144.217.85.166 (Debian 13), Phase 3 steps 1-9 were completed by the owner, and this session provisioned everything else - app dir, compose/Caddyfile/mysql config, a 0600 .env with real generated secrets, helper scripts, rclone, systemd user units, the CI forced-command key, and the deploy workflow. What remains is purely credentials and DNS, none of which Claude can obtain: the 8 placeholder values in ~/lords/.env (ACME_EMAIL, the 3 Discord values, OWNER_DISCORD_ID, the 3 R2 values), the GHCR read:packages PAT, the lords-backups R2 token, the DEPLOY_SSH_KEY GitHub secret, and the apex + www Cloudflare A/CNAME records (cdn. is already bound to R2).",
+      "status": "in_progress",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -1946,10 +1946,13 @@
         }
       ],
       "regressionRisk": [],
-      "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "skippedByClaude": [
+        "Could not fill the 8 required .env values, the GHCR PAT, the R2 backup token or the DNS records - all require owner credentials.",
+        "The stack has never been brought up end to end; only the db service was smoke-tested (then its volume destroyed so the first deploy is greenfield)."
+      ],
+      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1978,6 +1981,13 @@
           "to": "blocked",
           "by": "claude",
           "note": "Hosting target decided (OVH VPS-1 + Cloudflare R2 + Caddy). Code-side prep landed in T-0134/T-0135/T-0136. STILL BLOCKED: needs the human to order the VPS (OVH KYC can stall an order for days) and create the Discord production app."
+        },
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": "blocked",
+          "to": "in_progress",
+          "by": "claude",
+          "note": "server provisioned end to end; remaining blockers are owner-supplied credentials and DNS only"
         }
       ]
     },
@@ -9243,8 +9253,11 @@
         },
         {
           "desc": "MySQL 8.0 -> 8.4 on the shared db service, plus a new mounted my.cnf. performance_schema=OFF and max_connections=60 are global; mysql_native_password is disabled by default in 8.4. An existing db-data volume created by 8.0 must be validated before this is used against real data.",
-          "status": "open",
-          "notedAt": "2026-07-20T03:40:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-20T03:40:00Z",
+          "resolvedAt": "2026-07-20T20:15:00Z",
+          "resolvedBy": "claude",
+          "note": "Discharged for production by construction: the box had no pre-existing volume, and the 8.4 volume created during this session's smoke test was deliberately destroyed (compose down -v) so the first real deploy provisions from empty. Verified on the box that 8.4 boots healthy in ~15s with the mounted tuning.cnf actually applied (innodb_buffer_pool_size=536870912, temptable_max_ram=67108864, max_connections=60). Local dev already runs 8.4 against its existing volume without issue."
         }
       ],
       "skippedByClaude": [
@@ -9256,7 +9269,7 @@
       ],
       "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
       "createdAt": "2026-07-20T03:40:00Z",
-      "updatedAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
       "history": [
         {
           "at": "2026-07-20T03:40:00Z",
@@ -9271,6 +9284,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        },
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": "deploy_ready",
+          "to": "deploy_ready",
+          "by": "claude",
+          "note": "risk #3 (8.0 -> 8.4 volume) resolved; O5 answered on the box - deploy.resources.limits.memory IS honoured by plain compose up (HostConfig.Memory=1073741824)"
         }
       ]
     },
@@ -9457,6 +9477,342 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "created and implemented alongside T-0133"
+        }
+      ]
+    },
+    {
+      "id": "T-0138",
+      "title": "Stop seed:prod clobbering owner configuration on every redeploy",
+      "summary": "seed:prod is chained after migrations by the compose migrate one-shot, so it runs on EVERY deploy, and every seeder used a merge-upsert (ensure). Idempotent but destructive: the second deploy would have reset regiment.setup_complete, overwritten the name/mission/accent the owner customized, UNLINKED every rank and medal from its real Discord role (linked:false), flipped discord_bot_settings.bot_enabled back off, reset the entire role-permission matrix, and nulled the Owner's Discord profile, joined_at and last_seen_at. Nothing failed loudly - the configuration simply reverted. Split MainSeeder into two tiers: code-owned reference catalogs (accent tones, audit actions) still refresh every deploy; everything an admin owns is gated on a greenfield database, detected by the regiment row existing. Role permissions stay in tier 1 but provision row-by-row via a new insert-only provision() helper, keyed on the immutable (role, capability) enum pair - so a capability added in a later release still gets its default grant while admin edits survive. Per-row provisioning is NOT safe for ranks/medals, whose natural keys (name, title) are user-editable: a renamed rank would not be found and would be re-created as a duplicate, hence the greenfield gate for those.",
+      "status": "review",
+      "type": "fix",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "seeding",
+      "repo": "",
+      "paths": [
+        "src/database/seeds/main.seeder.ts",
+        "src/database/seeds/main.seeder.spec.ts",
+        "src/database/seeds/seed.util.ts",
+        "src/database/seeds/role-permissions.seed.ts",
+        "src/database/seeds/regiment.seed.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "greenfield seed provisions regiment, ranks, medals, bot settings and owner",
+          "status": "passed"
+        },
+        {
+          "desc": "after simulated admin edits, a second migrate+seed leaves name, mission, accent, setup_complete, rank/medal linked, bot_enabled, welcome_message, event timezone, owner in_game_name/last_seen_at and discord_username all untouched",
+          "status": "passed"
+        },
+        {
+          "desc": "an admin-flipped role_permission (Moderator/view_audit_log granted=1, default 0) survives a reseed",
+          "status": "passed"
+        },
+        {
+          "desc": "a deleted role_permission row is back-filled with its default on reseed (84 rows restored)",
+          "status": "passed"
+        },
+        {
+          "desc": "8 unit tests pin the tier split; 411 unit + 48 e2e green",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "MainSeeder now SKIPS the greenfield seeders whenever the regiment row exists. A future seeder added to the tier-2 block will therefore never run on the existing production database - it only affects new deployments. Schema or data changes for an existing deployment must go in a migration, not a seeder. The tier a new seeder belongs in is a judgement call that the 8 unit tests do NOT make for you.",
+          "status": "open",
+          "notedAt": "2026-07-20T20:15:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Left dev/e2e connecting as root - the least-privilege DB accounts (T-0139) are wired in the prod overlay only, to keep the blast radius off the documented local e2e procedure."
+      ],
+      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "createdAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "implemented this session"
+        }
+      ]
+    },
+    {
+      "id": "T-0139",
+      "title": "Least-privilege MySQL accounts; stop serving traffic as root",
+      "summary": "Plan 1.5. A docker-entrypoint-initdb.d script creates lords_app (SELECT/INSERT/UPDATE/DELETE on the one schema, used by the long-lived API) and lords_migrate (ALL on the one schema, used only by the one-shot migrate container which exits before the API starts). root remains only for the container healthcheck and mysqldump. An RCE in the API process can no longer DROP a table, read mysql.user or GRANT itself anything. Two traps cost real debugging time and are documented: (1) the mysql entrypoint SOURCES a non-executable initdb file, so a bare 'set -euo pipefail' applies to the entrypoint's own shell and 'set -u' kills docker_process_sql (which tests \"$1\" with no args) at line 248 - init aborted, MySQL started perfectly healthy, and the accounts were SILENTLY ABSENT; fixed with a subshell function body and no -u. (2) initdb runs only when the data directory is empty, so changing APP_DB_PASSWORD in .env later does nothing to MySQL and rotation needs an explicit ALTER USER.",
+      "status": "review",
+      "type": "infra",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "access-control",
+      "repo": "",
+      "paths": [
+        "mysql/init/01-app-users.sh",
+        "docker-compose.prod.yml",
+        "deploy/README.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "both accounts are created with the intended grants on a fresh mysql:8.4 volume",
+          "status": "passed"
+        },
+        {
+          "desc": "13 behavioural checks: lords_app allowed SELECT/INSERT/UPDATE/DELETE, denied CREATE, DROP, GRANT, mysql.user and any other schema; lords_migrate allowed CREATE/ALTER/DROP, denied mysql.user",
+          "status": "passed"
+        },
+        {
+          "desc": "verified again on the production box against the real .env - accounts and grants correct, tuning.cnf applied (buffer pool 512M, temptable_max_ram 64M, max_connections 60)",
+          "status": "passed"
+        },
+        {
+          "desc": "POST-DEPLOY: the api authenticates as lords_app and the migrate one-shot as lords_migrate against a real first boot",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The accounts exist ONLY on a db-data volume created after this change - initdb is a no-op on an existing volume. Any environment with a pre-existing volume (a developer who opts into the prod overlay, a restored backup mounted onto an old volume) will fail to authenticate as lords_app with no hint as to why. The production volume was deliberately destroyed and recreated so the first real deploy provisions cleanly; nothing enforces this elsewhere.",
+          "status": "open",
+          "notedAt": "2026-07-20T20:15:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "createdAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "implemented this session"
+        }
+      ]
+    },
+    {
+      "id": "T-0140",
+      "title": "Provision the OVH box: bootstrap script, prod .env, config sync",
+      "summary": "Plan Phase 3 step 10, automated as deploy/bootstrap.sh - idempotent and re-runnable, never overwriting .env, backup.env or rclone.conf. It preflights docker and systemd linger, installs the three helper scripts to ~/bin, installs rclone WITHOUT root (unzip is absent from a minimal Debian 13 and pulling it in would need root, so it falls back to python3 -m zipfile), generates all five secrets on the box with openssl rand (hex throughout - the DB passwords get interpolated into single-quoted SQL literals by the initdb script, where a quote or backslash would break the statement), writes a 0600 .env from a documented template, installs the systemd user units, and reports exactly which values still need a human. Nothing needs root: the deploy account owns the docker socket and linger is enabled. Crucially it re-checks for placeholder markers SEPARATELY from 'docker compose config', because compose only asserts a ${VAR:?} is non-empty and placeholder text is non-empty - a .env full of placeholders passes compose config and then fails at runtime as an invalid Discord client or a 401 from R2.",
+      "status": "review",
+      "type": "infra",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "provisioning",
+      "repo": "",
+      "paths": [
+        "deploy/bootstrap.sh",
+        "deploy/env.production.template",
+        "deploy/backup.env.template",
+        "deploy/README.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "bootstrap.sh runs clean on the real box and is safe to re-run (run three times, .env preserved)",
+          "status": "passed"
+        },
+        {
+          "desc": "placeholder detection reports exactly the 8 values a human must supply, excluding the template's own explanatory comments",
+          "status": "passed"
+        },
+        {
+          "desc": "compose config parses against the generated .env",
+          "status": "passed"
+        },
+        {
+          "desc": "db service boots on the box, initdb accounts created, tuning.cnf applied",
+          "status": "passed"
+        },
+        {
+          "desc": "POST-DEPLOY: full stack up after the 8 required values are filled in",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "bootstrap.sh writes .env ONLY when absent, which is what makes it safe to re-run - but it also means a template change (a new required variable) is NOT picked up by an existing install. Adding a variable to docker-compose.prod.yml with ${VAR:?} will break the next deploy on a box whose .env predates it, and bootstrap will report success. The placeholder check does not cover missing keys, only unfilled ones.",
+          "status": "open",
+          "notedAt": "2026-07-20T20:15:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not add ~/bin to PATH in ~/.profile - Debian's default .profile already does this when ~/bin exists, but only from the next login; bootstrap warns instead of editing the user's shell config.",
+        "Did not install unzip, or anything else needing root - the whole deploy account is deliberately root-free."
+      ],
+      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "createdAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "implemented this session"
+        }
+      ]
+    },
+    {
+      "id": "T-0141",
+      "title": "Manual production deploy: forced-command key + workflow_dispatch workflow",
+      "summary": "Plan Phase 4. bin/lords-deploy is the ONLY thing the CI key may do, installed as an SSH forced command with restrict,no-pty,no-*-forwarding. $SSH_ORIGINAL_COMMAND is parsed against a fixed allowlist and never executed, so a stolen CI credential can roll images and nothing else. It flock-serializes (both repos can merge at once), pins the resolved tags into .env so a reboot or a later manual 'up -d' cannot drift back to :latest, does a stop-then-start recreate (never rolling - the Discord gateway runs in-process, so two overlapping api containers mean two gateway connections on one bot token and duplicate role grants to real members), and polls /api/health/ready from INSIDE the container because the api publishes no host port in prod. It deliberately does NOT auto-roll-back: migrations have already run when readiness fails, so reverting the image alone would leave an old binary on a new schema. The plan's intended gate - a protected environment with required reviewers - turns out to need GitHub Pro on a private repo, so the same guarantee is bought free with a workflow_dispatch-only deploy workflow. ONE workflow rolls BOTH images from the backend repo, which discharges the cross-repo lockstep requirement by construction rather than by discipline. Also splits IMAGE_TAG into API_IMAGE_TAG/WEB_IMAGE_TAG - the two images come from different repos with different SHAs, so one shared tag could only ever be correct for one of them and a pinned rollback would have resolved to a non-existent tag on the other.",
+      "status": "review",
+      "type": "infra",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "release-automation",
+      "repo": "",
+      "paths": [
+        "deploy/bin/lords-deploy",
+        ".github/workflows/deploy.yml",
+        ".github/workflows/release.yml",
+        "docker-compose.prod.yml",
+        "deploy/README.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "forced command blocks arbitrary commands, .env reads, shell requests, docker escapes, ';' injection via the tag, path traversal in the tag, unknown components and unknown actions (9 checks, box-to-itself)",
+          "status": "passed"
+        },
+        {
+          "desc": "'status' is permitted and reports compose ps + pinned tags + readiness",
+          "status": "passed"
+        },
+        {
+          "desc": "host key pinned via DEPLOY_KNOWN_HOSTS rather than accept-new",
+          "status": "passed"
+        },
+        {
+          "desc": "shellcheck clean at -S warning",
+          "status": "passed"
+        },
+        {
+          "desc": "POST-DEPLOY: an end-to-end run of the Deploy to production workflow rolls both images and reports ready",
+          "status": "pending"
+        },
+        {
+          "desc": "POST-DEPLOY: two consecutive deploys leave exactly one api container and one gateway connection",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "lords-deploy REWRITES ~/lords/.env in place (sed to a 0600 temp file, then mv) on every deploy. The write is atomic and preserves mode, but any hand-edit made to .env while a deploy is mid-flight is lost, and a future change to the pin_tag matcher could corrupt the secret file rather than just the tag line. Nothing backs .env up before rewriting it.",
+          "status": "open",
+          "notedAt": "2026-07-20T20:15:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "No auto-rollback on a failed deploy - deliberate, see the summary; the script prints the exact rollback command and 60 lines of api logs instead.",
+        "DEPLOY_SSH_KEY was NOT set as a GitHub secret by me - moving a private key into a third party is the owner's call. The exact one-liner is in the handoff and deploy/README.md.",
+        "Left the deploy trigger manual rather than on-merge, per the owner's choice."
+      ],
+      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "createdAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "implemented this session"
+        }
+      ]
+    },
+    {
+      "id": "T-0142",
+      "title": "Nightly database backups to R2 with a real restore drill",
+      "summary": "Plan Phase 5. bin/lords-backup runs mysqldump --single-transaction --quick from inside the db container, through zstd, to r2:lords-backups via rclone, on a systemd USER timer at 03:30 UTC - deliberately before the 04:30 unattended-upgrades reboot window, with Persistent=true so a missed night runs on next boot. A user timer rather than a system one because linger is enabled and the deploy account already owns the docker socket and the .env, so backups need no root. It checks BOTH halves of the pipe: a mysqldump auth failure exits non-zero while still writing a short, perfectly valid .zst - exactly the backup that looks fine for months and restores to nothing. It also enforces an absolute size floor, refuses a dump more than 50% smaller than the largest stored one, and verifies the archive decompresses and ends with mysqldump's completion marker before uploading. The heartbeat is pinged ONLY on the success path, so the monitor alerts on its absence - the only way to catch the timer silently not running at all. bin/lords-restore-drill restores the newest backup into a scratch schema, diffs table and row counts against live, drops the scratch schema and prints the wall-clock time, which is the RTO. It is safe against production: it never writes to lords_dashboard.",
+      "status": "review",
+      "type": "infra",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "backups",
+      "repo": "",
+      "paths": [
+        "deploy/bin/lords-backup",
+        "deploy/bin/lords-restore-drill",
+        "deploy/systemd/lords-backup.service",
+        "deploy/systemd/lords-backup.timer",
+        "deploy/backup.env.template",
+        "deploy/README.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "shellcheck clean at -S warning; systemd units install and daemon-reload cleanly as user units",
+          "status": "passed"
+        },
+        {
+          "desc": "BLOCKED ON CREDS: a real backup uploads to r2:lords-backups and is listable",
+          "status": "pending"
+        },
+        {
+          "desc": "BLOCKED ON CREDS: the size floor rejects a schema-only dump",
+          "status": "pending"
+        },
+        {
+          "desc": "BLOCKED ON CREDS: restore drill completes and the recorded RTO is written into deploy/README.md",
+          "status": "pending"
+        },
+        {
+          "desc": "BLOCKED ON CREDS: stopping the timer for a day fires the heartbeat monitor",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "NEITHER the backup nor the restore drill has been executed against real R2 - both are blocked on the lords-backups token, so this whole task is verified only by shellcheck and unit reasoning. The 50%-shrink guard in particular compares against the LARGEST stored backup, which means the very first run has nothing to compare against and only the absolute floor applies. Do not treat backups as working until the restore drill has been run once and its RTO recorded.",
+          "status": "open",
+          "notedAt": "2026-07-20T20:15:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "The systemd timer is installed but NOT enabled - enabling it before rclone.conf holds real credentials would only guarantee a failing unit and a misleading first alert. bootstrap prints the enable command.",
+        "No R2 lifecycle rule; retention is enforced client-side by 'rclone delete --min-age'. A server-side rule would survive the box being lost.",
+        "Backups are not encrypted at rest beyond R2's own - the dump contains encrypted Discord tokens but plaintext PII."
+      ],
+      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "createdAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T20:15:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T20:15:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "implemented this session"
         }
       ]
     }
