@@ -7,8 +7,10 @@
 # means a `main` that does not compile takes production down with it. The VPS
 # only ever does `docker compose pull && up -d`.
 #
-# Images are tagged with the commit SHA, so a rollback is a tag change:
-#   IMAGE_TAG=<previous-sha> docker compose -f ... -f ... up -d
+# Images are tagged with the commit SHA. Publishing one changes NOTHING live —
+# rolling it out is a separate, manual act: run the "Deploy to production"
+# workflow with the tag you want. Rollback is that same workflow with an older
+# sha.
 #
 # NOTE: this repo is private, so published packages are private too. The VPS
 # needs `docker login ghcr.io` with a PAT carrying read:packages.
@@ -72,5 +74,11 @@ jobs:
             echo "${{ steps.img.outputs.name }}:latest"
             echo '```'
             echo ''
-            echo "Deploy with \`IMAGE_TAG=${{ github.sha }}\`."
+            echo 'Nothing live has changed. To roll this out, run the'
+            echo '**Deploy to production** workflow with:'
+            echo ''
+            echo "    api_tag = ${{ github.sha }}"
+            echo ''
+            echo 'Pick the matching lords-web tag for `web_tag` — the SPA and the'
+            echo 'API share a contract and must ship together.'
           } >> "$GITHUB_STEP_SUMMARY"

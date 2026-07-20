@@ -67,7 +67,21 @@ else
 	arch="$(dpkg --print-architecture 2>/dev/null || echo amd64)"
 	curl -fsSL "https://downloads.rclone.org/rclone-${RCLONE_VERSION}-linux-${arch}.zip" \
 		-o "$tmp/rclone.zip" || die "rclone download failed"
-	( cd "$tmp" && unzip -q rclone.zip && find . -name rclone -type f -exec install -m 0755 {} "$BIN_DIR/rclone" \; )
+
+	# `unzip` is NOT part of a minimal Debian 13 install and pulling it in would
+	# need root, which nothing else here does. python3 is present (it is an
+	# essential dependency of the base system) and its zipfile module is enough.
+	if command -v unzip >/dev/null; then
+		( cd "$tmp" && unzip -q rclone.zip )
+	elif command -v python3 >/dev/null; then
+		python3 -m zipfile -e "$tmp/rclone.zip" "$tmp/" || die "could not extract rclone"
+	else
+		die "need unzip or python3 to extract rclone"
+	fi
+
+	found="$(find "$tmp" -name rclone -type f -print -quit)"
+	[ -n "$found" ] || die "rclone binary not found in the archive"
+	install -m 0755 "$found" "$BIN_DIR/rclone"
 	rm -rf "$tmp"
 	"$BIN_DIR/rclone" version >/dev/null || die "rclone install failed"
 	ok "installed $("$BIN_DIR/rclone" version | head -1)"
@@ -156,8 +170,28 @@ fi
 # ── Validate ────────────────────────────────────────────────────────────────
 step "Validation"
 cd "$APP_DIR"
+
+# Checked BEFORE the compose parse, and separately from it. Compose only asserts
+# that a ${VAR:?} is non-empty — the placeholder text is non-empty, so a .env
+# full of ‹REQUIRED› markers sails through `compose config` and then fails at
+# runtime as an invalid Discord client or a 401 from R2. Grep for the markers.
+# `grep -v ':#'` drops the header comments that explain the markers — otherwise
+# the file's own documentation counts itself as unfinished configuration.
+PLACEHOLDERS="$(grep -n '‹' "$ENV_FILE" | grep -v '^[0-9]*:[[:space:]]*#' || true)"
+UNSET_COUNT="$(printf '%s' "$PLACEHOLDERS" | grep -c . || true)"
+if [ "$UNSET_COUNT" -gt 0 ]; then
+	warn "$UNSET_COUNT value(s) in .env still need you:"
+	printf '%s\n' "$PLACEHOLDERS" | cut -d= -f1 | cut -d: -f2- | sed 's/^/      /'
+else
+	ok "no placeholder values left in .env"
+fi
+
 if docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null 2>"$APP_DIR/.compose-err"; then
-	ok "compose config parses and every required variable is set"
+	if [ "$UNSET_COUNT" -eq 0 ]; then
+		ok "compose config parses and every required variable is set"
+	else
+		info "compose config parses (but see the placeholders above — it cannot detect those)"
+	fi
 	rm -f "$APP_DIR/.compose-err"
 else
 	warn "compose config is not yet satisfiable:"
