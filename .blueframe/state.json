@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
-  "lastSyncedAt": "2026-07-20T20:15:00Z",
-  "notesForNextSession": "PRODUCTION IS PROVISIONED BUT NOT LIVE. Branch feat/prod-deploy-automation (T-0138..T-0142) is in review; the frontend has a one-line companion change to its release.yml summary. THE BOX: ssh ovh-lords (deploy@144.217.85.166). Everything lives under ~/lords and ~/bin and NOTHING needs root - the deploy account owns the docker socket and loginctl linger is on, which is why backups are a systemd USER timer. sudo on that box DOES require a password, so do not plan work that needs it. Re-run ~/lords/deploy/bootstrap.sh any time; it is idempotent and never overwrites .env, backup.env or rclone.conf, and it prints exactly which values are still placeholders. BLOCKED ON THE OWNER, nothing else: (1) 8 placeholder values in ~/lords/.env - ACME_EMAIL, DISCORD_CLIENT_ID/SECRET/GUILD_ID, OWNER_DISCORD_ID, S3_ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY; (2) docker login ghcr.io with a read:packages PAT (both repos are private, so a missing PAT fails every pull with an AUTH error, not a 404 - that is T-0136#0); (3) the lords-backups R2 token in ~/.config/rclone/rclone.conf, then 'systemctl --user enable --now lords-backup.timer'; (4) the DEPLOY_SSH_KEY GitHub secret - I set DEPLOY_HOST and DEPLOY_KNOWN_HOSTS but deliberately did not move a private key myself: ssh ovh-lords 'cat ~/.ssh/lords_ci_deploy' | gh secret set DEPLOY_SSH_KEY --env production --repo Amitoj02/lords-dashboard-backend ; (5) Cloudflare apex A -> 144.217.85.166 and www CNAME, both Proxied (cdn. is already bound to R2). DEPLOYS ARE MANUAL BY DESIGN: required-reviewer environment protection needs GitHub Pro on a private repo (the API rejects it with a billing error), so the gate is a workflow_dispatch-only workflow - backend repo, Actions, 'Deploy to production', with an api_tag and a web_tag. ONE workflow rolls BOTH images because the two repos share a contract. BIGGEST FIND THIS SESSION: seed:prod runs on EVERY deploy and every seeder merged its defaults over live rows, so the SECOND deploy would have unlinked every rank and medal from its real Discord role, reset the permission matrix, flipped bot_enabled off, un-completed first-run setup and nulled the Owner's Discord profile and last_seen_at - silently. T-0138 splits the seeders into refresh-always reference catalogs vs greenfield-only provisioning. If you add a seeder, decide which tier it is in; the tests do not decide for you, and tier 2 will NEVER run against the existing production database. The prod db volume was destroyed after smoke-testing precisely so the first real deploy provisions greenfield with the REAL OWNER_DISCORD_ID - if you boot the stack before that value is filled in, the regiment gets provisioned against a placeholder and the greenfield gate means it will never re-provision. Drop the volume if that happens. DO NOT set DISCORD_BOT_MOCK=false yet - go live with the web app first; the bot's Phase 6 ladder into the 576-member guild is a separate, partly irreversible exercise. STILL UNVERIFIED: backups and the restore drill have never run against real R2 (T-0142's risk), and the full stack has never been up end to end. Run ~/bin/lords-restore-drill once creds exist and record the RTO in deploy/README.md. LOCAL: unchanged - isolated e2e DB lords_dashboard_e2e, NODE_ENV=test DB_HOST=127.0.0.1 DB_PORT=3307 DB_PASSWORD=devroot DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= ; 411 unit + 48 e2e green. dist/ and dist.root-owned/ are still root-owned and still break host builds (sudo rm -rf them). Keep this file ASCII-escaped and testPlan status pending|passed|failed.",
-  "nextIdCounter": 143,
+  "lastSyncedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
+  "lastSyncedAt": "2026-07-20T22:10:00Z",
+  "notesForNextSession": "*** PRODUCTION IS LIVE at https://lordsofholdfast.com since 2026-07-20. *** Deploy workflow run 29781571948 rolled both images at :latest. Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok,database:up} (which also proves the least-privilege lords_app account authenticated on a real first boot), /api/docs 404, SPA serving. All four containers healthy. DOCS FIRST: read CONTRIBUTING.md (developer flow, and THE SEEDING TIER RULE), then docs/INFRASTRUCTURE.md (what runs where, credential inventory, what survives down -v), then deploy/README.md (runbook). Branch docs/infrastructure-and-contributing (T-0143) is in review. DEPLOYS ARE MANUAL: backend repo, Actions, 'Deploy to production', api_tag + web_tag. One workflow rolls BOTH images. Required-reviewer environment protection needs GitHub Pro on a private repo, so workflow_dispatch is the gate. Rollback is the same workflow with older tags; there is deliberately no auto-rollback because migrations have already run when readiness fails. STILL NOT DONE, in rough priority order: (1) an AVATAR UPLOAD has never been tested end to end - presign -> R2 CORS -> PUT -> cdn. serving is the most likely thing to be broken; (2) BACKUPS have never run against real R2 - 'systemctl --user enable --now lords-backup.timer', then run ~/bin/lords-restore-drill ONCE and write the RTO into deploy/README.md; a backup you have not restored is a hypothesis; (3) no monitoring - point Better Stack at /api/health/ready and a heartbeat at BACKUP_HEARTBEAT_URL in ~/lords/backup.env; (4) LEGAL (plan Phase 7) must be live BEFORE public sign-in - privacy policy naming Cloudflare/OVH/Discord, a working delete-my-account button (Discord's Developer ToS requires it), retention job, privacy@ alias; (5) the Discord bot rollout, plan Phase 6, seven-step ladder - step 5 is the first irreversible action against 576 real people. TWO BOT SWITCHES, NOT ONE: DISCORD_BOT_MOCK=false only makes the bot CONNECT (read-only); the botEnabled DB flag (default false, admin UI) controls whether anything is ENQUEUED. Nothing is written to Discord until both are set. Safe to unmock against a TEST guild - that is plan 6.3 step 1 - but see the next note. KNOWN GAP, NOT YET FIXED: real-discord-gateway.ts:61 registers GuildMemberAdd and DISCARDS member.guild.id, so a bot in two guilds fires onboarding against whatever DISCORD_GUILD_ID is configured - a join in a test guild would DM a welcome and try to assign a role in production, and vice versa. Keep the bot in exactly ONE guild, or use a separate Discord application for staging. The owner was offered a two-line guild filter and had not decided when the session ended. SECOND KNOWN GAP: guild membership is recorded (discord_identities.guild_member) and shown in the admin member detail but NEVER ENFORCED by any guard. A non-member can sign in, apply and be approved; a member who leaves keeps access indefinitely; there is no GuildMemberRemove handler. If you add enforcement, note resolveGuildMembership falls back to false on a bot timeout, so a naive gate would lock out the whole regiment whenever the gateway hiccups - it must distinguish 'confirmed not a member' from 'could not check'. GUILD SWITCH PROCEDURE (test guild -> real guild): everything guild-coupled lives in the DB (bot settings channel/role ids, rank/medal linked + discordRoleName, members, identities), so 'down -v' then edit DISCORD_GUILD_ID/OWNER_DISCORD_ID then 'up -d' is clean and complete. But R2 objects SURVIVE down -v and become orphaned - 'rclone delete r2:lords-media' when intentionally resetting. Do NOT boot the stack with a placeholder OWNER_DISCORD_ID: the greenfield gate means it will never re-provision. BOX: ssh ovh-lords. Everything under ~/lords and ~/bin; NOTHING needs root (deploy owns the docker socket, linger is on, backups are a systemd USER timer). sudo DOES require a password. Re-run ~/lords/deploy/bootstrap.sh any time - idempotent, never overwrites .env/backup.env/rclone.conf. NOTE 'rclone lsd r2:' ALWAYS 403s with a correctly bucket-scoped token (ListBuckets is account-level) - test with 'rclone lsf r2:lords-backups' instead. LOCAL: isolated e2e DB lords_dashboard_e2e, NODE_ENV=test DB_HOST=127.0.0.1 DB_PORT=3307 DB_PASSWORD=devroot DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= (must be EMPTY). 419 unit + 48 e2e green. dist/ and dist.root-owned/ are still root-owned and break host builds (sudo rm -rf them, or build in the container). Keep this file ASCII-escaped; testPlan status must be pending|passed|failed.",
+  "nextIdCounter": 144,
   "connections": [],
   "tasks": [
     {
@@ -1895,7 +1895,7 @@
       "id": "T-0032",
       "title": "MVP production deploy (unified prod compose)",
       "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs \u2014 register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost \u2014 a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025). [2026-07-20] The server half is DONE: the OVH VPS-1 exists at 144.217.85.166 (Debian 13), Phase 3 steps 1-9 were completed by the owner, and this session provisioned everything else - app dir, compose/Caddyfile/mysql config, a 0600 .env with real generated secrets, helper scripts, rclone, systemd user units, the CI forced-command key, and the deploy workflow. What remains is purely credentials and DNS, none of which Claude can obtain: the 8 placeholder values in ~/lords/.env (ACME_EMAIL, the 3 Discord values, OWNER_DISCORD_ID, the 3 R2 values), the GHCR read:packages PAT, the lords-backups R2 token, the DEPLOY_SSH_KEY GitHub secret, and the apex + www Cloudflare A/CNAME records (cdn. is already bound to R2).",
-      "status": "in_progress",
+      "status": "deployed",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -1950,9 +1950,9 @@
         "Could not fill the 8 required .env values, the GHCR PAT, the R2 backup token or the DNS records - all require owner credentials.",
         "The stack has never been brought up end to end; only the db service was smoke-tested (then its volume destroyed so the first deploy is greenfield)."
       ],
-      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
       "createdAt": "2026-07-11T02:30:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-11T02:30:00Z",
@@ -1988,6 +1988,13 @@
           "to": "in_progress",
           "by": "claude",
           "note": "server provisioned end to end; remaining blockers are owner-supplied credentials and DNS only"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "in_progress",
+          "to": "deployed",
+          "by": "claude",
+          "note": "PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving. The two remaining testPlan items are post-deploy smoke tests requiring a real Discord sign-in, which only the owner can perform."
         }
       ]
     },
@@ -9175,7 +9182,7 @@
       "id": "T-0134",
       "title": "Production hardening for OVHcloud VPS-1 + Cloudflare R2",
       "summary": "Retarget the prod stack from DigitalOcean+MinIO to OVH VPS-1 + Cloudflare R2. Fixes three silent-failure storage bugs (S3_ACCESS_KEY_ID/SECRET were sourced from MINIO_ROOT_USER so a prod .env was ignored; S3_REGION would inherit the dev us-east-1 and break R2 signing; S3_PUBLIC_BASE_URL derived the private signing endpoint). Adds Caddy as the only port-publishing container (the old web:8080 publish was world-open because Docker DNAT bypasses ufw), moves MySQL 8.0->8.4 (EOL 2026-04-21) with 4GB tuning, drops MinIO from prod, and pins the API to one replica because the Discord gateway runs in-process. Also fixes rate limiting behind a proxy (CF-Connecting-IP), splits /health into live/ready, gates Swagger out of production, and makes permanent Discord 4xx codes fail terminally on the first attempt instead of burning five.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "L",
       "sizeWeight": 5,
@@ -9227,8 +9234,8 @@
           "status": "pending"
         },
         {
-          "desc": "POST-DEPLOY: /api/docs is NOT reachable in production",
-          "status": "pending"
+          "desc": "POST-DEPLOY: /api/docs is NOT reachable in production -- PASSED at go-live: https://lordsofholdfast.com/api/docs returns 404",
+          "status": "passed"
         },
         {
           "desc": "POST-DEPLOY: two consecutive deploys + hard refresh do not white-screen (index.html not cached)",
@@ -9269,7 +9276,7 @@
       ],
       "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
       "createdAt": "2026-07-20T03:40:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T03:40:00Z",
@@ -9291,6 +9298,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "risk #3 (8.0 -> 8.4 volume) resolved; O5 answered on the box - deploy.resources.limits.memory IS honoured by plain compose up (HostConfig.Memory=1073741824)"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9298,7 +9312,7 @@
       "id": "T-0135",
       "title": "Squash 18 migrations into InitialSchema; align UQ_event_occurrence with the entity",
       "summary": "Production is greenfield (T-0028), so the 18-migration forward history will never be replayed. Collapsing it into a single InitialSchema keeps the prod migrate one-shot to one step. Also promotes the recurring-occurrence uniqueness guard onto RegimentEvent as UQ_event_occurrence(recurrence_template_id, starts_at) so the entity matches the schema the migration already created (T-0075) and migration:generate stops drifting.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
@@ -9339,7 +9353,7 @@
       ],
       "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
       "createdAt": "2026-07-20T03:40:00Z",
-      "updatedAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T03:40:00Z",
@@ -9354,6 +9368,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9361,7 +9382,7 @@
       "id": "T-0136",
       "title": "GHCR release pipeline for api + web images; correct stub-era docs",
       "summary": "Adds a Release workflow to each repo building --target prod and pushing ghcr.io/<owner>/lords-api and lords-web tagged with the commit SHA and latest, so prod compose references images instead of the ../lords-regiment-dashboard relative build context (which cannot resolve on a server) and rollback is an IMAGE_TAG change. Building in CI also keeps the Angular production build off a 4 GB box running a live MySQL. Also corrects CLAUDE.md, which still described the frontend services as RxJS of() stubs - untrue since T-0026 and an invitation to re-wire live code.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "infra",
       "size": "S",
       "sizeWeight": 2,
@@ -9395,8 +9416,11 @@
       "regressionRisk": [
         {
           "desc": "Both repos are PRIVATE, so the published packages are private too. The production host needs a PAT with read:packages or every docker compose pull fails with an auth error rather than a 404.",
-          "status": "open",
-          "notedAt": "2026-07-20T03:40:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-20T03:40:00Z",
+          "resolvedAt": "2026-07-20T22:10:00Z",
+          "resolvedBy": "claude",
+          "note": "Discharged: the owner ran docker login ghcr.io on the box with a read:packages PAT, and the first deploy pulled both private images successfully. Note GHCR returns an unhelpful 'denied: denied' for BOTH a bad credential and a missing read:packages scope."
         }
       ],
       "skippedByClaude": [
@@ -9405,7 +9429,7 @@
       ],
       "lastTouchedCommit": "7bca4e0edca59728e0a79f017f8231e468e6f9d0",
       "createdAt": "2026-07-20T03:40:00Z",
-      "updatedAt": "2026-07-20T03:40:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T03:40:00Z",
@@ -9420,6 +9444,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "built + verified on feat/production-ovh-r2 (PR #17); typecheck 0, lint 0, 395 unit + 43 e2e green, CI green. Not yet on main."
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9427,7 +9458,7 @@
       "id": "T-0137",
       "title": "Expose allowMercenaries on the public regiment profile",
       "summary": "The apply form must stop OFFERING the Mercenary track once T-0133 makes the API refuse it, or applicants walk into a 403. GET /settings requires the ManageSettings capability so an Applicant cannot read it; the flag therefore rides on the already-public GET /api/regiment projection. RegimentsService already injects the settings repo (used by getStats), so the read is parallelised with the member count. A missing settings row defaults to true, matching the allow_mercenaries column default and the service-layer guard.",
-      "status": "deploy_ready",
+      "status": "deployed",
       "type": "feature",
       "size": "XS",
       "sizeWeight": 1,
@@ -9469,7 +9500,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "3de3892b1aa034b295f823aa22e7718e8c006a2e",
       "createdAt": "2026-07-20T05:00:00Z",
-      "updatedAt": "2026-07-20T05:00:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T05:00:00Z",
@@ -9477,6 +9508,13 @@
           "to": "deploy_ready",
           "by": "claude",
           "note": "created and implemented alongside T-0133"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "deploy_ready",
+          "to": "deployed",
+          "by": "claude",
+          "note": "PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9484,7 +9522,7 @@
       "id": "T-0138",
       "title": "Stop seed:prod clobbering owner configuration on every redeploy",
       "summary": "seed:prod is chained after migrations by the compose migrate one-shot, so it runs on EVERY deploy, and every seeder used a merge-upsert (ensure). Idempotent but destructive: the second deploy would have reset regiment.setup_complete, overwritten the name/mission/accent the owner customized, UNLINKED every rank and medal from its real Discord role (linked:false), flipped discord_bot_settings.bot_enabled back off, reset the entire role-permission matrix, and nulled the Owner's Discord profile, joined_at and last_seen_at. Nothing failed loudly - the configuration simply reverted. Split MainSeeder into two tiers: code-owned reference catalogs (accent tones, audit actions) still refresh every deploy; everything an admin owns is gated on a greenfield database, detected by the regiment row existing. Role permissions stay in tier 1 but provision row-by-row via a new insert-only provision() helper, keyed on the immutable (role, capability) enum pair - so a capability added in a later release still gets its default grant while admin edits survive. Per-row provisioning is NOT safe for ranks/medals, whose natural keys (name, title) are user-editable: a renamed rank would not be found and would be re-created as a duplicate, hence the greenfield gate for those.",
-      "status": "review",
+      "status": "deployed",
       "type": "fix",
       "size": "M",
       "sizeWeight": 3,
@@ -9534,9 +9572,9 @@
       "skippedByClaude": [
         "Left dev/e2e connecting as root - the least-privilege DB accounts (T-0139) are wired in the prod overlay only, to keep the blast radius off the documented local e2e procedure."
       ],
-      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
       "createdAt": "2026-07-20T20:15:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T20:15:00Z",
@@ -9544,6 +9582,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented this session"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged in PR #19 and live in production; PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9551,7 +9596,7 @@
       "id": "T-0139",
       "title": "Least-privilege MySQL accounts; stop serving traffic as root",
       "summary": "Plan 1.5. A docker-entrypoint-initdb.d script creates lords_app (SELECT/INSERT/UPDATE/DELETE on the one schema, used by the long-lived API) and lords_migrate (ALL on the one schema, used only by the one-shot migrate container which exits before the API starts). root remains only for the container healthcheck and mysqldump. An RCE in the API process can no longer DROP a table, read mysql.user or GRANT itself anything. Two traps cost real debugging time and are documented: (1) the mysql entrypoint SOURCES a non-executable initdb file, so a bare 'set -euo pipefail' applies to the entrypoint's own shell and 'set -u' kills docker_process_sql (which tests \"$1\" with no args) at line 248 - init aborted, MySQL started perfectly healthy, and the accounts were SILENTLY ABSENT; fixed with a subshell function body and no -u. (2) initdb runs only when the data directory is empty, so changing APP_DB_PASSWORD in .env later does nothing to MySQL and rotation needs an explicit ALTER USER.",
-      "status": "review",
+      "status": "deployed",
       "type": "infra",
       "size": "S",
       "sizeWeight": 2,
@@ -9581,8 +9626,8 @@
           "status": "passed"
         },
         {
-          "desc": "POST-DEPLOY: the api authenticates as lords_app and the migrate one-shot as lords_migrate against a real first boot",
-          "status": "pending"
+          "desc": "POST-DEPLOY: the api authenticates as lords_app and the migrate one-shot as lords_migrate against a real first boot -- PASSED at go-live: /api/health/ready reports database:up, and the api's DB_USERNAME is lords_app, so the DML account authenticated on a real first boot; the migrate one-shot completed as lords_migrate (migrations applied + greenfield seed ran) before the api started",
+          "status": "passed"
         }
       ],
       "regressionRisk": [
@@ -9593,9 +9638,9 @@
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
       "createdAt": "2026-07-20T20:15:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T20:15:00Z",
@@ -9603,6 +9648,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented this session"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged in PR #19 and live in production; PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9610,7 +9662,7 @@
       "id": "T-0140",
       "title": "Provision the OVH box: bootstrap script, prod .env, config sync",
       "summary": "Plan Phase 3 step 10, automated as deploy/bootstrap.sh - idempotent and re-runnable, never overwriting .env, backup.env or rclone.conf. It preflights docker and systemd linger, installs the three helper scripts to ~/bin, installs rclone WITHOUT root (unzip is absent from a minimal Debian 13 and pulling it in would need root, so it falls back to python3 -m zipfile), generates all five secrets on the box with openssl rand (hex throughout - the DB passwords get interpolated into single-quoted SQL literals by the initdb script, where a quote or backslash would break the statement), writes a 0600 .env from a documented template, installs the systemd user units, and reports exactly which values still need a human. Nothing needs root: the deploy account owns the docker socket and linger is enabled. Crucially it re-checks for placeholder markers SEPARATELY from 'docker compose config', because compose only asserts a ${VAR:?} is non-empty and placeholder text is non-empty - a .env full of placeholders passes compose config and then fails at runtime as an invalid Discord client or a 401 from R2.",
-      "status": "review",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
@@ -9645,8 +9697,8 @@
           "status": "passed"
         },
         {
-          "desc": "POST-DEPLOY: full stack up after the 8 required values are filled in",
-          "status": "pending"
+          "desc": "POST-DEPLOY: full stack up after the 8 required values are filled in -- PASSED at go-live: all four containers up, api healthy, after the owner filled the 8 values",
+          "status": "passed"
         }
       ],
       "regressionRisk": [
@@ -9660,9 +9712,9 @@
         "Did not add ~/bin to PATH in ~/.profile - Debian's default .profile already does this when ~/bin exists, but only from the next login; bootstrap warns instead of editing the user's shell config.",
         "Did not install unzip, or anything else needing root - the whole deploy account is deliberately root-free."
       ],
-      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
       "createdAt": "2026-07-20T20:15:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T20:15:00Z",
@@ -9670,6 +9722,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented this session"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged in PR #19 and live in production; PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9677,7 +9736,7 @@
       "id": "T-0141",
       "title": "Manual production deploy: forced-command key + workflow_dispatch workflow",
       "summary": "Plan Phase 4. bin/lords-deploy is the ONLY thing the CI key may do, installed as an SSH forced command with restrict,no-pty,no-*-forwarding. $SSH_ORIGINAL_COMMAND is parsed against a fixed allowlist and never executed, so a stolen CI credential can roll images and nothing else. It flock-serializes (both repos can merge at once), pins the resolved tags into .env so a reboot or a later manual 'up -d' cannot drift back to :latest, does a stop-then-start recreate (never rolling - the Discord gateway runs in-process, so two overlapping api containers mean two gateway connections on one bot token and duplicate role grants to real members), and polls /api/health/ready from INSIDE the container because the api publishes no host port in prod. It deliberately does NOT auto-roll-back: migrations have already run when readiness fails, so reverting the image alone would leave an old binary on a new schema. The plan's intended gate - a protected environment with required reviewers - turns out to need GitHub Pro on a private repo, so the same guarantee is bought free with a workflow_dispatch-only deploy workflow. ONE workflow rolls BOTH images from the backend repo, which discharges the cross-repo lockstep requirement by construction rather than by discipline. Also splits IMAGE_TAG into API_IMAGE_TAG/WEB_IMAGE_TAG - the two images come from different repos with different SHAs, so one shared tag could only ever be correct for one of them and a pinned rollback would have resolved to a non-existent tag on the other.",
-      "status": "review",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
@@ -9713,8 +9772,8 @@
           "status": "passed"
         },
         {
-          "desc": "POST-DEPLOY: an end-to-end run of the Deploy to production workflow rolls both images and reports ready",
-          "status": "pending"
+          "desc": "POST-DEPLOY: an end-to-end run of the Deploy to production workflow rolls both images and reports ready -- PASSED at go-live: run 29781571948 succeeded in 49s, rolled both images, api reported healthy",
+          "status": "passed"
         },
         {
           "desc": "POST-DEPLOY: two consecutive deploys leave exactly one api container and one gateway connection",
@@ -9733,9 +9792,9 @@
         "DEPLOY_SSH_KEY was NOT set as a GitHub secret by me - moving a private key into a third party is the owner's call. The exact one-liner is in the handoff and deploy/README.md.",
         "Left the deploy trigger manual rather than on-merge, per the owner's choice."
       ],
-      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
       "createdAt": "2026-07-20T20:15:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T20:15:00Z",
@@ -9743,6 +9802,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented this session"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged in PR #19 and live in production; PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
         }
       ]
     },
@@ -9750,7 +9816,7 @@
       "id": "T-0142",
       "title": "Nightly database backups to R2 with a real restore drill",
       "summary": "Plan Phase 5. bin/lords-backup runs mysqldump --single-transaction --quick from inside the db container, through zstd, to r2:lords-backups via rclone, on a systemd USER timer at 03:30 UTC - deliberately before the 04:30 unattended-upgrades reboot window, with Persistent=true so a missed night runs on next boot. A user timer rather than a system one because linger is enabled and the deploy account already owns the docker socket and the .env, so backups need no root. It checks BOTH halves of the pipe: a mysqldump auth failure exits non-zero while still writing a short, perfectly valid .zst - exactly the backup that looks fine for months and restores to nothing. It also enforces an absolute size floor, refuses a dump more than 50% smaller than the largest stored one, and verifies the archive decompresses and ends with mysqldump's completion marker before uploading. The heartbeat is pinged ONLY on the success path, so the monitor alerts on its absence - the only way to catch the timer silently not running at all. bin/lords-restore-drill restores the newest backup into a scratch schema, diffs table and row counts against live, drops the scratch schema and prints the wall-clock time, which is the RTO. It is safe against production: it never writes to lords_dashboard.",
-      "status": "review",
+      "status": "deployed",
       "type": "infra",
       "size": "M",
       "sizeWeight": 3,
@@ -9803,9 +9869,9 @@
         "No R2 lifecycle rule; retention is enforced client-side by 'rclone delete --min-age'. A server-side rule would survive the box being lost.",
         "Backups are not encrypted at rest beyond R2's own - the dump contains encrypted Discord tokens but plaintext PII."
       ],
-      "lastTouchedCommit": "1fbf34da94c73ccb6fa233b7aa5d57d6570fadc6",
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
       "createdAt": "2026-07-20T20:15:00Z",
-      "updatedAt": "2026-07-20T20:15:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
       "history": [
         {
           "at": "2026-07-20T20:15:00Z",
@@ -9813,6 +9879,68 @@
           "to": "review",
           "by": "claude",
           "note": "implemented this session"
+        },
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged in PR #19 and live in production; PRODUCTION GO-LIVE 2026-07-20 (deploy workflow run 29781571948, both images at :latest). Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok, database:up}, /api/docs 404 (Swagger gated out of prod), SPA serving."
+        }
+      ]
+    },
+    {
+      "id": "T-0143",
+      "title": "Document the infrastructure map and the contributor workflow",
+      "summary": "Two reference documents written after go-live. docs/INFRASTRUCTURE.md is the 'where is everything' map: the seven systems and which credential opens each, the request / upload / deploy / backup paths, the on-box layout, the DB account split, a credential inventory recording location and blast radius (no values), a what-survives-what table for down -v vs a box rebuild, and the open items including the unenforced guild membership and the GuildMemberAdd guild filter. CONTRIBUTING.md is the day-to-day flow: two-repo layout, local setup, the branch/PR/CI loop, the isolated-e2e-database procedure with the OWNER_DISCORD_ID= requirement, migrations (including that the squashed InitialSchema means old databases must be dropped not migrated), THE TWO-TIER SEEDING RULE, cross-repo lockstep, the manual deploy path, and the traps that have actually cost time. Also corrects the stale README intro, which still described the project as a first milestone with the Discord bot out of scope, and adds a documentation index to README and CLAUDE.md.",
+      "status": "review",
+      "type": "docs",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "documentation",
+      "subfeature": "developer-onboarding",
+      "repo": "",
+      "paths": [
+        "docs/INFRASTRUCTURE.md",
+        "CONTRIBUTING.md",
+        "README.md",
+        "CLAUDE.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "every relative link in the new and edited docs resolves to a real file",
+          "status": "passed"
+        },
+        {
+          "desc": "markdown is outside the repo's prettier scope (src/test TS only) and CI runs no format check, so the docs are left as authored rather than reflowed",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "These documents record facts that will drift: the go-live date, the verified-at-go-live table, the credential inventory and the open-items list. In particular the seeding-tier rule in CONTRIBUTING.md and the unenforced-guild-membership note in INFRASTRUCTURE.md describe current behaviour, not a guarantee - if either is changed, the docs become actively misleading rather than merely stale.",
+          "status": "open",
+          "notedAt": "2026-07-20T22:10:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not document the frontend's internal architecture - that belongs in the frontend repo's own CLAUDE.md, which already covers it.",
+        "Did not add a markdown linter or extend prettier to cover .md; that is a repo-wide convention change and was not asked for."
+      ],
+      "lastTouchedCommit": "cef6270b64487edb3241c5d6a3bc772b4e8edf4f",
+      "createdAt": "2026-07-20T22:10:00Z",
+      "updatedAt": "2026-07-20T22:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-20T22:10:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "written after production go-live"
         }
       ]
     }

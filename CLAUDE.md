@@ -3,8 +3,15 @@
 ## Project Overview
 NestJS 11 + TypeORM + MySQL 8 REST API for the **Lords Regiment Dashboard** (Holdfast: Nations at War). It backs the Angular frontend: Discord OAuth2 sign-in → JWT, plus feature modules (members/roster, ranks & medals, events, gallery, applications, audit, settings) built on the normalized schema. Base URL `http://localhost:3000/api` (Swagger at `/api/docs`).
 
+**Live in production at `https://lordsofholdfast.com` since 2026-07-20** (OVH VPS-1 + Cloudflare R2).
+
+- `CONTRIBUTING.md` — the developer flow: local setup, testing (incl. the isolated e2e database), migrations, **the two-tier seeding rule**, cross-repo changes, and how code reaches production.
 - `README.md` — tech stack, local setup (`npm run db:setup`, `start:dev`), auth flow, and route table.
 - `SCHEMA.md` — the complete normalized (3NF) schema: 28 tables, enums, junctions, soft-deletes, the authorization matrix, and the auth/identity model.
+- `docs/INFRASTRUCTURE.md` — what runs where, request/upload/deploy/backup paths, the credential inventory, and what survives `down -v`.
+- `deploy/README.md` — the production runbook: deploy, roll back, restore, troubleshoot.
+
+⚠️ **`seed:prod` runs on every production deploy.** Seeders are split into two tiers in `MainSeeder` — code-owned reference catalogs that refresh every time, and greenfield-only provisioning for anything an admin can edit. Adding a seeder means choosing a tier; the tests do not choose for you, and a tier-2 seeder will never run against the existing production database. See `CONTRIBUTING.md`.
 
 ## Companion Repository — Angular Frontend
 
