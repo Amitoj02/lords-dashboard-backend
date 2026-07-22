@@ -8,7 +8,9 @@ import { CreateEventDto } from './create-event.dto';
  * arrays are provided they REPLACE the existing child rows wholesale (omit them to
  * leave a collection untouched). `recurrenceActive` is update-only: set it false to
  * permanently stop a recurring template; `recurrenceCadence` (inherited) can be
- * changed to alter the cadence going forward.
+ * changed to alter the cadence going forward. A naive `startsAt`/`endsAt` is
+ * resolved in the timezone sent with the same request, or the event's stored one
+ * when none is sent.
  */
 export class UpdateEventDto extends PartialType(CreateEventDto) {
   @ApiPropertyOptional({

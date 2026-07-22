@@ -31,6 +31,7 @@ import { EventPlatform } from './entities/event-platform.entity';
 import { EventRsvp } from './entities/event-rsvp.entity';
 import { EventTag } from './entities/event-tag.entity';
 import { RegimentEvent } from './entities/event.entity';
+import { resolveEventInstant } from './event-time';
 
 /** New arrays of child rows to REPLACE on an event (undefined = leave untouched). */
 interface ChildCollections {
@@ -43,6 +44,16 @@ interface ChildCollections {
 interface SerializeOptions {
   includeServer: boolean;
   memberId?: string | null;
+}
+
+/**
+ * Collapse an omitted-or-empty optional server field to null on write (T-0151).
+ * A form that clears the input posts `''`, which would otherwise persist as an
+ * empty string on `server_name`/`server_region` and leave clients unable to
+ * branch on "unset" with a single null check.
+ */
+function blankToNull(value: string | null | undefined): string | null {
+  return value === undefined || value === null || value === '' ? null : value;
 }
 
 /**
@@ -270,17 +281,19 @@ export class EventsService {
         bannerUrl: dto.bannerKey
           ? this.storage.resolveKeyToPublicUrl(user, dto.bannerKey, StorageTarget.EventBanner)
           : null,
-        startsAt: new Date(dto.startsAt),
-        endsAt: dto.endsAt ? new Date(dto.endsAt) : null,
+        // Naive wall-clock input is anchored to the event's own zone, never the
+        // process zone (T-0156); an offset-qualified input stays verbatim.
+        startsAt: resolveEventInstant(dto.startsAt, timezone),
+        endsAt: dto.endsAt ? resolveEventInstant(dto.endsAt, timezone) : null,
         timezone,
         isRecurring: cadence !== null ? true : (dto.isRecurring ?? false),
         recurrenceRule: dto.recurrenceRule ?? null,
         recurrenceCadence: cadence,
         recurrenceActive: cadence !== null,
         recurrenceTemplateId: null,
-        serverName: dto.serverName ?? null,
-        serverPassword: dto.serverPassword ?? null,
-        serverRegion: dto.serverRegion ?? null,
+        serverName: blankToNull(dto.serverName),
+        serverPassword: blankToNull(dto.serverPassword),
+        serverRegion: blankToNull(dto.serverRegion),
         status: EventStatus.Upcoming,
         expectedAttendance: dto.expectedAttendance ?? null,
         attendanceGoal: dto.attendanceGoal ?? null,
@@ -332,6 +345,12 @@ export class EventsService {
     const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
     const before = this.snapshot(event);
 
+    // The zone every wall-clock timestamp in THIS request resolves against: an
+    // incoming timezone wins, otherwise the event's stored one — so a PATCH that
+    // touches only endsAt still lands in the event's zone (T-0156). Resolved
+    // before the field assignments below, which overwrite event.timezone.
+    const timezone = dto.timezone ?? event.timezone;
+
     const saved = await this.dataSource.transaction(async (manager) => {
       const eventRepo = manager.getRepository(RegimentEvent);
 
@@ -342,9 +361,13 @@ export class EventsService {
           ? this.storage.resolveKeyToPublicUrl(user, dto.bannerKey, StorageTarget.EventBanner)
           : null;
       }
-      if (dto.startsAt !== undefined) event.startsAt = new Date(dto.startsAt);
-      if (dto.endsAt !== undefined) event.endsAt = dto.endsAt ? new Date(dto.endsAt) : null;
-      if (dto.timezone !== undefined) event.timezone = dto.timezone;
+      if (dto.startsAt !== undefined) event.startsAt = resolveEventInstant(dto.startsAt, timezone);
+      if (dto.endsAt !== undefined) {
+        event.endsAt = dto.endsAt ? resolveEventInstant(dto.endsAt, timezone) : null;
+      }
+      // Assigning the same value the timestamps resolved against keeps the row
+      // self-consistent (and never writes null into a NOT NULL column).
+      if (dto.timezone !== undefined) event.timezone = timezone;
       if (dto.isRecurring !== undefined) event.isRecurring = dto.isRecurring;
       if (dto.recurrenceRule !== undefined) event.recurrenceRule = dto.recurrenceRule ?? null;
       // Setting a cadence turns the row into an ACTIVE template (mirrors create,
@@ -361,10 +384,12 @@ export class EventsService {
         }
       }
       if (dto.recurrenceActive !== undefined) event.recurrenceActive = dto.recurrenceActive;
-      if (dto.serverName !== undefined) event.serverName = dto.serverName ?? null;
-      // Written as plaintext; the column transformer encrypts it at rest.
-      if (dto.serverPassword !== undefined) event.serverPassword = dto.serverPassword ?? null;
-      if (dto.serverRegion !== undefined) event.serverRegion = dto.serverRegion ?? null;
+      if (dto.serverName !== undefined) event.serverName = blankToNull(dto.serverName);
+      // Written as plaintext; the column transformer encrypts it at rest. Note the
+      // transformer only nulls an empty password on the way OUT — collapsing here
+      // is what keeps the saved entity (and its projection) honest.
+      if (dto.serverPassword !== undefined) event.serverPassword = blankToNull(dto.serverPassword);
+      if (dto.serverRegion !== undefined) event.serverRegion = blankToNull(dto.serverRegion);
       if (dto.expectedAttendance !== undefined)
         event.expectedAttendance = dto.expectedAttendance ?? null;
       if (dto.attendanceGoal !== undefined) event.attendanceGoal = dto.attendanceGoal ?? null;

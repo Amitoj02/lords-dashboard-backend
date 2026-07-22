@@ -43,9 +43,10 @@ export interface EventDtoOptions {
 /**
  * Projection of a {@link RegimentEvent}. The same class serves both the public
  * view and the authenticated member view: public callers get only the safe
- * fields (server name/region/password are REDACTED — omitted entirely), while
- * `includeServer` unlocks the member-only fields. The server password is NEVER
- * projected here; it is only returned by the dedicated reveal endpoint.
+ * fields (server name/region/password are REDACTED — omitted entirely, leaving
+ * just the boolean presence flags), while `includeServer` unlocks the
+ * member-only fields. The server password is NEVER projected here; it is only
+ * returned by the dedicated reveal endpoint.
  */
 export class EventDto {
   @ApiProperty({ format: 'uuid' })
@@ -102,6 +103,21 @@ export class EventDto {
   @ApiProperty({ description: 'Number of confirmed attendees' })
   attendeesCount: number;
 
+  @ApiProperty({
+    description:
+      'Whether a game server is bound to this event. Public: the name itself stays ' +
+      'redacted, but the flag lets an unauthenticated calendar say "server details for members".',
+  })
+  hasServerName: boolean;
+
+  @ApiProperty({
+    description:
+      'Whether a server password is set. Public: the password is never projected anywhere ' +
+      '(only the capability-gated reveal endpoint returns it); the flag lets the UI badge a ' +
+      'protected event and hide the reveal control on passwordless ones.',
+  })
+  hasServerPassword: boolean;
+
   // ── Member-only fields (present only when includeServer is set) ──────────────
 
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
@@ -109,13 +125,6 @@ export class EventDto {
 
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   serverRegion?: string | null;
-
-  @ApiPropertyOptional({
-    description:
-      'Whether a server password is set (member view only) — lets the UI hide the ' +
-      'password/reveal controls for passwordless events. The password itself is never projected.',
-  })
-  hasServerPassword?: boolean;
 
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   recurrenceRule?: string | null;
@@ -177,7 +186,8 @@ export class EventDto {
   /**
    * Build the projection from an event plus its batched child collections/counts.
    * Public callers pass `includeServer: false` (the default), which omits every
-   * member-only field so the raw entity's server binding never leaks. When
+   * member-only field so the raw entity's server binding never leaks — only the
+   * `hasServerName`/`hasServerPassword` presence flags cross that line. When
    * `includeServer` is set the server name/region are added — but never the
    * password, which only the reveal endpoint returns.
    */
@@ -200,13 +210,17 @@ export class EventDto {
     dto.tags = opts.tags;
     dto.rsvpCounts = opts.rsvpCounts;
     dto.attendeesCount = opts.attendeesCount;
+    // Presence flags carry no secret, so they are part of the PUBLIC projection
+    // (T-0151) — without them the public calendar cannot tell a password-protected
+    // event from a plain one. An empty string counts as unset: the encryption
+    // transformer nulls an empty password on its way to the DB, so an in-memory
+    // '' (a just-saved entity, a legacy row) is never a real binding.
+    dto.hasServerName = !!event.serverName;
+    dto.hasServerPassword = !!event.serverPassword;
 
     if (opts.includeServer) {
-      dto.serverName = event.serverName;
-      dto.serverRegion = event.serverRegion;
-      // Non-sensitive presence flag — the password value itself is NEVER projected
-      // (only the dedicated reveal endpoint returns it).
-      dto.hasServerPassword = event.serverPassword != null;
+      dto.serverName = event.serverName || null;
+      dto.serverRegion = event.serverRegion || null;
       dto.recurrenceRule = event.recurrenceRule;
       dto.recurrenceCadence = event.recurrenceCadence;
       dto.recurrenceActive = event.recurrenceActive;

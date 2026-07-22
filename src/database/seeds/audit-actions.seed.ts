@@ -144,6 +144,31 @@ const ACTIONS = [
   { code: 'settings.dissolve', label: 'Regiment dissolved', defaultSeverity: AuditSeverity.Error },
   { code: 'user.ban', label: 'User banned', defaultSeverity: AuditSeverity.Warn },
   { code: 'auth.sign_in', label: 'User signed in', defaultSeverity: AuditSeverity.Info },
+  // Public presentation + legal copy (T-0147 / T-0149). Editing a legal
+  // document is Warn, not Info: the privacy policy is a compliance artefact,
+  // so "who changed it and when" must stand out in the ledger.
+  {
+    code: 'regiment.presentation.update',
+    label: 'Public presentation updated',
+    defaultSeverity: AuditSeverity.Info,
+  },
+  {
+    code: 'regiment.document.update',
+    label: 'Legal document updated',
+    defaultSeverity: AuditSeverity.Warn,
+  },
+  // Bulk Discord role re-link (T-0158 / T-0160). ONE row per bulk action, not
+  // one per member — a 600-member fan-out must not flood the ledger.
+  {
+    code: 'discord.role.relink',
+    label: 'Discord role re-linked in bulk',
+    defaultSeverity: AuditSeverity.Warn,
+  },
+  {
+    code: 'discord.role.relink.cancel',
+    label: 'Bulk Discord role re-link cancelled',
+    defaultSeverity: AuditSeverity.Warn,
+  },
 ];
 
 export async function seedAuditActions(ds: DataSource): Promise<void> {

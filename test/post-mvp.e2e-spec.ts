@@ -12,6 +12,7 @@ import { MemberRole } from '../src/common/enums';
 import { RegimentEvent } from '../src/events/entities/event.entity';
 import { GalleryItem } from '../src/gallery/entities/gallery-item.entity';
 import { Member } from '../src/members/entities/member.entity';
+import { RegimentDocument } from '../src/regiments/entities/regiment-document.entity';
 
 /**
  * End-to-end coverage of the POST-MVP feature modules against a real MySQL
@@ -173,6 +174,166 @@ describe('Post-MVP feature modules (e2e)', () => {
 
       // The SAME applicant token now passes the guard (cache invalidated live).
       await request(server()).get('/api/members').set(bearer(applicantToken)).expect(200);
+    });
+  });
+
+  // ── Public presentation + legal documents (T-0145/0147/0148/0149) ──────────
+  describe('regiment presentation + legal documents', () => {
+    it('grants the new manage_regiment_details capability to the Owner by default', async () => {
+      const matrix = await request(server())
+        .get('/api/settings/permissions')
+        .set(bearer(ownerToken))
+        .expect(200);
+
+      // The capability axis is derived from the enum, so a new member shows up
+      // here automatically — this pins the DEFAULT GRANT, which is not derived.
+      expect(matrix.body.capabilities).toContain('manage_regiment_details');
+      expect(matrix.body.matrix.Owner.manage_regiment_details).toBe(true);
+      expect(matrix.body.matrix.Member.manage_regiment_details).toBe(false);
+    });
+
+    it('exposes presign policy for the three new upload targets', async () => {
+      const res = await request(server())
+        .get('/api/storage/policy')
+        .set(bearer(ownerToken))
+        .expect(200);
+      const byTarget = Object.fromEntries(
+        res.body.targets.map((t: { target: string }) => [t.target, t]),
+      );
+
+      expect(byTarget['regiment-hero-banner'].maxImageMb).toBe(12);
+      expect(byTarget['regiment-login-banner'].maxImageMb).toBe(12);
+      expect(byTarget['gallery-poster'].maxImageMb).toBe(4);
+      // Backgrounds take the raster set, NOT the icon set: an SVG background is
+      // rendered through a CSS url(), which is not the <img> secure-static mode
+      // that makes SVG safe for rank/medal icons.
+      expect(byTarget['regiment-hero-banner'].acceptedMimeTypes).not.toContain('image/svg+xml');
+    });
+
+    it('round-trips the presentation fields and publishes them ANONYMOUSLY', async () => {
+      await request(server())
+        .patch('/api/settings/presentation')
+        .set(bearer(ownerToken))
+        .send({
+          charterQuote: 'Hold the line.',
+          charterQuoteAttribution: 'The Charter',
+          heroOverlayDensity: 0,
+        })
+        .expect(200);
+
+      // The landing AND sign-in pages are both logged-out surfaces, so this has
+      // to be readable with no token at all.
+      const profile = await request(server()).get('/api/regiment').expect(200);
+      expect(profile.body.presentation.charterQuote).toBe('Hold the line.');
+      expect(profile.body.presentation.charterQuoteAttribution).toBe('The Charter');
+      // 0 is a meaningful density; a truthiness projection would drop it to null
+      // and the client would silently re-apply the stylesheet default.
+      expect(profile.body.presentation.heroOverlayDensity).toBe(0);
+    });
+
+    it('rejects an out-of-range overlay density and an over-long quote', async () => {
+      await request(server())
+        .patch('/api/settings/presentation')
+        .set(bearer(ownerToken))
+        .send({ heroOverlayDensity: 101 })
+        .expect(400);
+
+      await request(server())
+        .patch('/api/settings/presentation')
+        .set(bearer(ownerToken))
+        .send({ charterQuote: 'x'.repeat(501) })
+        .expect(400);
+    });
+
+    it('rejects a banner key from another target’s namespace', async () => {
+      await request(server())
+        .patch('/api/settings/presentation')
+        .set(bearer(ownerToken))
+        .send({
+          heroBannerKey: 'gallery/regiment-1/member-1/00000000-0000-0000-0000-000000000000.png',
+        })
+        .expect(400);
+    });
+
+    it('serves all three legal documents anonymously, unset until edited', async () => {
+      // The e2e database persists across runs and earlier cases in this file
+      // write documents, so clear the table first: the contract under test is
+      // "never edited ⇒ null", which is only observable from a clean slate.
+      await dataSource.getRepository(RegimentDocument).createQueryBuilder().delete().execute();
+
+      const before = await request(server()).get('/api/regiment/documents').expect(200);
+      expect(before.body.map((d: { slug: string }) => d.slug)).toEqual([
+        'terms',
+        'privacy',
+        'guidelines',
+      ]);
+      // Never-edited is `null`, not an error and not an empty page: the client
+      // renders its shipped fallback, so a live site always has a privacy policy.
+      expect(before.body.every((d: { body: string | null }) => d.body === null)).toBe(true);
+
+      await request(server())
+        .put('/api/settings/documents/privacy')
+        .set(bearer(ownerToken))
+        .send({ body: '# Privacy\n\nWe keep your Discord id.' })
+        .expect(200);
+
+      const after = await request(server()).get('/api/regiment/documents').expect(200);
+      const privacy = after.body.find((d: { slug: string }) => d.slug === 'privacy');
+      expect(privacy.body).toContain('We keep your Discord id.');
+      // The anonymous projection must not carry edit attribution.
+      expect(privacy).not.toHaveProperty('updatedByName');
+    });
+
+    it('stores hostile markup verbatim — the renderer, not the API, is the XSS boundary', async () => {
+      await request(server())
+        .put('/api/settings/documents/terms')
+        .set(bearer(ownerToken))
+        .send({ body: '<script>alert(1)</script>' })
+        .expect(200);
+
+      // The API deliberately does NOT strip: the document is Markdown, and the
+      // SPA's escape-first renderer is what makes it inert. Asserting the raw
+      // round-trip here keeps that contract explicit rather than accidental.
+      const docs = await request(server()).get('/api/regiment/documents').expect(200);
+      const terms = docs.body.find((d: { slug: string }) => d.slug === 'terms');
+      expect(terms.body).toBe('<script>alert(1)</script>');
+    });
+
+    it('clears a document back to the shipped fallback when saved blank', async () => {
+      await request(server())
+        .put('/api/settings/documents/guidelines')
+        .set(bearer(ownerToken))
+        .send({ body: '   ' })
+        .expect(200);
+
+      const docs = await request(server()).get('/api/regiment/documents').expect(200);
+      const guidelines = docs.body.find((d: { slug: string }) => d.slug === 'guidelines');
+      expect(guidelines.body).toBeNull();
+    });
+
+    it('rejects an unknown document slug', async () => {
+      await request(server())
+        .put('/api/settings/documents/refunds')
+        .set(bearer(ownerToken))
+        .send({ body: 'x' })
+        .expect(400);
+    });
+
+    it('403s a caller without manage_regiment_details on every write route', async () => {
+      await request(server())
+        .get('/api/settings/presentation')
+        .set(bearer(applicantToken))
+        .expect(403);
+      await request(server())
+        .patch('/api/settings/presentation')
+        .set(bearer(applicantToken))
+        .send({ charterQuote: 'nope' })
+        .expect(403);
+      await request(server())
+        .put('/api/settings/documents/terms')
+        .set(bearer(applicantToken))
+        .send({ body: 'nope' })
+        .expect(403);
     });
   });
 
@@ -451,13 +612,25 @@ describe('Post-MVP feature modules (e2e)', () => {
     let selfToken: string;
     let appId: string;
 
-    const cleanupSelf = async (): Promise<void> => {
+    // Extra identities used by the projection-split cases below. They need the
+    // same teardown as SELF_DISCORD_ID: the e2e database persists across runs, so
+    // a leftover application would make the second run 409 on submit.
+    const USER_MSG_DISCORD_ID = '900900900900900904';
+    const NO_WIPE_DISCORD_ID = '900900900900900905';
+
+    const cleanupIdentity = async (discordUserId: string): Promise<void> => {
       const identity = await dataSource
         .getRepository(DiscordIdentity)
-        .findOne({ where: { discordUserId: SELF_DISCORD_ID } });
+        .findOne({ where: { discordUserId } });
       if (identity) {
         await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
         await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+    };
+
+    const cleanupSelf = async (): Promise<void> => {
+      for (const id of [SELF_DISCORD_ID, USER_MSG_DISCORD_ID, NO_WIPE_DISCORD_ID]) {
+        await cleanupIdentity(id);
       }
     };
 
@@ -543,6 +716,103 @@ describe('Post-MVP feature modules (e2e)', () => {
         .set(bearer(selfToken))
         .send({})
         .expect(403);
+    });
+
+    // ── Staff-only fields must not reach the applicant (T-0153/T-0154/T-0155) ──
+    // The unit tests mock the repository, so only a real MySQL round-trip proves
+    // the projection split AND that decided_by_member_id actually survives a save.
+    it('the applicant projection never carries staff-only fields, on any of its three routes', async () => {
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(selfToken))
+        .expect(200);
+
+      // The block above already declined this application WITH a reason, so if
+      // the projection leaked, these would be populated right now.
+      for (const field of [
+        'moderatorNote',
+        'declineReason',
+        'decidedByName',
+        'decidedByAvatarUrl',
+        'decidedByMemberId',
+      ]) {
+        expect(mine.body.application).not.toHaveProperty(field);
+      }
+    });
+
+    it('surfaces the officer’s user message — and only that — to the applicant', async () => {
+      // Fresh identity: the one above is blocked and frozen.
+      const profile = { ...selfProfile, id: USER_MSG_DISCORD_ID, username: 'e2e_usermsg' };
+      const token = (await signIn(profile)).token;
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(token))
+        .send({ ...validApp, inGameName: 'UserMsg1' })
+        .expect(201);
+
+      // The staff console posts every box on every decision, blanks included.
+      await request(server())
+        .post(`/api/applications/${created.body.id}/decline`)
+        .set(bearer(ownerToken))
+        .send({
+          reason: 'internal: too few hours',
+          note: 'staff eyes only',
+          discordDmMessage: 'Thanks for applying — try again after 50 hours.',
+        })
+        .expect(200);
+
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(token))
+        .expect(200);
+
+      expect(mine.body.application.userMessage).toBe(
+        'Thanks for applying — try again after 50 hours.',
+      );
+      expect(mine.body.application).not.toHaveProperty('moderatorNote');
+      expect(mine.body.application).not.toHaveProperty('declineReason');
+
+      // Staff still see everything, and the decision is attributed.
+      const staff = await request(server())
+        .get(`/api/applications/${created.body.id}`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      expect(staff.body.moderatorNote).toBe('staff eyes only');
+      expect(staff.body.declineReason).toBe('internal: too few hours');
+      expect(staff.body.userMessage).toBe('Thanks for applying — try again after 50 hours.');
+
+      // The regression the unit tests cannot see: TypeORM lets a LOADED relation
+      // outrank the raw FK on save, so a naive eager-load would have written
+      // decided_by_member_id = NULL on every decision. Only a real save proves it.
+      expect(staff.body.decidedByMemberId).not.toBeNull();
+      expect(staff.body.decidedByName).toBeTruthy();
+    });
+
+    it('a second decision with blank boxes does not wipe the stored text', async () => {
+      const profile = { ...selfProfile, id: NO_WIPE_DISCORD_ID, username: 'e2e_nowipe' };
+      const token = (await signIn(profile)).token;
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(token))
+        .send({ ...validApp, inGameName: 'NoWipe1' })
+        .expect(201);
+
+      await request(server())
+        .post(`/api/applications/${created.body.id}/hold`)
+        .set(bearer(ownerToken))
+        .send({ note: 'needs a reference', discordDmMessage: 'We are checking your references.' })
+        .expect(200);
+
+      // The console re-posts every field on the next action, blanks included, and
+      // @IsOptional() does not strip ''. Blank must mean "not provided".
+      const held = await request(server())
+        .post(`/api/applications/${created.body.id}/hold`)
+        .set(bearer(ownerToken))
+        .send({ note: '', discordDmMessage: '' })
+        .expect(200);
+
+      expect(held.body.moderatorNote).toBe('needs a reference');
+      expect(held.body.userMessage).toBe('We are checking your references.');
     });
 
     it('owner unblocks → applicant is no longer blocked', async () => {

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DiscordModule } from '../discord/discord.module';
 import { StorageModule } from '../storage/storage.module';
 import { Medal } from './entities/medal.entity';
 import { MemberMedal } from './entities/member-medal.entity';
@@ -13,7 +14,13 @@ import { MedalsService } from './medals.service';
  * provided globally by AuditModule, so it is not imported here.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Medal, MemberMedal]), StorageModule],
+  imports: [
+    TypeOrmModule.forFeature([Medal, MemberMedal]),
+    StorageModule,
+    // For the bulk role re-link when a medal's Discord role changes (T-0158).
+    // DiscordModule exports DiscordSyncService and does not import this one.
+    DiscordModule,
+  ],
   controllers: [MedalsController],
   providers: [MedalsService],
   exports: [MedalsService],

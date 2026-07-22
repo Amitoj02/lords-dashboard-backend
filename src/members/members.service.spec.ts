@@ -412,7 +412,10 @@ describe('MembersService', () => {
     });
 
     it('changeRank moves the member, records a service entry and an audit row', async () => {
-      memberRepo.findOne.mockResolvedValue(buildMember());
+      // A move UP the ladder (precedence 5 → 4): lower number = higher rank.
+      memberRepo.findOne.mockResolvedValue(
+        buildMember({ rank: { id: 'rank-1', name: 'Lieutenant', precedence: 5 } as Rank }),
+      );
       rankRepo.findOne.mockResolvedValue({
         id: 'rank-9',
         name: 'Captain',
@@ -431,8 +434,68 @@ describe('MembersService', () => {
       // The projection surfaces the new rank's insignia image URL.
       expect(dto.rankImageUrl).toBe('https://cdn/captain.png');
       expect(serviceRecordRepo.save).toHaveBeenCalledTimes(1);
+      expect(serviceRecordRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'promotion' }),
+      );
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'member.rank.change', regimentId: REGIMENT }),
+      );
+    });
+
+    it('changeRank records a demotion when the new rank sits lower on the ladder (T-0157)', async () => {
+      // Sergeant (precedence 2) → Captain (precedence 4): a HIGHER precedence
+      // number is a step DOWN, so this must not be filed as a promotion.
+      memberRepo.findOne.mockResolvedValue(buildMember());
+      rankRepo.findOne.mockResolvedValue({ id: 'rank-9', name: 'Captain', precedence: 4 });
+
+      await service.changeRank(
+        'member-1',
+        { rankId: 'rank-9', note: 'missed three musters' },
+        user({ memberId: 'moderator-1', role: MemberRole.Admin }),
+        null,
+      );
+
+      // The entry still names the NEW rank and keeps the moderator's note.
+      expect(serviceRecordRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'demotion',
+          event: 'Rank set to Captain',
+          note: 'missed three musters',
+        }),
+      );
+      // The audit row is unchanged by the demotion labelling.
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'member.rank.change',
+          before: expect.objectContaining({ rank: 'Sergeant' }),
+          after: { rankId: 'rank-9', rank: 'Captain' },
+        }),
+      );
+    });
+
+    it('changeRank records a promotion when the member had no previous rank (T-0157)', async () => {
+      // Nothing to compare against ⇒ the entry cannot claim a direction, so it
+      // stays a promotion rather than being labelled a demotion by default.
+      memberRepo.findOne.mockResolvedValue(buildMember({ rank: undefined }));
+      rankRepo.findOne.mockResolvedValue({ id: 'rank-9', name: 'Recruit', precedence: 10 });
+
+      await service.changeRank('member-1', { rankId: 'rank-9' }, user({ memberId: 'mod' }), null);
+
+      expect(serviceRecordRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'promotion' }),
+      );
+    });
+
+    it('changeRank re-assigning the member’s current rank stays a promotion (T-0157)', async () => {
+      // Equal precedence is only reachable by re-assigning the same rank (the
+      // ladder is uniquely indexed on regiment+precedence); it is not a demotion.
+      memberRepo.findOne.mockResolvedValue(buildMember());
+      rankRepo.findOne.mockResolvedValue({ id: 'rank-1', name: 'Sergeant', precedence: 2 });
+
+      await service.changeRank('member-1', { rankId: 'rank-1' }, user({ memberId: 'mod' }), null);
+
+      expect(serviceRecordRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'promotion' }),
       );
     });
 
@@ -461,7 +524,12 @@ describe('MembersService', () => {
       // buildMember defaults to MemberRole.Member, so assigning Member is a no-op.
       memberRepo.findOne.mockResolvedValue(buildMember());
 
-      const dto = await service.changeRole('member-1', { role: MemberRole.Member }, user(), null);
+      const dto = await service.changeRole(
+        'member-1',
+        { role: MemberRole.Member },
+        user({ memberId: 'moderator-1' }),
+        null,
+      );
 
       // Projection is still returned, but nothing security-relevant is written.
       expect(dto.role).toBe(MemberRole.Member);
@@ -478,7 +546,7 @@ describe('MembersService', () => {
       const dto = await service.changeRole(
         'member-1',
         { role: MemberRole.Admin },
-        user({ role: MemberRole.Owner }),
+        user({ memberId: 'owner-member', role: MemberRole.Owner }),
         '1.2.3.4',
       );
 
@@ -520,7 +588,12 @@ describe('MembersService', () => {
     it('suspend sets suspendedUntil + audits when the date is in the future', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
       const until = new Date(Date.now() + 86_400_000).toISOString();
-      await service.suspend('member-1', { until, reason: 'cooldown' }, user(), '9.9.9.9');
+      await service.suspend(
+        'member-1',
+        { until, reason: 'cooldown' },
+        user({ memberId: 'moderator-1' }),
+        '9.9.9.9',
+      );
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'member.suspend' }),
       );
@@ -535,7 +608,12 @@ describe('MembersService', () => {
 
     it('ban marks bannedAt + Inactive and audits member.ban', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember({ bannedAt: null }));
-      const dto = await service.ban('member-1', { reason: 'grief' }, user(), null);
+      const dto = await service.ban(
+        'member-1',
+        { reason: 'grief' },
+        user({ memberId: 'moderator-1' }),
+        null,
+      );
       expect(dto.bannedAt).not.toBeNull();
       expect(dto.status).toBe(MemberStatus.Inactive);
       expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'member.ban' }));
@@ -582,6 +660,98 @@ describe('MembersService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'member.unsuspend', regimentId: REGIMENT }),
       );
+    });
+
+    // A non-owner moderator holding manage_roles is the real exposure: the owner
+    // guard does not cover them, so nothing else stops them locking themselves
+    // out of the seat they hold (T-0150).
+    describe('self-moderation guard (T-0150)', () => {
+      const moderator = () => user({ memberId: 'moderator-1', role: MemberRole.Admin });
+      const self = () => buildMember({ id: 'moderator-1', role: MemberRole.Admin });
+
+      it('a moderator cannot suspend themselves, and the rejection writes no audit row', async () => {
+        memberRepo.findOne.mockResolvedValue(self());
+        const until = new Date(Date.now() + 86_400_000).toISOString();
+
+        await expect(
+          service.suspend('moderator-1', { until }, moderator(), null),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+
+        expect(memberRepo.save).not.toHaveBeenCalled();
+        expect(serviceRecordRepo.save).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+        expect(sessionContext.invalidateSessions).not.toHaveBeenCalled();
+      });
+
+      it('a moderator cannot ban themselves, and the rejection writes no audit row', async () => {
+        memberRepo.findOne.mockResolvedValue(self());
+
+        await expect(service.ban('moderator-1', {}, moderator(), null)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+
+        expect(memberRepo.save).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+        expect(discordSync.enqueueMemberBanRole).not.toHaveBeenCalled();
+      });
+
+      it('a moderator cannot demote themselves, and the rejection writes no audit row', async () => {
+        memberRepo.findOne.mockResolvedValue(self());
+
+        await expect(
+          service.changeRole('moderator-1', { role: MemberRole.Member }, moderator(), null),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+
+        expect(memberRepo.save).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+        expect(sessionContext.invalidate).not.toHaveBeenCalled();
+      });
+
+      it('a self-targeted role change is refused even when it would have been a no-op', async () => {
+        // The guard runs before the same-role short-circuit, so self-targeting
+        // this endpoint always answers 403 rather than sometimes 200.
+        memberRepo.findOne.mockResolvedValue(self());
+
+        await expect(
+          service.changeRole('moderator-1', { role: MemberRole.Admin }, moderator(), null),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+      });
+
+      it('identifies self by member id, not by Discord id or display name', async () => {
+        // Same Discord account details, different member row — still a valid
+        // moderation target; matching on anything but the member id would 403.
+        memberRepo.findOne.mockResolvedValue(buildMember({ bannedAt: null }));
+
+        await service.ban(
+          'member-1',
+          {},
+          user({ memberId: 'moderator-1', discordUserId: 'discord-1' }),
+          null,
+        );
+
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'member.ban' }),
+        );
+      });
+
+      it('leaves moderation of another member fully intact', async () => {
+        memberRepo.findOne.mockResolvedValue(
+          buildMember({ role: MemberRole.Admin, bannedAt: null, discordIdentityId: 'identity-9' }),
+        );
+
+        await service.ban(
+          'member-1',
+          { reason: 'grief' },
+          user({ memberId: 'owner-member', role: MemberRole.Owner }),
+          null,
+        );
+
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'member.ban' }),
+        );
+        expect(sessionContext.invalidateSessions).toHaveBeenCalledWith('identity-9');
+        expect(discordSync.enqueueMemberBanRole).toHaveBeenCalledTimes(1);
+      });
     });
   });
 

@@ -263,8 +263,12 @@ Do not "simplify" them.
 
 ## Project state
 
-This repo uses **Blueframe**. `.blueframe/state.json` is the machine-readable
-source of truth for task status, open questions, test plans and regression risks.
+This repo uses [**Blueframe**](https://github.com/Amitoj02/blueframe), an open-
+source project-state tracker. Install it from that repository — you don't need it
+to build or test this project, only to read and reconcile the task state below.
+
+`.blueframe/state.json` is the machine-readable source of truth for task status,
+open questions, test plans and regression risks.
 
 - Read it at the start of a session — `in_progress` tasks, open `questions`,
   pending `testPlan` items, and `notesForNextSession`.
@@ -274,4 +278,11 @@ source of truth for task status, open questions, test plans and regression risks
 - Keep the file **ASCII-escaped** (`ensure_ascii`) or every em-dash line shows up
   as a spurious diff. `testPlan` status must be `pending`, `passed` or `failed`.
 
-`bf serve lords-dashboard` gives combined state across both repos.
+`bf serve lords-dashboard` gives combined state across both repos. The workspace
+groups this repo with the SPA — see
+[its CONTRIBUTING guide](https://github.com/Amitoj02/lords-regiment-dashboard/blob/main/CONTRIBUTING.md)
+for the frontend half of the same flow.
+
+The file is plain JSON, so you can read and edit it without installing anything;
+`bf` is a convenience, not a gate. Full schema and CLI reference live in the
+[Blueframe repository](https://github.com/Amitoj02/blueframe).

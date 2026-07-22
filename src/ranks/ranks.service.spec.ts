@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { MemberRole } from '../common/enums';
@@ -73,6 +74,7 @@ describe('RanksService', () => {
     assertIconWithinDimensions: jest.fn().mockResolvedValue(undefined),
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
+  const discordSync = { enqueueRoleRelink: jest.fn().mockResolvedValue(null) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -110,6 +112,7 @@ describe('RanksService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: StorageService, useValue: storage },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
 
@@ -327,6 +330,56 @@ describe('RanksService', () => {
       expect(dto.linked).toBe(true);
       expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'rank.update' }));
     });
+
+    it('fans the change out to every holder, passing the role that is being replaced', async () => {
+      rankRepo.findOne.mockResolvedValue(buildRank({ discordRoleId: 'old-role', linked: true }));
+      memberRepo.count.mockResolvedValue(0);
+      discordSync.enqueueRoleRelink.mockResolvedValue({ batchId: 'batch-1', affected: 42 });
+
+      await service.linkDiscord(user(), 'rank-1', { discordRoleId: 'new-role' }, null);
+
+      expect(discordSync.enqueueRoleRelink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: 'rank',
+          subjectId: 'rank-1',
+          previousRoleId: 'old-role',
+          nextRoleId: 'new-role',
+        }),
+      );
+    });
+
+    it('writes ONE relink audit row for the whole action, carrying the member count', async () => {
+      // A row per member would bury the ladder's history under one admin click.
+      rankRepo.findOne.mockResolvedValue(buildRank({ discordRoleId: 'old-role', linked: true }));
+      memberRepo.count.mockResolvedValue(0);
+      discordSync.enqueueRoleRelink.mockResolvedValue({ batchId: 'batch-1', affected: 42 });
+
+      await service.linkDiscord(user(), 'rank-1', { discordRoleId: 'new-role' }, null);
+
+      const relinkRows = audit.record.mock.calls.filter(
+        (c) => (c[0] as { action: string }).action === 'discord.role.relink',
+      );
+      expect(relinkRows).toHaveLength(1);
+      expect(relinkRows[0][0]).toEqual(
+        expect.objectContaining({
+          before: { discordRoleId: 'old-role' },
+          after: { discordRoleId: 'new-role' },
+          detail: expect.stringContaining('42 member role updates'),
+        }),
+      );
+    });
+
+    it('records no relink row when nothing was queued (bot off / no holders)', async () => {
+      rankRepo.findOne.mockResolvedValue(buildRank());
+      memberRepo.count.mockResolvedValue(0);
+      discordSync.enqueueRoleRelink.mockResolvedValue(null);
+
+      await service.linkDiscord(user(), 'rank-1', { discordRoleId: 'new-role' }, null);
+
+      expect(audit.record).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'discord.role.relink' }),
+      );
+    });
   });
 
   describe('unlinkDiscord', () => {
@@ -345,6 +398,18 @@ describe('RanksService', () => {
       expect(dto.linked).toBe(false);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'rank.update', detail: 'Unlinked from Discord role.' }),
+      );
+    });
+
+    it('fans out an unlink as a re-link to nothing, so holders LOSE the old role', async () => {
+      rankRepo.findOne.mockResolvedValue(buildRank({ discordRoleId: 'old-role', linked: true }));
+      memberRepo.count.mockResolvedValue(0);
+      discordSync.enqueueRoleRelink.mockResolvedValue({ batchId: 'batch-1', affected: 7 });
+
+      await service.unlinkDiscord(user(), 'rank-1', null);
+
+      expect(discordSync.enqueueRoleRelink).toHaveBeenCalledWith(
+        expect.objectContaining({ previousRoleId: 'old-role', nextRoleId: null }),
       );
     });
   });

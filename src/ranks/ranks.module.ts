@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DiscordModule } from '../discord/discord.module';
 import { Member } from '../members/entities/member.entity';
 import { StorageModule } from '../storage/storage.module';
 import { Rank } from './entities/rank.entity';
@@ -13,7 +14,13 @@ import { RanksService } from './ranks.service';
  * AuditModule, so it is not imported here.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Rank, Member]), StorageModule],
+  imports: [
+    TypeOrmModule.forFeature([Rank, Member]),
+    StorageModule,
+    // For the bulk role re-link when a rank's Discord role changes (T-0158).
+    // DiscordModule exports DiscordSyncService and does not import this one.
+    DiscordModule,
+  ],
   controllers: [RanksController],
   providers: [RanksService],
   exports: [RanksService],

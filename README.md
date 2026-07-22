@@ -106,6 +106,27 @@ reverse-proxies `/api`. See [`project-plan/DEPLOY.md`](./project-plan/DEPLOY.md)
 The JWT is returned both as an `access_token` cookie and on the success-redirect query string for the
 SPA handoff. Every route is guarded by a global `JwtAuthGuard`; `@Public()` opts routes out.
 
+### Public presentation, legal documents and bulk role sync
+
+| Method | Route | Auth | Purpose |
+| ------ | ----- | ---- | ------- |
+| GET | `/api/regiment` | public | Regiment profile **+ the `presentation` slice** (landing/login banners, quotes, overlay densities) |
+| GET | `/api/regiment/documents` | public | Terms, privacy and community guidelines as Markdown; `body: null` = never edited |
+| GET/PATCH | `/api/settings/presentation` | `manage_regiment_details` | Read/write the presentation slice; banners are submitted as storage **keys** |
+| GET | `/api/settings/documents` | `manage_regiment_details` | The three documents plus who last saved each |
+| PUT | `/api/settings/documents/:slug` | `manage_regiment_details` | Replace one document (`terms` \| `privacy` \| `guidelines`) |
+| GET | `/api/discord/relink/:batchId` | `edit_ranks_medals` | Live progress / terminal summary of a bulk Discord role re-link |
+| POST | `/api/discord/relink/:batchId/cancel` | `edit_ranks_medals` | Stop further expansion; already-applied members stay, run reports as partial |
+
+The two anonymous routes exist *because* their consumers are logged-out surfaces: the sign-in page and
+the legal pages are reached before authentication, so they cannot read anything behind a capability
+gate. `manage_regiment_details` (T-0145) is a **publishing** right, deliberately separate from
+`manage_settings` — see [`SCHEMA.md`](SCHEMA.md#role_permissions-authorization-matrix--source-of-truth).
+
+Legal documents are stored as **Markdown and are not sanitised server-side**: the SPA renders them
+through a strict escape-first renderer, which is the security boundary. Do not add a second,
+divergent sanitiser here.
+
 ## NPM scripts
 
 | Script | Purpose |

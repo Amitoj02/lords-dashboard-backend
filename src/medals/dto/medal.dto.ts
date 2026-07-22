@@ -48,13 +48,35 @@ export class MedalDto {
   @ApiProperty({ description: 'ISO timestamp the medal was last updated' })
   updatedAt: string;
 
+  @ApiProperty({
+    nullable: true,
+    required: false,
+    description:
+      'Set ONLY on the link/unlink responses, and only when that change actually queued a bulk ' +
+      'role re-sync (T-0158). It is the handle the admin UI polls for progress and cancels with ' +
+      'via /api/discord/relink/:batchId — without it the client has just triggered a background ' +
+      'run it has no way to name. Absent on every list/read projection.',
+  })
+  relinkBatchId?: string | null;
+
   /**
    * Build the projection from a medal plus its derived award counts. The caller
    * is responsible for computing `holdersCount` (distinct members) and
    * `awardsCount` (total award rows) — usually batched for the whole list.
+   *
+   * `relinkBatchId` is omitted rather than nulled when no bulk run was queued, so
+   * the field never appears on the list projection at all.
    */
-  static from(medal: Medal, holdersCount: number, awardsCount: number): MedalDto {
+  static from(
+    medal: Medal,
+    holdersCount: number,
+    awardsCount: number,
+    relinkBatchId?: string | null,
+  ): MedalDto {
     const dto = new MedalDto();
+    if (relinkBatchId) {
+      dto.relinkBatchId = relinkBatchId;
+    }
     dto.id = medal.id;
     dto.title = medal.title;
     dto.glyph = medal.glyph;

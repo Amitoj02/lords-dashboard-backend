@@ -7,10 +7,12 @@ import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
 import { RolePermission } from '../authz/entities/role-permission.entity';
-import { AuditSeverity, Capability, MemberRole } from '../common/enums';
+import { AuditSeverity, Capability, MemberRole, RegimentDocumentSlug } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
+import { RegimentDocument } from '../regiments/entities/regiment-document.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
+import { StorageService } from '../storage/storage.service';
 import { SettingsService } from './settings.service';
 
 const REGIMENT = 'regiment-1';
@@ -63,6 +65,15 @@ const buildSettings = (overrides: Partial<RegimentSettings> = {}): RegimentSetti
   eventDefaultStartTime: null,
   eventDefaultNotifyBefore: null,
   auditRetentionMonths: 12,
+  // Presentation (T-0146): unset means "render the shipped copy".
+  heroBannerUrl: null,
+  loginBannerUrl: null,
+  charterQuote: null,
+  charterQuoteAttribution: null,
+  loginQuote: null,
+  loginQuoteAttribution: null,
+  heroOverlayDensity: null,
+  loginOverlayDensity: null,
   createdAt: new Date('2024-01-01T00:00:00.000Z'),
   updatedAt: new Date('2024-01-01T00:00:00.000Z'),
   ...overrides,
@@ -83,6 +94,17 @@ describe('SettingsService', () => {
   const regimentRepo = { findOne: jest.fn(), save: jest.fn(), softDelete: jest.fn() };
   const permissionRepo = { find: jest.fn(), create: jest.fn(), save: jest.fn() };
   const memberRepo = { findOne: jest.fn() };
+  const documentRepo = {
+    find: jest.fn().mockResolvedValue([]),
+    findOne: jest.fn(),
+    create: jest.fn((data: Partial<RegimentDocument>) => ({ ...data })),
+    save: jest.fn((doc: RegimentDocument) => Promise.resolve(doc)),
+  };
+  // Mirrors the real namespace check: a key outside the target's prefix throws,
+  // which is what stops an arbitrary URL being published as the public hero.
+  const storage = {
+    resolveKeyToPublicUrl: jest.fn((_user: unknown, key: string) => `https://cdn.example/${key}`),
+  };
   const authz = { invalidate: jest.fn() };
   const audit = { record: jest.fn() };
   const sessionContext = { invalidate: jest.fn() };
@@ -105,6 +127,8 @@ describe('SettingsService', () => {
         { provide: getRepositoryToken(Regiment), useValue: regimentRepo },
         { provide: getRepositoryToken(RolePermission), useValue: permissionRepo },
         { provide: getRepositoryToken(Member), useValue: memberRepo },
+        { provide: getRepositoryToken(RegimentDocument), useValue: documentRepo },
+        { provide: StorageService, useValue: storage },
         { provide: AuthzService, useValue: authz },
         { provide: AuditService, useValue: audit },
         { provide: SessionContextService, useValue: sessionContext },
@@ -172,6 +196,135 @@ describe('SettingsService', () => {
       expect(regimentRepo.save).not.toHaveBeenCalled();
       expect(settingsRepo.save).not.toHaveBeenCalled();
       expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('updatePresentation (T-0147)', () => {
+    beforeEach(() => {
+      regimentRepo.findOne.mockResolvedValue(buildRegiment());
+      settingsRepo.findOne.mockResolvedValue(buildSettings());
+    });
+
+    it('resolves a banner KEY through the namespace validator, never a raw URL', async () => {
+      const dto = await service.updatePresentation(
+        user(),
+        { heroBannerKey: 'regiments/regiment-1/hero/abc.png' },
+        null,
+      );
+
+      // The whole point of accepting a key rather than a URL: the caller cannot
+      // publish an arbitrary origin as the regiment's public background.
+      expect(storage.resolveKeyToPublicUrl).toHaveBeenCalledWith(
+        expect.anything(),
+        'regiments/regiment-1/hero/abc.png',
+        'regiment-hero-banner',
+      );
+      expect(dto.heroBannerUrl).toBe('https://cdn.example/regiments/regiment-1/hero/abc.png');
+    });
+
+    it('propagates the namespace rejection instead of persisting a foreign key', async () => {
+      storage.resolveKeyToPublicUrl.mockImplementationOnce(() => {
+        throw new BadRequestException('Uploaded key is outside the expected namespace');
+      });
+
+      await expect(
+        service.updatePresentation(user(), { heroBannerKey: 'gallery/regiment-1/m/x.png' }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(settingsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('clears a banner when the key is explicitly null', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        buildSettings({ heroBannerUrl: 'https://cdn/old.png' }),
+      );
+
+      const dto = await service.updatePresentation(user(), { heroBannerKey: null }, null);
+
+      expect(dto.heroBannerUrl).toBeNull();
+      expect(storage.resolveKeyToPublicUrl).not.toHaveBeenCalled();
+    });
+
+    it('writes an overlay density of 0, which a truthiness check would drop', async () => {
+      // 0 is a meaningful value (a fully transparent scrim). The production
+      // guard is deliberately `!== undefined`, not a truthiness test.
+      const dto = await service.updatePresentation(user(), { heroOverlayDensity: 0 }, null);
+
+      expect(dto.heroOverlayDensity).toBe(0);
+      expect(settingsRepo.save).toHaveBeenCalled();
+    });
+
+    it('normalises a blank quote to null so "cleared" and "never set" are one state', async () => {
+      settingsRepo.findOne.mockResolvedValue(buildSettings({ charterQuote: 'Old words' }));
+
+      const dto = await service.updatePresentation(user(), { charterQuote: '' }, null);
+
+      // The client then has exactly one fallback branch instead of two.
+      expect(dto.charterQuote).toBeNull();
+    });
+
+    it('leaves untouched keys alone and skips the save + audit when nothing changed', async () => {
+      await service.updatePresentation(user(), {}, null);
+
+      expect(settingsRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('audits only the changed presentation keys', async () => {
+      await service.updatePresentation(user(), { loginQuote: 'Stand fast.' }, null);
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'regiment.presentation.update',
+          before: { loginQuote: null },
+          after: { loginQuote: 'Stand fast.' },
+        }),
+      );
+    });
+  });
+
+  describe('updateDocument (T-0149)', () => {
+    beforeEach(() => {
+      regimentRepo.findOne.mockResolvedValue(buildRegiment());
+      documentRepo.findOne.mockResolvedValue(null);
+    });
+
+    it('stores a blank body as NULL so the public page falls back to shipped copy', async () => {
+      // A live site must never serve an empty privacy policy.
+      const dto = await service.updateDocument(
+        user(),
+        RegimentDocumentSlug.Privacy,
+        { body: '   ' },
+        null,
+      );
+
+      expect(dto.body).toBeNull();
+    });
+
+    it('audits the body LENGTH, not the body', async () => {
+      await service.updateDocument(user(), RegimentDocumentSlug.Terms, { body: 'abcde' }, null);
+
+      // A 60k before/after pair on every save would bloat the ledger — and the
+      // Discord mirror of it — for no diagnostic gain.
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'regiment.document.update',
+          before: { length: 0 },
+          after: { length: 5 },
+        }),
+      );
+    });
+
+    it('records who saved the document', async () => {
+      memberRepo.findOne.mockResolvedValue({ id: 'member-1', inGameName: 'Jane' });
+
+      const dto = await service.updateDocument(
+        user(),
+        RegimentDocumentSlug.Guidelines,
+        { body: '# Rules' },
+        null,
+      );
+
+      expect(dto.updatedByName).toBe('Jane');
     });
   });
 

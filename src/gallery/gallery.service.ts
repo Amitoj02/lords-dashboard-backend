@@ -200,7 +200,8 @@ export class GalleryService {
    * Submit a gallery item. Forces Pending unless the regiment auto-approves
    * trusted staff (Owner/Admin) — enforcing the per-submission item count and
    * per-type size caps from regiment_settings first. Writes the item, its files
-   * and tagged members atomically, then audits the submission.
+   * and tagged members atomically, then audits the submission. A submission with
+   * no poster key simply stores no thumbnail.
    */
   async submit(
     user: AuthenticatedUser,
@@ -216,6 +217,15 @@ export class GalleryService {
     const settings = await this.settings.findOne({ where: { regimentId: user.regimentId } });
     const files = dto.files ?? [];
     this.assertWithinLimits(files, settings);
+
+    // The video poster frame (T-0152) is captured client-side and uploaded like
+    // any other asset, so it arrives as a KEY: resolving it through the poster
+    // namespace is the only thing standing between the item's thumbnail and an
+    // arbitrary attacker-chosen URL. Resolved before the transaction so a bad
+    // key fails the request before any row is written.
+    const posterUrl = dto.posterKey
+      ? this.storage.resolveKeyToPublicUrl(user, dto.posterKey, StorageTarget.GalleryPoster)
+      : null;
 
     const autoApprove = !!settings?.autoApproveTrustedMembers && TRUSTED_ROLES.includes(user.role);
     const now = new Date();
@@ -235,7 +245,7 @@ export class GalleryService {
           caption: dto.caption ?? null,
           type: dto.type,
           linkUrl: dto.linkUrl ?? null,
-          thumbnailUrl: dto.thumbnailUrl ?? null,
+          thumbnailUrl: posterUrl,
           status,
           declineReason: null,
           isDraft: false,
@@ -468,6 +478,13 @@ export class GalleryService {
       if (file.url) {
         await this.storage.deleteObject(file.url);
       }
+    }
+    // The poster frame (T-0152) is a stored object of its own, so it has to be
+    // purged with the media or it outlives the item it belonged to. deleteObject
+    // ignores anything outside the storage base, so a legacy externally-hosted
+    // thumbnail is a no-op here.
+    if (item.thumbnailUrl) {
+      await this.storage.deleteObject(item.thumbnailUrl);
     }
 
     await this.audit.record({

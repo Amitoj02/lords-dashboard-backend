@@ -19,6 +19,7 @@ import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
+import { ApplicantApplicationDto } from './dto/applicant-application.dto';
 import { ApplicationDto } from './dto/application.dto';
 import { ApplicationQueryDto } from './dto/application-query.dto';
 import { ApproveApplicationDto } from './dto/approve-application.dto';
@@ -43,6 +44,20 @@ function enrolledRoleFor(applicantType: ApplicantType): MemberRole {
 }
 
 /**
+ * Normalize an optional free-text decision field to "given" or "not given".
+ *
+ * The staff console posts every decision field on every decision, blank boxes
+ * included, and `@IsOptional()` does not strip an empty string — so `''` arrives
+ * as a real value. Collapsing blank to null is what lets the decision handlers
+ * treat "the officer typed nothing" as *leave the stored text alone* instead of
+ * overwriting an earlier note/reason/message with an empty string (T-0153).
+ */
+function givenText(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+/**
  * Recruitment applications: applicant self-submit + the staff review queue
  * (approve/decline/hold). Every query is scoped to the caller's regiment; the
  * single mutation that touches two tables (approve) runs in a transaction.
@@ -58,6 +73,8 @@ export class ApplicationsService {
     private readonly settings: Repository<RegimentSettings>,
     @InjectRepository(DiscordIdentity)
     private readonly identities: Repository<DiscordIdentity>,
+    @InjectRepository(Member)
+    private readonly members: Repository<Member>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
     // Drops the applicant's cached authorization context on approval so they
@@ -73,7 +90,10 @@ export class ApplicationsService {
    * (Applicant role). Honors the regiment's openRecruitment toggle, blocks a
    * second concurrent application, and flags re-applications.
    */
-  async submit(user: AuthenticatedUser, dto: CreateApplicationDto): Promise<ApplicationDto> {
+  async submit(
+    user: AuthenticatedUser,
+    dto: CreateApplicationDto,
+  ): Promise<ApplicantApplicationDto> {
     // An officer can permanently bar an identity from applying (T-0055); reject
     // before anything else so a blocked user can never create a new application.
     const identity = await this.identities.findOne({ where: { id: user.identityId } });
@@ -147,7 +167,7 @@ export class ApplicationsService {
 
     // TODO(audit): no `application.submit` action code exists in the seed; the
     // submit is an applicant self-action, so it is intentionally not audited.
-    return ApplicationDto.from(saved);
+    return ApplicantApplicationDto.from(saved);
   }
 
   /**
@@ -162,7 +182,7 @@ export class ApplicationsService {
     });
     const identity = await this.identities.findOne({ where: { id: user.identityId } });
     return {
-      application: application ? ApplicationDto.from(application) : null,
+      application: application ? ApplicantApplicationDto.from(application) : null,
       blocked: !!identity?.applicationsBlockedAt,
     };
   }
@@ -174,7 +194,10 @@ export class ApplicationsService {
    * queue (which is ordered by submittedAt) — the "within 48 hours" copy is
    * informational only, so this is safe.
    */
-  async updateMine(user: AuthenticatedUser, dto: UpdateMyApplicationDto): Promise<ApplicationDto> {
+  async updateMine(
+    user: AuthenticatedUser,
+    dto: UpdateMyApplicationDto,
+  ): Promise<ApplicantApplicationDto> {
     // A blocked applicant is frozen: they cannot edit (which would otherwise
     // re-bump them into the officer queue). Mirrors the submit() guard (T-0055).
     const identity = await this.identities.findOne({ where: { id: user.identityId } });
@@ -219,7 +242,7 @@ export class ApplicationsService {
     application.submittedAt = new Date();
 
     const saved = await this.applications.save(application);
-    return ApplicationDto.from(saved);
+    return ApplicantApplicationDto.from(saved);
   }
 
   /**
@@ -326,6 +349,9 @@ export class ApplicationsService {
       // Join the promoted member so the projection carries the applicant's live
       // identity (display name + avatar) without an N+1 (T-0129).
       .leftJoinAndSelect('a.promotedMember', 'promotedMember')
+      // Join the deciding staffer so the queue can attribute each decision
+      // without a per-row member lookup (T-0155).
+      .leftJoinAndSelect('a.decidedByMember', 'decidedByMember')
       .where('a.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('a.isDraft = :isDraft', { isDraft: false });
 
@@ -379,6 +405,13 @@ export class ApplicationsService {
       }
     }
 
+    // Blank in, nothing stored: an approval taken with an empty message box must
+    // not erase a message an earlier hold already sent this applicant (T-0153).
+    const userMessage = givenText(dto.discordDmMessage);
+    // Stamped before the transaction opens so the enlistment never waits on an
+    // unrelated read; the FK + relation it sets are persisted inside it.
+    await this.stampDecider(user, application);
+
     const { savedApplication, member } = await this.dataSource.transaction(async (manager) => {
       const rankRepo = manager.getRepository(Rank);
       const memberRepo = manager.getRepository(Member);
@@ -425,7 +458,7 @@ export class ApplicationsService {
       // silently discard the promotion. Keep the two in step — this also lets the
       // approve response carry the new member's live identity.
       application.promotedMember = member;
-      application.decidedByMemberId = user.memberId;
+      if (userMessage) application.discordDmMessage = userMessage;
       application.decidedAt = now;
       const savedApplication = await applicationRepo.save(application);
 
@@ -450,7 +483,7 @@ export class ApplicationsService {
       user.regimentId,
       application.discordIdentityId,
       'approve',
-      dto.discordDmMessage,
+      userMessage,
     );
 
     // The applicant is now a member: drop their cached (Applicant) context so
@@ -470,9 +503,18 @@ export class ApplicationsService {
     const application = await this.loadOrFail(user, id);
     this.assertDecidable(application);
 
+    // Each text field is only written when the officer actually typed one, so a
+    // decline taken with empty boxes cannot blank text a prior hold stored, nor
+    // persist '' where the column means "no reason given" (T-0153).
+    const reason = givenText(dto.reason);
+    const note = givenText(dto.note);
+    const userMessage = givenText(dto.discordDmMessage);
+
     application.status = ApplicationStatus.Declined;
-    application.declineReason = dto.reason ?? null;
-    application.decidedByMemberId = user.memberId;
+    if (reason) application.declineReason = reason;
+    if (note) application.moderatorNote = note;
+    if (userMessage) application.discordDmMessage = userMessage;
+    await this.stampDecider(user, application);
     application.decidedAt = new Date();
     const saved = await this.applications.save(application);
 
@@ -481,7 +523,9 @@ export class ApplicationsService {
       action: 'application.decline',
       actor: AuditService.actorFromUser(user, ip),
       target: { type: 'application', id: saved.id, label: saved.applicantName },
-      detail: dto.reason ?? null,
+      // The officer's rationale reaches us as `reason` or, from the console's
+      // shared note box, as `note` (T-0248) — audit whichever was filled in.
+      detail: reason ?? note,
     });
 
     // Best-effort decision DM to the applicant (never affects the decline).
@@ -489,7 +533,7 @@ export class ApplicationsService {
       user.regimentId,
       application.discordIdentityId,
       'decline',
-      dto.discordDmMessage,
+      userMessage,
     );
 
     return ApplicationDto.from(saved);
@@ -513,9 +557,15 @@ export class ApplicationsService {
       throw new ConflictException('Application already decided');
     }
 
+    // See decline(): blank means "not provided", so re-holding with empty boxes
+    // preserves the note and message the first hold stored (T-0153).
+    const note = givenText(dto.note);
+    const userMessage = givenText(dto.discordDmMessage);
+
     application.status = ApplicationStatus.Held;
-    application.moderatorNote = dto.note ?? application.moderatorNote;
-    application.decidedByMemberId = user.memberId;
+    if (note) application.moderatorNote = note;
+    if (userMessage) application.discordDmMessage = userMessage;
+    await this.stampDecider(user, application);
     const saved = await this.applications.save(application);
 
     await this.audit.record({
@@ -523,7 +573,7 @@ export class ApplicationsService {
       action: 'application.hold',
       actor: AuditService.actorFromUser(user, ip),
       target: { type: 'application', id: saved.id, label: saved.applicantName },
-      detail: dto.note ?? null,
+      detail: note,
     });
 
     // Best-effort decision DM to the applicant (never affects the hold).
@@ -531,7 +581,7 @@ export class ApplicationsService {
       user.regimentId,
       application.discordIdentityId,
       'hold',
-      dto.discordDmMessage,
+      userMessage,
     );
 
     return ApplicationDto.from(saved);
@@ -556,11 +606,8 @@ export class ApplicationsService {
       const discordUserId = identity?.discordUserId;
       if (!discordUserId) return;
 
-      const trimmed = customMessage?.trim();
       const content =
-        trimmed && trimmed.length > 0
-          ? trimmed
-          : await this.defaultDecisionMessage(regimentId, decision);
+        givenText(customMessage) ?? (await this.defaultDecisionMessage(regimentId, decision));
 
       await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
     } catch (error) {
@@ -593,13 +640,35 @@ export class ApplicationsService {
     const application = await this.applications.findOne({
       where: { id, regimentId: user.regimentId },
       // The identity carries the applications-block flag surfaced on the DTO (T-0128);
-      // the promoted member carries the applicant's live identity (T-0129).
-      relations: { discordIdentity: true, promotedMember: true },
+      // the promoted member carries the applicant's live identity (T-0129); the
+      // deciding staffer carries the decision attribution (T-0155).
+      relations: { discordIdentity: true, promotedMember: true, decidedByMember: true },
     });
     if (!application) {
       throw new NotFoundException('Application not found');
     }
     return application;
+  }
+
+  /**
+   * Stamp the deciding staffer onto an application about to be saved.
+   *
+   * `loadOrFail` hydrates `decidedByMember` — null while the application is
+   * undecided (T-0155) — and TypeORM lets a LOADED relation outrank the raw FK
+   * on save, the same trap documented for `promotedMember` in approve(). Setting
+   * only `decidedByMemberId` would therefore write decided_by_member_id = NULL
+   * and throw the attribution away, so the relation is resolved and kept in step
+   * (which also lets the decision response carry the decider's name/avatar). If
+   * the staffer's member row cannot be read the relation is left undefined —
+   * TypeORM skips undefined relations, so the FK alone still lands.
+   */
+  private async stampDecider(user: AuthenticatedUser, application: Application): Promise<void> {
+    application.decidedByMemberId = user.memberId;
+    application.decidedByMember = user.memberId
+      ? ((await this.members.findOne({
+          where: { id: user.memberId, regimentId: user.regimentId },
+        })) ?? undefined)
+      : null;
   }
 
   /** Guard a final decision: the application must still be Pending or Held. */

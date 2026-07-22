@@ -186,7 +186,10 @@ export class MembersController {
 
   @Post(':id/role')
   @RequireCapability(Capability.ManageRoles)
-  @ApiOperation({ summary: "Change a member's role" })
+  @ApiOperation({
+    summary: "Change a member's role",
+    description: 'Forbidden against the regiment owner or the caller themselves.',
+  })
   @ApiOkResponse({ type: MemberDto })
   changeRole(
     @Param('id', ParseShortIdPipe) id: string,
@@ -227,7 +230,10 @@ export class MembersController {
 
   @Post(':id/suspend')
   @RequireCapability(Capability.ManageRoles)
-  @ApiOperation({ summary: 'Suspend a member until a future date' })
+  @ApiOperation({
+    summary: 'Suspend a member until a future date',
+    description: 'Forbidden against the regiment owner or the caller themselves.',
+  })
   @ApiOkResponse({ type: MemberDto })
   suspend(
     @Param('id', ParseShortIdPipe) id: string,
@@ -240,7 +246,10 @@ export class MembersController {
 
   @Post(':id/ban')
   @RequireCapability(Capability.ManageRoles)
-  @ApiOperation({ summary: 'Ban a member (app-side)' })
+  @ApiOperation({
+    summary: 'Ban a member (app-side)',
+    description: 'Forbidden against the regiment owner or the caller themselves.',
+  })
   @ApiOkResponse({ type: MemberDto })
   ban(
     @Param('id', ParseShortIdPipe) id: string,

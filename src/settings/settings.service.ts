@@ -12,11 +12,21 @@ import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
 import { RolePermission } from '../authz/entities/role-permission.entity';
-import { AuditSeverity, Capability, MemberRole } from '../common/enums';
+import {
+  AuditSeverity,
+  Capability,
+  MemberRole,
+  RegimentDocumentSlug,
+  StorageTarget,
+} from '../common/enums';
 import { Member } from '../members/entities/member.entity';
+import { RegimentDocument } from '../regiments/entities/regiment-document.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
+import { StorageService } from '../storage/storage.service';
 import { PermissionsMatrixDto } from './dto/permissions-matrix.dto';
+import { PresentationDto, UpdatePresentationDto } from './dto/presentation.dto';
+import { AdminRegimentDocumentDto, UpdateRegimentDocumentDto } from './dto/regiment-document.dto';
 import { SettingsDto } from './dto/settings.dto';
 import { TransferDiscordDto, TransferOwnershipDto } from './dto/settings-actions.dto';
 import { UpdatePermissionsDto } from './dto/update-permissions.dto';
@@ -33,6 +43,31 @@ const REGIMENT_KEYS = [
   'establishedAt',
   'discordInviteUrl',
   'discordServerName',
+] as const;
+
+/**
+ * Public-presentation keys that copy straight across from the DTO (T-0147).
+ * Held SEPARATE from SETTINGS_KEYS on purpose: they live on the same row but
+ * behind a different capability (ManageRegimentDetails), so PATCH
+ * /api/settings must never be able to write them and PATCH
+ * /api/settings/presentation must never be able to write anything else.
+ *
+ * The two banners are NOT here — they arrive as storage keys and are resolved
+ * through the namespace validator first (see `applyBanner`).
+ */
+const PRESENTATION_KEYS = [
+  'charterQuote',
+  'charterQuoteAttribution',
+  'loginQuote',
+  'loginQuoteAttribution',
+  'heroOverlayDensity',
+  'loginOverlayDensity',
+] as const;
+
+/** DTO key -> (entity column, storage target) for the two banner uploads. */
+const PRESENTATION_BANNERS = [
+  ['heroBannerKey', 'heroBannerUrl', StorageTarget.RegimentHeroBanner],
+  ['loginBannerKey', 'loginBannerUrl', StorageTarget.RegimentLoginBanner],
 ] as const;
 
 /** Editable keys that live on the 1—1 regiment_settings row. */
@@ -74,6 +109,9 @@ export class SettingsService {
     private readonly permissions: Repository<RolePermission>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
+    @InjectRepository(RegimentDocument)
+    private readonly documents: Repository<RegimentDocument>,
+    private readonly storage: StorageService,
     private readonly authz: AuthzService,
     private readonly audit: AuditService,
     private readonly dataSource: DataSource,
@@ -149,6 +187,154 @@ export class SettingsService {
     return SettingsDto.from(regiment, settings);
   }
 
+  // ── Public presentation + legal documents (T-0147 / T-0149) ────────────────
+  // These sit behind ManageRegimentDetails, NOT ManageSettings. Editing the copy
+  // the whole internet sees is a publishing right, not an ownership right, so it
+  // can be delegated to whoever writes it without also handing over ownership
+  // transfer, the permission matrix or the Discord binding. Keeping them on
+  // their own routes is what makes the split enforceable: a ManageSettings
+  // holder cannot reach these, and a ManageRegimentDetails holder cannot reach
+  // PATCH /api/settings.
+
+  /** The presentation slice, for the admin editor. */
+  async getPresentation(user: AuthenticatedUser): Promise<PresentationDto> {
+    const settings = await this.settings.findOne({ where: { regimentId: user.regimentId } });
+    return PresentationDto.from(settings);
+  }
+
+  /**
+   * Apply only the provided presentation keys and audit the diff. An explicit
+   * `null` CLEARS a field back to the shipped default, so the guard is
+   * `!== undefined` rather than a truthiness test — otherwise a meaningful
+   * `0` overlay density would be silently unwritable.
+   */
+  async updatePresentation(
+    user: AuthenticatedUser,
+    dto: UpdatePresentationDto,
+    ip: string | null,
+  ): Promise<PresentationDto> {
+    const regiment = await this.loadRegiment(user.regimentId);
+    const existing = await this.settings.findOne({ where: { regimentId: user.regimentId } });
+    const settings = existing ?? this.settings.create(this.defaultSettings(user.regimentId));
+
+    const before: Record<string, unknown> = {};
+    const after: Record<string, unknown> = {};
+    const dtoRec = dto as Record<string, unknown>;
+    const setRec = settings as unknown as Record<string, unknown>;
+
+    for (const key of PRESENTATION_KEYS) {
+      if (dtoRec[key] === undefined) {
+        continue;
+      }
+      // Normalise blank to null so "cleared in the editor" and "never set" are
+      // one state, and the client needs exactly one fallback branch.
+      const value = dtoRec[key] === '' ? null : dtoRec[key];
+      if (value === setRec[key]) {
+        continue;
+      }
+      before[key] = setRec[key];
+      setRec[key] = value;
+      after[key] = value;
+    }
+
+    // Banners arrive as storage keys. Resolving through the namespace validator
+    // is what stops a caller from publishing an arbitrary URL — or another
+    // target's key — as the regiment's public background.
+    for (const [dtoKey, column, target] of PRESENTATION_BANNERS) {
+      const submitted = dtoRec[dtoKey];
+      if (submitted === undefined) {
+        continue;
+      }
+      const url =
+        typeof submitted === 'string' && submitted.length > 0
+          ? this.storage.resolveKeyToPublicUrl(user, submitted, target)
+          : null;
+      if (url === setRec[column]) {
+        continue;
+      }
+      before[column] = setRec[column];
+      setRec[column] = url;
+      after[column] = url;
+    }
+
+    if (Object.keys(after).length > 0) {
+      await this.settings.save(settings);
+      await this.audit.record({
+        regimentId: user.regimentId,
+        action: 'regiment.presentation.update',
+        actor: AuditService.actorFromUser(user, ip),
+        target: { type: 'regiment', id: regiment.id, label: regiment.name },
+        before,
+        after,
+      });
+    }
+
+    return PresentationDto.from(settings);
+  }
+
+  /**
+   * All three legal documents for the admin editor, including who last saved
+   * each. Always returns one entry per slug — a slug with no row yet projects as
+   * `body: null`, which the editor shows as "not yet written" and the public
+   * page renders as its shipped fallback.
+   */
+  async getDocuments(user: AuthenticatedUser): Promise<AdminRegimentDocumentDto[]> {
+    const rows = await this.documents.find({
+      where: { regimentId: user.regimentId },
+      relations: { updatedByMember: true },
+    });
+    return Object.values(RegimentDocumentSlug).map((slug) =>
+      AdminRegimentDocumentDto.fromAdmin(slug, rows.find((row) => row.slug === slug) ?? null),
+    );
+  }
+
+  /**
+   * Upsert one legal document. A blank body is stored as NULL rather than an
+   * empty string, so clearing the editor restores the shipped fallback instead
+   * of publishing an empty privacy policy.
+   *
+   * The audit entry records the slug and the body LENGTH, not the bodies
+   * themselves: a 60,000-character before/after pair on every save would bloat
+   * the ledger — and the Discord mirror of it — for no diagnostic gain.
+   */
+  async updateDocument(
+    user: AuthenticatedUser,
+    slug: RegimentDocumentSlug,
+    dto: UpdateRegimentDocumentDto,
+    ip: string | null,
+  ): Promise<AdminRegimentDocumentDto> {
+    const regiment = await this.loadRegiment(user.regimentId);
+    const existing = await this.documents.findOne({
+      where: { regimentId: user.regimentId, slug },
+    });
+
+    const body = dto.body && dto.body.trim().length > 0 ? dto.body : null;
+    const previousLength = existing?.body?.length ?? 0;
+
+    const document =
+      existing ?? this.documents.create({ regimentId: user.regimentId, slug, body: null });
+    document.body = body;
+    document.updatedByMemberId = user.memberId ?? null;
+    const saved = await this.documents.save(document);
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'regiment.document.update',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'regiment_document', id: slug, label: slug },
+      before: { length: previousLength },
+      after: { length: body?.length ?? 0 },
+      detail: `Updated the ${slug} document for ${regiment.name}`,
+    });
+
+    // Re-attach the author so the response carries their name: the entity we
+    // just saved has only the FK column populated, not the relation.
+    saved.updatedByMember = user.memberId
+      ? await this.members.findOne({ where: { id: user.memberId } })
+      : null;
+    return AdminRegimentDocumentDto.fromAdmin(slug, saved);
+  }
+
   /**
    * Mark first-run setup complete (T-0056): flips the regiment's
    * `setupComplete` flag so the Owner is no longer routed into first-run setup
@@ -221,7 +407,7 @@ export class SettingsService {
     // one transaction so a failure never leaves a partial, unaudited edit.
     const deduped = new Map<string, (typeof dto.changes)[number]>();
     for (const change of dto.changes) {
-      deduped.set(`${change.role} ${change.capability}`, change);
+      deduped.set(`${change.role}\u0000${change.capability}`, change);
     }
 
     await this.dataSource.transaction(async (manager) => {
@@ -461,6 +647,17 @@ export class SettingsService {
     settings.eventDefaultStartTime = null;
     settings.eventDefaultNotifyBefore = null;
     settings.auditRetentionMonths = 12;
+    // Presentation (T-0146): null everywhere means "use the shipped copy". The
+    // SPA owns the fallback, so an unconfigured regiment still renders a
+    // complete landing and login page.
+    settings.heroBannerUrl = null;
+    settings.loginBannerUrl = null;
+    settings.charterQuote = null;
+    settings.charterQuoteAttribution = null;
+    settings.loginQuote = null;
+    settings.loginQuoteAttribution = null;
+    settings.heroOverlayDensity = null;
+    settings.loginOverlayDensity = null;
     return settings;
   }
 }

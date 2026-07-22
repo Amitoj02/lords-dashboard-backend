@@ -38,12 +38,29 @@ export class RankDto {
   @ApiProperty({ description: 'ISO timestamp the rank was last updated' })
   updatedAt: string;
 
+  @ApiProperty({
+    nullable: true,
+    required: false,
+    description:
+      'Set ONLY on the link/unlink responses, and only when that change actually queued a bulk ' +
+      'role re-sync (T-0158). It is the handle the admin UI polls for progress and cancels with ' +
+      'via /api/discord/relink/:batchId — without it the client has just triggered a background ' +
+      'run it has no way to name. Absent on every list/read projection.',
+  })
+  relinkBatchId?: string | null;
+
   /**
    * Build the projection from a rank plus its computed holder count. The count is
    * derived server-side (a grouped members query), never read off the entity.
+   *
+   * `relinkBatchId` is omitted rather than nulled when no bulk run was queued, so
+   * the field never appears on the list projection at all.
    */
-  static from(rank: Rank, holdersCount: number): RankDto {
+  static from(rank: Rank, holdersCount: number, relinkBatchId?: string | null): RankDto {
     const dto = new RankDto();
+    if (relinkBatchId) {
+      dto.relinkBatchId = relinkBatchId;
+    }
     dto.id = rank.id;
     dto.name = rank.name;
     dto.imageUrl = rank.imageUrl;

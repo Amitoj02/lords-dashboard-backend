@@ -9,6 +9,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { StorageTarget } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { CreateMedalDto } from './dto/create-medal.dto';
 import { LinkDiscordDto } from './dto/link-discord.dto';
@@ -52,6 +53,9 @@ export class MedalsService {
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
     private readonly storage: StorageService,
+    // Re-linking a medal's Discord role has to reach everyone holding it; the
+    // fan-out is enqueued through the outbox, never applied inline (T-0158).
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   /**
@@ -218,7 +222,8 @@ export class MedalsService {
 
   /**
    * Map the medal to a Discord role and flag it linked. Recorded as a
-   * `medal.update` audit row (there is no dedicated link action code).
+   * `medal.update` audit row (there is no dedicated link action code), and — when
+   * the role actually changed — followed by a bulk re-link of every holder.
    */
   async linkDiscord(
     user: AuthenticatedUser,
@@ -228,6 +233,7 @@ export class MedalsService {
   ): Promise<MedalDto> {
     const medal = await this.loadOrFail(user, id);
     const before = this.snapshot(medal);
+    const previousRoleId = medal.discordRoleId;
 
     medal.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) medal.discordRoleName = dto.discordRoleName ?? null;
@@ -242,9 +248,13 @@ export class MedalsService {
       target: { type: 'medal', id: saved.id, label: saved.title },
       before,
       after: this.snapshot(saved),
+      // Mirrors RanksService.linkDiscord: the unlink side already said why it
+      // fired, so the link side must too or the ledger reads asymmetrically.
+      detail: `Linked to Discord role ${saved.discordRoleId}.`,
     });
+    const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
-    return this.project(saved);
+    return this.project(saved, relinkBatchId);
   }
 
   /**
@@ -255,6 +265,7 @@ export class MedalsService {
   async unlinkDiscord(user: AuthenticatedUser, id: string, ip: string | null): Promise<MedalDto> {
     const medal = await this.loadOrFail(user, id);
     const before = this.snapshot(medal);
+    const previousRoleId = medal.discordRoleId;
 
     medal.discordRoleId = null;
     medal.discordRoleName = null;
@@ -271,8 +282,50 @@ export class MedalsService {
       after: this.snapshot(saved),
       detail: 'Unlinked from Discord role.',
     });
+    // An unlink is a re-link to nothing: holders must LOSE the old role.
+    const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
-    return this.project(saved);
+    return this.project(saved, relinkBatchId);
+  }
+
+  /**
+   * Queue the bulk re-link for a medal whose Discord role mapping just changed
+   * and record the ONE audit row that stands for the whole action — who did it,
+   * which role left, which arrived, and how many members are affected. A row per
+   * holder would bury the catalogue's history under a single admin click.
+   *
+   * No-ops silently when nothing was queued (bot disabled, role syncing off, the
+   * role did not actually change, or nobody holds the medal).
+   */
+  private async fanOutRelink(
+    user: AuthenticatedUser,
+    medal: Medal,
+    previousRoleId: string | null,
+    ip: string | null,
+  ): Promise<string | null> {
+    const batch = await this.discordSync.enqueueRoleRelink({
+      regimentId: user.regimentId,
+      subject: 'medal',
+      subjectId: medal.id,
+      subjectLabel: medal.title,
+      previousRoleId,
+      nextRoleId: medal.discordRoleId,
+    });
+    if (!batch) return null;
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'discord.role.relink',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'medal', id: medal.id, label: medal.title },
+      before: { discordRoleId: previousRoleId },
+      after: { discordRoleId: medal.discordRoleId },
+      detail:
+        `Re-linked from Discord role ${previousRoleId ?? '(none)'} to ` +
+        `${medal.discordRoleId ?? '(none)'}; queued ${batch.affected} member role updates ` +
+        `(batch ${batch.batchId}).`,
+    });
+    return batch.batchId;
   }
 
   /** Load a regiment-scoped medal or throw 404. */
@@ -327,10 +380,10 @@ export class MedalsService {
   }
 
   /** Project a single saved medal, computing its current award counts. */
-  private async project(medal: Medal): Promise<MedalDto> {
+  private async project(medal: Medal, relinkBatchId?: string | null): Promise<MedalDto> {
     const stats = await this.awardStats([medal.id]);
     const s = stats.get(medal.id);
-    return MedalDto.from(medal, s?.holders ?? 0, s?.awards ?? 0);
+    return MedalDto.from(medal, s?.holders ?? 0, s?.awards ?? 0, relinkBatchId);
   }
 
   /** Field snapshot used for audit before/after values. */

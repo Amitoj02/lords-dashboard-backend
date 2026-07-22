@@ -87,6 +87,7 @@ describe('ApplicationsService', () => {
   let applications: MockRepo<Application>;
   let settings: MockRepo<RegimentSettings>;
   let identities: MockRepo<DiscordIdentity>;
+  let members: MockRepo<Member>;
   let audit: { record: jest.Mock };
   let sessionContext: { invalidate: jest.Mock };
   let discordSync: {
@@ -126,6 +127,15 @@ describe('ApplicationsService', () => {
         .mockResolvedValue({ id: 'identity-applicant', applicationsBlockedAt: null }),
       save: jest.fn((x: unknown) => Promise.resolve(x)),
     };
+    // The deciding staffer's own roster row, resolved on every decision so the
+    // decidedByMember relation is written in step with the FK (T-0155).
+    members = {
+      findOne: jest.fn().mockResolvedValue({
+        id: 'member-staff',
+        inGameName: 'Sergeant Steel',
+        avatarUrl: 'https://cdn/staff.png',
+      }),
+    };
     audit = { record: jest.fn() };
     sessionContext = { invalidate: jest.fn() };
     discordSync = {
@@ -163,6 +173,7 @@ describe('ApplicationsService', () => {
         { provide: getRepositoryToken(Application), useValue: applications },
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: getRepositoryToken(DiscordIdentity), useValue: identities },
+        { provide: getRepositoryToken(Member), useValue: members },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: SessionContextService, useValue: sessionContext },
@@ -361,8 +372,30 @@ describe('ApplicationsService', () => {
         }),
       );
       expect(result.application?.id).toBe('app-1');
-      expect(result.application?.declineReason).toBe('Too few hours');
       expect(result.blocked).toBe(false);
+    });
+
+    it('never hands the applicant the staff-only decision fields (T-0154)', async () => {
+      // The decline reason is an internal/audit datum: the only decision text an
+      // applicant may read is the message the officer wrote to them. This route
+      // is served TO the applicant, so a staff field appearing here is a leak —
+      // it used to return the full staff projection.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Declined,
+          declineReason: 'Too few hours',
+          moderatorNote: 'Smurfing on an alt, do not enlist',
+          discordDmMessage: 'Thanks for applying - try again after 50 more hours.',
+        }),
+      );
+
+      const result = await service.getMine(APPLICANT);
+
+      expect(result.application).not.toHaveProperty('declineReason');
+      expect(result.application).not.toHaveProperty('moderatorNote');
+      expect(result.application?.userMessage).toBe(
+        'Thanks for applying - try again after 50 more hours.',
+      );
     });
 
     it('returns a null application and blocked=true when never applied but blocked', async () => {
@@ -578,9 +611,57 @@ describe('ApplicationsService', () => {
       // loadOrFail must eager-load the identity relation for the flag to resolve.
       const result = await service.findOne(STAFF, 'app-1');
       expect(applications.findOne).toHaveBeenCalledWith(
-        expect.objectContaining({ relations: { discordIdentity: true, promotedMember: true } }),
+        expect.objectContaining({
+          relations: { discordIdentity: true, promotedMember: true, decidedByMember: true },
+        }),
       );
       expect(result.blocked).toBe(true);
+    });
+
+    it('attributes the decision to the deciding staffer (T-0155)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Declined,
+          decidedByMemberId: 'member-staff',
+          decidedByMember: {
+            id: 'member-staff',
+            inGameName: 'Sergeant Steel',
+            avatarUrl: 'https://cdn/staff.png',
+          } as Member,
+        }),
+      );
+
+      const result = await service.findOne(STAFF, 'app-1');
+
+      expect(result.decidedByName).toBe('Sergeant Steel');
+      expect(result.decidedByAvatarUrl).toBe('https://cdn/staff.png');
+    });
+
+    it('degrades to null attribution when the decider has left the roster (T-0155)', async () => {
+      // decided_by_member_id is ON DELETE SET NULL, and a decider can also simply
+      // be deleted — a queue read of their old decisions must still answer 200.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Declined,
+          decidedByMemberId: null,
+          decidedByMember: null,
+        }),
+      );
+
+      const result = await service.findOne(STAFF, 'app-1');
+
+      expect(result.decidedByName).toBeNull();
+      expect(result.decidedByAvatarUrl).toBeNull();
+    });
+
+    it('reports no decider for a pending application (T-0155)', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      const result = await service.findOne(STAFF, 'app-1');
+
+      expect(result.decidedByMemberId).toBeNull();
+      expect(result.decidedByName).toBeNull();
+      expect(result.decidedByAvatarUrl).toBeNull();
     });
 
     it('resolves live identity from the promoted member, else the Discord identity (T-0129)', async () => {
@@ -799,6 +880,25 @@ describe('ApplicationsService', () => {
       const result = await service.decline(STAFF, 'app-1', {}, null);
       expect(result.declineReason).toBeNull();
     });
+
+    it('accepts the staff-only note the console sends on a decline (T-0248)', async () => {
+      // The console shares one note box across hold and decline; without this
+      // field forbidNonWhitelisted would 400 the entire decline.
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      const result = await service.decline(
+        STAFF,
+        'app-1',
+        { note: 'Alt account of a banned member' },
+        null,
+      );
+
+      expect(result.moderatorNote).toBe('Alt account of a banned member');
+      // With no separate reason, the note is what the audit trail records.
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: 'Alt account of a banned member' }),
+      );
+    });
   });
 
   describe('hold', () => {
@@ -833,6 +933,133 @@ describe('ApplicationsService', () => {
     });
   });
 
+  describe('decision text persistence (T-0153)', () => {
+    it('stores the trimmed officer-written message on approve, decline and hold', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      const approved = await service.approve(
+        STAFF,
+        'app-1',
+        { discordDmMessage: '  Welcome aboard!  ' },
+        null,
+      );
+      expect(approved.userMessage).toBe('Welcome aboard!');
+
+      applications.findOne!.mockResolvedValue(baseApplication());
+      const declined = await service.decline(
+        STAFF,
+        'app-1',
+        { discordDmMessage: 'Not this time.' },
+        null,
+      );
+      expect(declined.userMessage).toBe('Not this time.');
+
+      applications.findOne!.mockResolvedValue(baseApplication());
+      const held = await service.hold(
+        STAFF,
+        'app-1',
+        { discordDmMessage: 'We need a reference first.' },
+        null,
+      );
+      expect(held.userMessage).toBe('We need a reference first.');
+    });
+
+    it('stores nothing when the officer wrote nothing — the default template is not persisted', async () => {
+      // The applicant still receives a DM (rendered from the default template),
+      // but the column records only text an officer actually chose to write, so
+      // "what were they told?" never answers with a machine-generated sentence.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        discordUserId: 'discord-2',
+        applicationsBlockedAt: null,
+      });
+      settings.findOne!.mockResolvedValue({ regiment: { name: 'The Lords' } });
+
+      const result = await service.hold(STAFF, 'app-1', { discordDmMessage: '' }, null);
+
+      expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledWith(
+        'regiment-1',
+        expect.objectContaining({ content: expect.stringContaining('The Lords') }),
+      );
+      expect(result.userMessage).toBeNull();
+    });
+
+    it('a decision with no message must not wipe the stored one', async () => {
+      // The staff console posts `discordDmMessage: ''` on every decision, and
+      // @IsOptional() does not strip an empty string — so a hold that explained
+      // itself must survive the decline that follows it with an empty box.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Held,
+          discordDmMessage: 'On hold - we need a reference.',
+        }),
+      );
+
+      const result = await service.decline(STAFF, 'app-1', { discordDmMessage: '   ' }, null);
+
+      expect(result.userMessage).toBe('On hold - we need a reference.');
+    });
+
+    it('a blank note must not wipe the stored moderator note', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication({ moderatorNote: 'prior note' }));
+      const held = await service.hold(STAFF, 'app-1', { note: '' }, null);
+      expect(held.moderatorNote).toBe('prior note');
+
+      applications.findOne!.mockResolvedValue(baseApplication({ moderatorNote: 'prior note' }));
+      const declined = await service.decline(STAFF, 'app-1', { note: '   ' }, null);
+      expect(declined.moderatorNote).toBe('prior note');
+    });
+
+    it('a blank reason is stored as null, never as an empty string', async () => {
+      // '' would read as "a reason was given" everywhere downstream (the console
+      // shows the reason block whenever the field is truthy in either direction).
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      const result = await service.decline(STAFF, 'app-1', { reason: '  ' }, null);
+
+      expect(result.declineReason).toBeNull();
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ detail: null }));
+    });
+  });
+
+  describe('decision attribution (T-0155)', () => {
+    it('writes the decider despite the hydrated (null) decidedByMember relation', async () => {
+      // Regression guard, mirroring the promotedMember trap in approve(): TypeORM
+      // lets a LOADED relation outrank the raw FK on save, so now that loadOrFail
+      // hydrates decidedByMember, setting only the FK would write
+      // decided_by_member_id = NULL and lose the attribution outright.
+      applications.findOne!.mockResolvedValue(baseApplication({ decidedByMember: null }));
+
+      await service.decline(STAFF, 'app-1', {}, null);
+
+      const saved = applications.save!.mock.calls[0][0] as Application;
+      expect(saved.decidedByMemberId).toBe('member-staff');
+      expect(saved.decidedByMember).toMatchObject({ id: 'member-staff' });
+    });
+
+    it('still records the decider FK when their member row cannot be read', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication({ decidedByMember: null }));
+      members.findOne!.mockResolvedValue(null);
+
+      await service.hold(STAFF, 'app-1', {}, null);
+
+      const saved = applications.save!.mock.calls[0][0] as Application;
+      expect(saved.decidedByMemberId).toBe('member-staff');
+      // undefined, not null: TypeORM skips an undefined relation, so the FK stands.
+      expect(saved.decidedByMember).toBeUndefined();
+    });
+
+    it('carries the decider onto the staff projection of the decision response', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      const result = await service.decline(STAFF, 'app-1', { reason: 'Too few hours' }, null);
+
+      expect(result.decidedByName).toBe('Sergeant Steel');
+      expect(result.decidedByAvatarUrl).toBe('https://cdn/staff.png');
+    });
+  });
+
   describe('findAll', () => {
     /** Chainable query-builder stub mirroring the findAll fluent chain. */
     const findAllQb = (rows: Application[], total = rows.length) => {
@@ -863,6 +1090,9 @@ describe('ApplicationsService', () => {
       // the promoted member is joined for the applicant's live identity (T-0129).
       expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.discordIdentity', 'identity');
       expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.promotedMember', 'promotedMember');
+      // The decider is joined too, so attributing a page of decisions costs no
+      // per-row member lookup (T-0155).
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.decidedByMember', 'decidedByMember');
       expect(qb.where).toHaveBeenCalledWith('a.regimentId = :regimentId', {
         regimentId: 'regiment-1',
       });
@@ -895,6 +1125,28 @@ describe('ApplicationsService', () => {
       const result = await service.findAll(STAFF, { page: 1, limit: 20, skip: 0 });
 
       expect(result.data.map((a) => a.blocked)).toEqual([true, false, false]);
+    });
+
+    it('attributes decisions from the joined decider, with no per-row lookup (T-0155)', async () => {
+      const decided = baseApplication({
+        id: 'app-decided',
+        status: ApplicationStatus.Approved,
+        decidedByMemberId: 'member-staff',
+        decidedByMember: {
+          id: 'member-staff',
+          inGameName: 'Sergeant Steel',
+          avatarUrl: null,
+        } as Member,
+      });
+      const pending = baseApplication({ id: 'app-pending' });
+      const qb = findAllQb([decided, pending], 2);
+      applications.createQueryBuilder!.mockReturnValue(qb);
+
+      const result = await service.findAll(STAFF, { page: 1, limit: 20, skip: 0 });
+
+      expect(result.data.map((a) => a.decidedByName)).toEqual(['Sergeant Steel', null]);
+      // The whole page is attributed by the join — a member lookup per row is an N+1.
+      expect(members.findOne).not.toHaveBeenCalled();
     });
   });
 });

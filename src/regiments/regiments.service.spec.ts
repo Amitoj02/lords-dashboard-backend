@@ -1,9 +1,10 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { EventStatus, MemberRole, MemberStatus } from '../common/enums';
+import { EventStatus, MemberRole, MemberStatus, RegimentDocumentSlug } from '../common/enums';
 import { RegimentEvent } from '../events/entities/event.entity';
 import { Member } from '../members/entities/member.entity';
+import { RegimentDocument } from './entities/regiment-document.entity';
 import { RegimentSettings } from './entities/regiment-settings.entity';
 import { Regiment } from './entities/regiment.entity';
 import { RegimentsService } from './regiments.service';
@@ -50,6 +51,7 @@ describe('RegimentsService', () => {
   };
 
   const eventRepo = { count: jest.fn() };
+  const documentRepo = { find: jest.fn().mockResolvedValue([]) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -71,6 +73,7 @@ describe('RegimentsService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settingsRepo },
         { provide: getRepositoryToken(Member), useValue: memberRepo },
         { provide: getRepositoryToken(RegimentEvent), useValue: eventRepo },
+        { provide: getRepositoryToken(RegimentDocument), useValue: documentRepo },
       ],
     }).compile();
 
@@ -139,6 +142,103 @@ describe('RegimentsService', () => {
       settingsRepo.findOne.mockResolvedValue({ regimentId: REGIMENT_ID, publicStats: true });
 
       expect((await service.getProfile()).allowMercenaries).toBe(true);
+    });
+
+    // T-0147. The landing AND sign-in pages are both anonymous, so the
+    // presentation slice has to ride on this endpoint — there is no
+    // authenticated call a logged-out visitor could make instead.
+    it('carries the presentation slice on the ANONYMOUS profile (T-0147)', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      memberRepo.count.mockResolvedValue(1);
+      settingsRepo.findOne.mockResolvedValue({
+        regimentId: REGIMENT_ID,
+        allowMercenaries: true,
+        heroBannerUrl: 'https://cdn/hero.jpg',
+        charterQuote: 'Hold the line.',
+        charterQuoteAttribution: 'The Charter',
+        heroOverlayDensity: 0,
+      });
+
+      const dto = await service.getProfile();
+
+      expect(dto.presentation.heroBannerUrl).toBe('https://cdn/hero.jpg');
+      expect(dto.presentation.charterQuote).toBe('Hold the line.');
+      expect(dto.presentation.charterQuoteAttribution).toBe('The Charter');
+      // 0 is a MEANINGFUL density (fully transparent scrim), not "unset". A
+      // `??`/truthiness projection would silently turn it into null and the
+      // client would re-apply the stylesheet default instead.
+      expect(dto.presentation.heroOverlayDensity).toBe(0);
+    });
+
+    it('projects presentation as all-null when there is no settings row', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      memberRepo.count.mockResolvedValue(1);
+      settingsRepo.findOne.mockResolvedValue(null);
+
+      // Null means "unset — render the shipped copy". A regiment mid-first-run
+      // must still serve a complete landing page, never a 500.
+      const { presentation } = await service.getProfile();
+      expect(presentation.heroBannerUrl).toBeNull();
+      expect(presentation.loginQuote).toBeNull();
+      expect(presentation.loginOverlayDensity).toBeNull();
+    });
+  });
+
+  describe('getDocuments', () => {
+    // T-0149. These back /terms, /privacy and /guidelines — pages a visitor
+    // reaches before signing in, and the privacy policy is a Discord Developer
+    // ToS obligation, so this endpoint must never be the reason one is blank.
+    it('returns one entry per slug even when nothing has been written', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      documentRepo.find.mockResolvedValue([]);
+
+      const docs = await service.getDocuments();
+
+      expect(docs.map((doc) => doc.slug)).toEqual(['terms', 'privacy', 'guidelines']);
+      expect(docs.every((doc) => doc.body === null)).toBe(true);
+    });
+
+    it('returns the stored body for an edited document', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      documentRepo.find.mockResolvedValue([
+        {
+          regimentId: REGIMENT_ID,
+          slug: 'privacy',
+          body: '# Privacy',
+          updatedAt: new Date('2026-07-22T00:00:00.000Z'),
+        },
+      ]);
+
+      const privacy = (await service.getDocuments()).find(
+        (doc) => doc.slug === RegimentDocumentSlug.Privacy,
+      );
+      expect(privacy?.body).toBe('# Privacy');
+      expect(privacy?.updatedAt).toBe('2026-07-22T00:00:00.000Z');
+    });
+
+    it('treats a whitespace-only body as unset so the client falls back', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      documentRepo.find.mockResolvedValue([
+        { regimentId: REGIMENT_ID, slug: 'terms', body: '   \n  ', updatedAt: new Date() },
+      ]);
+
+      // An admin who clears the editor must restore the shipped copy, not
+      // publish an empty legal page.
+      const terms = (await service.getDocuments()).find(
+        (doc) => doc.slug === RegimentDocumentSlug.Terms,
+      );
+      expect(terms?.body).toBeNull();
+    });
+
+    it('does NOT leak the author on the anonymous projection', async () => {
+      regimentRepo.find.mockResolvedValue([buildRegiment()]);
+      documentRepo.find.mockResolvedValue([
+        { regimentId: REGIMENT_ID, slug: 'terms', body: 'x', updatedAt: new Date() },
+      ]);
+
+      const [terms] = await service.getDocuments();
+      expect(terms).not.toHaveProperty('updatedByName');
+      expect(terms).not.toHaveProperty('updatedByMemberId');
     });
   });
 

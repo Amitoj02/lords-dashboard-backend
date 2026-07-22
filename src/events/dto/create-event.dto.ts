@@ -44,18 +44,27 @@ export class CreateEventDto {
   @MaxLength(512)
   bannerKey?: string;
 
-  @ApiProperty({ description: 'ISO 8601 start timestamp' })
+  @ApiProperty({
+    description:
+      'ISO 8601 start timestamp. A naive wall clock ("2026-07-20T21:57:00") is read in the ' +
+      "event's timezone; an offset-qualified value (Z or ±HH:MM) is a true instant and wins " +
+      'over `timezone`.',
+  })
   @IsDateString()
   startsAt: string;
 
-  @ApiPropertyOptional({ description: 'ISO 8601 end timestamp (open-ended when omitted)' })
+  @ApiPropertyOptional({
+    description: 'ISO 8601 end timestamp (open-ended when omitted); resolved like `startsAt`',
+  })
   @IsOptional()
   @IsDateString()
   endsAt?: string;
 
   @ApiPropertyOptional({
     maxLength: 40,
-    description: 'IANA timezone; defaults to the regiment setting',
+    description:
+      'IANA timezone; defaults to the regiment setting. Also the zone naive timestamps above ' +
+      'are resolved in.',
   })
   @IsOptional()
   @IsString()
