@@ -3,12 +3,16 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { DiscordSyncJobStatus, DiscordSyncJobType, MemberRole } from '../common/enums';
+import {
+  DiscordSyncJobStatus,
+  DiscordSyncJobType,
+  MemberRole,
+  RoleRelinkBatchState,
+} from '../common/enums';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordOnboardingService } from './discord-onboarding.service';
 import { DiscordService } from './discord.service';
 import { DiscordSyncService } from './discord-sync.service';
-import { RoleRelinkBatchState } from './dto/role-relink.dto';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';

@@ -4,7 +4,12 @@ import { Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
-import { BotConnectionStatus, DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
+import {
+  BotConnectionStatus,
+  DiscordSyncJobStatus,
+  DiscordSyncJobType,
+  RoleRelinkBatchState,
+} from '../common/enums';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordOnboardingService } from './discord-onboarding.service';
 import { DiscordSyncService } from './discord-sync.service';
@@ -18,11 +23,7 @@ import {
 import { DiscordChannel, DiscordRole } from './gateway/discord-gateway';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
 import { BindGuildDto, DiscordOperationsQueryDto, SimulateJoinDto } from './dto/discord-inputs.dto';
-import {
-  RoleRelinkBatchState,
-  RoleRelinkFailuresDto,
-  RoleRelinkProgressDto,
-} from './dto/role-relink.dto';
+import { RoleRelinkFailuresDto, RoleRelinkProgressDto } from './dto/role-relink.dto';
 import { RoleRelinkPayload } from './discord-sync.service';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';

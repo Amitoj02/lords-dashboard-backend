@@ -10,8 +10,10 @@ import {
   IsString,
   MaxLength,
   Min,
+  Validate,
 } from 'class-validator';
 import { Platform, RecurrenceCadence } from '../../common/enums';
+import { IsIanaTimezone } from './is-iana-timezone.validator';
 
 /**
  * Body for POST /api/events. The regiment and creator are taken from the JWT,
@@ -69,6 +71,7 @@ export class CreateEventDto {
   @IsOptional()
   @IsString()
   @MaxLength(40)
+  @Validate(IsIanaTimezone)
   timezone?: string;
 
   @ApiPropertyOptional({ default: false })

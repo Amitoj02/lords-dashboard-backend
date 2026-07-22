@@ -1,21 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { RoleRelinkBatchState } from '../../common/enums';
 import { RoleRelinkSubject } from '../discord-sync.service';
-
-/**
- * Lifecycle of one bulk re-link run. `Partial` and `Cancelled` are both the
- * result of an operator stop — they differ only in whether anything had already
- * been applied, and neither is rolled back (T-0160).
- */
-export enum RoleRelinkBatchState {
-  /** Still expanding pages and/or applying per-member jobs. */
-  Running = 'running',
-  /** Fully drained. `failed` may still be non-zero — the counts tell the story. */
-  Completed = 'completed',
-  /** Cancelled after some members were already updated; those stay correct. */
-  Partial = 'partial',
-  /** Cancelled before any member was updated. */
-  Cancelled = 'cancelled',
-}
 
 /**
  * Why a run's failures happened, split by the CLASS of Discord error, so a role

@@ -169,6 +169,21 @@ export enum DiscordSyncJobType {
   RoleRelinkApply = 'role.relink_apply',
 }
 
+/**
+ * Terminal/at-rest state of a bulk Discord role re-link run (T-0160), derived
+ * from its job rows rather than held in memory, so it survives an API restart.
+ */
+export enum RoleRelinkBatchState {
+  /** Still expanding pages and/or applying per-member jobs. */
+  Running = 'running',
+  /** Fully drained. `failed` may still be non-zero - the counts tell the story. */
+  Completed = 'completed',
+  /** Cancelled after some members were already updated; those stay correct. */
+  Partial = 'partial',
+  /** Cancelled before any member was updated. */
+  Cancelled = 'cancelled',
+}
+
 export enum NotificationTone {
   Info = 'info',
   Warn = 'warn',
