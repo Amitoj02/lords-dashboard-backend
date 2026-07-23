@@ -113,7 +113,15 @@ export class MembersService {
       .andWhere('member.deletedAt IS NULL');
 
     if (query.search) {
-      const term = `%${query.search.toLowerCase()}%`;
+      // Escape LIKE wildcards so a user-supplied % / _ is matched literally rather
+      // than turning the search into a leading-wildcard scan, and bound the length
+      // (LDA-L7). Parameterised already, so this is about correctness/DoS, not
+      // injection. `\` is MySQL's default LIKE escape character.
+      const escaped = query.search
+        .toLowerCase()
+        .slice(0, 100)
+        .replace(/[\\%_]/g, '\\$&');
+      const term = `%${escaped}%`;
       qb.andWhere(
         '(LOWER(member.inGameName) LIKE :term OR LOWER(identity.discordTag) LIKE :term)',
         { term },
