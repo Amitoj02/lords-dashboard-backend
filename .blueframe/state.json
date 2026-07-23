@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
-  "lastSyncedAt": "2026-07-23T03:55:41Z",
-  "notesForNextSession": "SESSION: implemented ALL 14 remaining planned tasks (T-0163, T-0166..T-0178) on branch feat/planned-tasks-t0163-t0178, plus 3 discovered fixes (T-0179..T-0181). Status `review` pending PR merge; flip to `deployed` once merged. Coupled frontend branch: lords-regiment-dashboard feat/planned-tasks-t0256-t0266 - THE TWO MUST MERGE AND DEPLOY TOGETHER (the SPA reads guildMember/guildGateEnabled/permittedActions off the new projections). *** THE HEADLINE: THE GUILD-MEMBERSHIP GATE IS BUILT BUT SHIPS OFF. *** discord_bot_settings.guild_gate_enabled defaults FALSE and there is now an admin toggle for it in the Lord Adjutant settings panel. With it off nothing changes for anyone - verified both ways in a browser. DO NOT FLIP IT until the bot is connected and verified against the real guild, because a disconnected bot means no confirmed verdicts. Two safety nets exist anyway: guild_checked_at IS NULL means NEVER CONFIRMED (not 'confirmed absent') and resolves fail-open true+degraded, which is what every production row will be on deploy day; and anyone holding manage_settings is exempt unconditionally so you can always reach the panel to switch it back off. THREE ADDITIVE MIGRATIONS: RetireTransferOwnership1784900000000 (DELETEs role_permissions rows for the retired capability - a DATA change; verified against a database pre-seeded with the six legacy rows, purged to 0, and a re-seed does not re-add them), GuildMembershipRevalidation1784900001000 (discord_identities.guild_checked_at + discord_bot_settings.guild_gate_enabled), EventReminderDispatch1784900002000 (event_notify_offsets.sent_at). All three verified up -> down -> up against MySQL 8. TWO PREVIOUSLY-RECORDED GAPS ARE NOW CLOSED: (1) the real-discord-gateway GuildMemberAdd handler no longer discards member.guild.id, so a bot in two guilds can no longer fire production onboarding from a test-guild join (T-0180) - the 'keep the bot in exactly ONE guild' constraint is lifted; (2) guild membership is no longer 'recorded but never enforced' - it is enforced, behind the default-off flag above, with live GuildMemberAdd/Remove handlers flipping the stored verdict. ALSO NEW: event reminders actually send now. event_notify_offsets rows were persisted but NOTHING consumed them, so no reminder had ever fired; T-0181 adds the sweep, at-most-once across a restart via a conditional claim on sent_at. It claims BEFORE enqueuing, so a crash in between drops a reminder rather than duplicating one. OWNERSHIP TRANSFER IS GONE AND THERE IS NO REPLACEMENT: with T-0170 there is no API path left to assign MemberRole.Owner or repoint regiments.owner_member_id. Losing the Owner's Discord account means recovery via direct DB access. POST /settings/dissolve is now the only Owner-ROLE-gated route. MEMBER ADMIN ACTIONS now enforce strictly-outranks (Owner>Admin>Moderator>Member>Mercenary>Applicant): an Admin cannot touch a peer Admin, only the Owner can moderate an Admin. The same pure predicate feeds MemberDto.permittedActions, so the roster/modal cannot drift from the server. ACCOUNT DELETION REMAINS SELF-ONLY BY OWNER DECISION - nobody, not even the Owner, may delete another member's account; pinned by unit + e2e tests so a path cannot be added silently. VERIFIED THIS SESSION: eslint+prettier clean, nest build clean, 709 unit (was 518), 101 e2e (was 61) run twice - fresh DB and dirty DB. Live HTTP checks against the dev stack: permittedActions all-false for Admin->Owner, Admin->peer-Admin and Moderator->Admin with matching 403s; both retired routes 404; reanchor moved 21:57 America/New_York to 01:57Z with duration preserved, wrong expectation 400, second run 400, audit row written. Browser at 1440px AND a true 390x844 mobile viewport (CDP device metrics - resize_window does NOT shrink the extension's headless viewport; use a CCcached chrome --remote-debugging-port and Emulation.setDeviceMetricsOverride). NOT VERIFIED: nothing has been drained against the REAL Discord API - every embed assertion is against the mock gateway's recorded payload. The first real-bot run is still ahead. --- PREVIOUS: *** PRODUCTION IS LIVE at https://lordsofholdfast.com since 2026-07-20. *** Deploy workflow run 29781571948 rolled both images at :latest. Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok,database:up} (which also proves the least-privilege lords_app account authenticated on a real first boot), /api/docs 404, SPA serving. All four containers healthy. DOCS FIRST: read CONTRIBUTING.md (developer flow, and THE SEEDING TIER RULE), then docs/INFRASTRUCTURE.md (what runs where, credential inventory, what survives down -v), then deploy/README.md (runbook). Branch docs/infrastructure-and-contributing (T-0143) merged to main via PR #20; T-0143 is deployed. Task 'type' must be one of feature|bug|chore|infra|question|spike - 'fix' and 'docs' are NOT valid and will fail schema validation. DEPLOYS ARE MANUAL: backend repo, Actions, 'Deploy to production', api_tag + web_tag. One workflow rolls BOTH images. Required-reviewer environment protection needs GitHub Pro on a private repo, so workflow_dispatch is the gate. Rollback is the same workflow with older tags; there is deliberately no auto-rollback because migrations have already run when readiness fails. STILL NOT DONE, in rough priority order: (1) an AVATAR UPLOAD has never been tested end to end - presign -> R2 CORS -> PUT -> cdn. serving is the most likely thing to be broken; (2) BACKUPS have never run against real R2 - 'systemctl --user enable --now lords-backup.timer', then run ~/bin/lords-restore-drill ONCE and write the RTO into deploy/README.md; a backup you have not restored is a hypothesis; (3) no monitoring - point Better Stack at /api/health/ready and a heartbeat at BACKUP_HEARTBEAT_URL in ~/lords/backup.env; (4) LEGAL (plan Phase 7) must be live BEFORE public sign-in - privacy policy naming Cloudflare/OVH/Discord, a working delete-my-account button (Discord's Developer ToS requires it), retention job, privacy@ alias; (5) the Discord bot rollout, plan Phase 6, seven-step ladder - step 5 is the first irreversible action against 576 real people. TWO BOT SWITCHES, NOT ONE: DISCORD_BOT_MOCK=false only makes the bot CONNECT (read-only); the botEnabled DB flag (default false, admin UI) controls whether anything is ENQUEUED. Nothing is written to Discord until both are set. Safe to unmock against a TEST guild - that is plan 6.3 step 1 - but see the next note. KNOWN GAP, NOT YET FIXED: real-discord-gateway.ts:61 registers GuildMemberAdd and DISCARDS member.guild.id, so a bot in two guilds fires onboarding against whatever DISCORD_GUILD_ID is configured - a join in a test guild would DM a welcome and try to assign a role in production, and vice versa. Keep the bot in exactly ONE guild, or use a separate Discord application for staging. The owner was offered a two-line guild filter and had not decided when the session ended. SECOND KNOWN GAP: guild membership is recorded (discord_identities.guild_member) and shown in the admin member detail but NEVER ENFORCED by any guard. A non-member can sign in, apply and be approved; a member who leaves keeps access indefinitely; there is no GuildMemberRemove handler. If you add enforcement, note resolveGuildMembership falls back to false on a bot timeout, so a naive gate would lock out the whole regiment whenever the gateway hiccups - it must distinguish 'confirmed not a member' from 'could not check'. GUILD SWITCH PROCEDURE (test guild -> real guild): everything guild-coupled lives in the DB (bot settings channel/role ids, rank/medal linked + discordRoleName, members, identities), so 'down -v' then edit DISCORD_GUILD_ID/OWNER_DISCORD_ID then 'up -d' is clean and complete. But R2 objects SURVIVE down -v and become orphaned - 'rclone delete r2:lords-media' when intentionally resetting. Do NOT boot the stack with a placeholder OWNER_DISCORD_ID: the greenfield gate means it will never re-provision. BOX: ssh ovh-lords. Everything under ~/lords and ~/bin; NOTHING needs root (deploy owns the docker socket, linger is on, backups are a systemd USER timer). sudo DOES require a password. Re-run ~/lords/deploy/bootstrap.sh any time - idempotent, never overwrites .env/backup.env/rclone.conf. NOTE 'rclone lsd r2:' ALWAYS 403s with a correctly bucket-scoped token (ListBuckets is account-level) - test with 'rclone lsf r2:lords-backups' instead. LOCAL: isolated e2e DB lords_dashboard_e2e, NODE_ENV=test DB_HOST=127.0.0.1 DB_PORT=3307 DB_PASSWORD=devroot DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= (must be EMPTY). 518 unit + 61 e2e green. dist/ and dist.root-owned/ are still root-owned and break host builds (sudo rm -rf them, or build in the container). Keep this file ASCII-escaped; testPlan status must be pending|passed|failed. *** THIS SESSION: implemented ALL seventeen planned tasks T-0144..T-0160 on branch feat/planned-tasks-t0144-t0160 (status 'review' pending PR merge; flip to 'deployed' once merged). ONE additive migration PresentationLegalAndRoleRelink - nullable columns, the new regiment_documents table, an appended 'cancelled' enum member and one index - verified up -> down -> up; nothing rewrites an existing row, so it is safe against production. NEW CAPABILITY manage_regiment_details (Owner+Admin) gates the presentation and legal routes; it back-fills onto the live DB because seedRolePermissions is tier 1 but insert-only per (role, capability). T-0156 and T-0157 are FORWARD-ONLY by decision: existing wrong-time events and mislabelled promotion rows are NOT rewritten - see new tasks T-0163. NEAR MISS worth remembering: eager-loading applications.decidedByMember would have nulled decided_by_member_id on every decision, because TypeORM lets a LOADED relation outrank the raw FK column on save (same trap already documented for promotedMember); stampDecider() sets both in step and an e2e proves it against real MySQL. Gallery submit had a live hole - CreateGalleryItemDto persisted a client-supplied thumbnailUrl with no namespace check - now replaced by a validated posterKey. dist/ is recreated root-owned by the running dev container: use 'docker run --rm -v $PWD:/w:z alpine rm -rf /w/dist' rather than sudo, and typecheck with --tsBuildInfoFile pointed at scratch. NOTE settings.service.ts used to contain a literal NUL byte as a composite-key separator, which made the whole file invisible to grep; it is now '\\\\u0000'. LATE FIX (T-0165): AuthzService memoised role_permissions with no expiry, so a matrix change made OUTSIDE the API - notably seed:prod back-filling a new capability's default grant, which happens on EVERY deploy - stayed invisible until restart, while GET /settings/permissions read the table and reported it granted. Now has a 30s TTL. If a capability check ever disagrees with the permissions screen, that is the shape of the bug.",
-  "nextIdCounter": 182,
+  "lastSyncedCommit": "0d8d2f6aad51504aa340b9b21f356de2429a3637",
+  "lastSyncedAt": "2026-07-23T05:25:13Z",
+  "notesForNextSession": "LATEST (T-0186, commit 0d8d2f6 on feat/planned-tasks-t0163-t0178): the decision attribution now falls the officer's avatar back to their LINKED DISCORD avatar. members.avatar_url only ever holds an UPLOADED avatar, so decidedByAvatarUrl was null for practically every real officer and the console showed bare initials. This needed the nested decidedByMember.discordIdentity relation on THREE separate read paths - stampDecider (the decision response), loadOrFail (the detail read) and the findAll join (the queue page) - and mocked repositories cannot tell them apart, so a single e2e asserts all three against real MySQL. Pairs with lords-regiment-dashboard:T-0274 (the officer chip is now a link to their profile); the SPA change stands alone but shows initials until this ships. --- SESSION: implemented ALL 14 remaining planned tasks (T-0163, T-0166..T-0178) on branch feat/planned-tasks-t0163-t0178, plus 3 discovered fixes (T-0179..T-0181). Status `review` pending PR merge; flip to `deployed` once merged. Coupled frontend branch: lords-regiment-dashboard feat/planned-tasks-t0256-t0266 - THE TWO MUST MERGE AND DEPLOY TOGETHER (the SPA reads guildMember/guildGateEnabled/permittedActions off the new projections). *** THE HEADLINE: THE GUILD-MEMBERSHIP GATE IS BUILT BUT SHIPS OFF. *** discord_bot_settings.guild_gate_enabled defaults FALSE and there is now an admin toggle for it in the Lord Adjutant settings panel. With it off nothing changes for anyone - verified both ways in a browser. DO NOT FLIP IT until the bot is connected and verified against the real guild, because a disconnected bot means no confirmed verdicts. Two safety nets exist anyway: guild_checked_at IS NULL means NEVER CONFIRMED (not 'confirmed absent') and resolves fail-open true+degraded, which is what every production row will be on deploy day; and anyone holding manage_settings is exempt unconditionally so you can always reach the panel to switch it back off. THREE ADDITIVE MIGRATIONS: RetireTransferOwnership1784900000000 (DELETEs role_permissions rows for the retired capability - a DATA change; verified against a database pre-seeded with the six legacy rows, purged to 0, and a re-seed does not re-add them), GuildMembershipRevalidation1784900001000 (discord_identities.guild_checked_at + discord_bot_settings.guild_gate_enabled), EventReminderDispatch1784900002000 (event_notify_offsets.sent_at). All three verified up -> down -> up against MySQL 8. TWO PREVIOUSLY-RECORDED GAPS ARE NOW CLOSED: (1) the real-discord-gateway GuildMemberAdd handler no longer discards member.guild.id, so a bot in two guilds can no longer fire production onboarding from a test-guild join (T-0180) - the 'keep the bot in exactly ONE guild' constraint is lifted; (2) guild membership is no longer 'recorded but never enforced' - it is enforced, behind the default-off flag above, with live GuildMemberAdd/Remove handlers flipping the stored verdict. ALSO NEW: event reminders actually send now. event_notify_offsets rows were persisted but NOTHING consumed them, so no reminder had ever fired; T-0181 adds the sweep, at-most-once across a restart via a conditional claim on sent_at. It claims BEFORE enqueuing, so a crash in between drops a reminder rather than duplicating one. OWNERSHIP TRANSFER IS GONE AND THERE IS NO REPLACEMENT: with T-0170 there is no API path left to assign MemberRole.Owner or repoint regiments.owner_member_id. Losing the Owner's Discord account means recovery via direct DB access. POST /settings/dissolve is now the only Owner-ROLE-gated route. MEMBER ADMIN ACTIONS now enforce strictly-outranks (Owner>Admin>Moderator>Member>Mercenary>Applicant): an Admin cannot touch a peer Admin, only the Owner can moderate an Admin. The same pure predicate feeds MemberDto.permittedActions, so the roster/modal cannot drift from the server. ACCOUNT DELETION REMAINS SELF-ONLY BY OWNER DECISION - nobody, not even the Owner, may delete another member's account; pinned by unit + e2e tests so a path cannot be added silently. VERIFIED THIS SESSION: eslint+prettier clean, nest build clean, 709 unit (was 518), 101 e2e (was 61) run twice - fresh DB and dirty DB. Live HTTP checks against the dev stack: permittedActions all-false for Admin->Owner, Admin->peer-Admin and Moderator->Admin with matching 403s; both retired routes 404; reanchor moved 21:57 America/New_York to 01:57Z with duration preserved, wrong expectation 400, second run 400, audit row written. Browser at 1440px AND a true 390x844 mobile viewport (CDP device metrics - resize_window does NOT shrink the extension's headless viewport; use a CCcached chrome --remote-debugging-port and Emulation.setDeviceMetricsOverride). NOT VERIFIED: nothing has been drained against the REAL Discord API - every embed assertion is against the mock gateway's recorded payload. The first real-bot run is still ahead. --- PREVIOUS: *** PRODUCTION IS LIVE at https://lordsofholdfast.com since 2026-07-20. *** Deploy workflow run 29781571948 rolled both images at :latest. Verified externally: apex + www 200 with valid TLS, /api/health/ready {status:ok,database:up} (which also proves the least-privilege lords_app account authenticated on a real first boot), /api/docs 404, SPA serving. All four containers healthy. DOCS FIRST: read CONTRIBUTING.md (developer flow, and THE SEEDING TIER RULE), then docs/INFRASTRUCTURE.md (what runs where, credential inventory, what survives down -v), then deploy/README.md (runbook). Branch docs/infrastructure-and-contributing (T-0143) merged to main via PR #20; T-0143 is deployed. Task 'type' must be one of feature|bug|chore|infra|question|spike - 'fix' and 'docs' are NOT valid and will fail schema validation. DEPLOYS ARE MANUAL: backend repo, Actions, 'Deploy to production', api_tag + web_tag. One workflow rolls BOTH images. Required-reviewer environment protection needs GitHub Pro on a private repo, so workflow_dispatch is the gate. Rollback is the same workflow with older tags; there is deliberately no auto-rollback because migrations have already run when readiness fails. STILL NOT DONE, in rough priority order: (1) an AVATAR UPLOAD has never been tested end to end - presign -> R2 CORS -> PUT -> cdn. serving is the most likely thing to be broken; (2) BACKUPS have never run against real R2 - 'systemctl --user enable --now lords-backup.timer', then run ~/bin/lords-restore-drill ONCE and write the RTO into deploy/README.md; a backup you have not restored is a hypothesis; (3) no monitoring - point Better Stack at /api/health/ready and a heartbeat at BACKUP_HEARTBEAT_URL in ~/lords/backup.env; (4) LEGAL (plan Phase 7) must be live BEFORE public sign-in - privacy policy naming Cloudflare/OVH/Discord, a working delete-my-account button (Discord's Developer ToS requires it), retention job, privacy@ alias; (5) the Discord bot rollout, plan Phase 6, seven-step ladder - step 5 is the first irreversible action against 576 real people. TWO BOT SWITCHES, NOT ONE: DISCORD_BOT_MOCK=false only makes the bot CONNECT (read-only); the botEnabled DB flag (default false, admin UI) controls whether anything is ENQUEUED. Nothing is written to Discord until both are set. Safe to unmock against a TEST guild - that is plan 6.3 step 1 - but see the next note. KNOWN GAP, NOT YET FIXED: real-discord-gateway.ts:61 registers GuildMemberAdd and DISCARDS member.guild.id, so a bot in two guilds fires onboarding against whatever DISCORD_GUILD_ID is configured - a join in a test guild would DM a welcome and try to assign a role in production, and vice versa. Keep the bot in exactly ONE guild, or use a separate Discord application for staging. The owner was offered a two-line guild filter and had not decided when the session ended. SECOND KNOWN GAP: guild membership is recorded (discord_identities.guild_member) and shown in the admin member detail but NEVER ENFORCED by any guard. A non-member can sign in, apply and be approved; a member who leaves keeps access indefinitely; there is no GuildMemberRemove handler. If you add enforcement, note resolveGuildMembership falls back to false on a bot timeout, so a naive gate would lock out the whole regiment whenever the gateway hiccups - it must distinguish 'confirmed not a member' from 'could not check'. GUILD SWITCH PROCEDURE (test guild -> real guild): everything guild-coupled lives in the DB (bot settings channel/role ids, rank/medal linked + discordRoleName, members, identities), so 'down -v' then edit DISCORD_GUILD_ID/OWNER_DISCORD_ID then 'up -d' is clean and complete. But R2 objects SURVIVE down -v and become orphaned - 'rclone delete r2:lords-media' when intentionally resetting. Do NOT boot the stack with a placeholder OWNER_DISCORD_ID: the greenfield gate means it will never re-provision. BOX: ssh ovh-lords. Everything under ~/lords and ~/bin; NOTHING needs root (deploy owns the docker socket, linger is on, backups are a systemd USER timer). sudo DOES require a password. Re-run ~/lords/deploy/bootstrap.sh any time - idempotent, never overwrites .env/backup.env/rclone.conf. NOTE 'rclone lsd r2:' ALWAYS 403s with a correctly bucket-scoped token (ListBuckets is account-level) - test with 'rclone lsf r2:lords-backups' instead. LOCAL: isolated e2e DB lords_dashboard_e2e, NODE_ENV=test DB_HOST=127.0.0.1 DB_PORT=3307 DB_PASSWORD=devroot DISCORD_MOCK=true DISCORD_BOT_MOCK=true OWNER_DISCORD_ID= (must be EMPTY). 518 unit + 61 e2e green. dist/ and dist.root-owned/ are still root-owned and break host builds (sudo rm -rf them, or build in the container). Keep this file ASCII-escaped; testPlan status must be pending|passed|failed. *** THIS SESSION: implemented ALL seventeen planned tasks T-0144..T-0160 on branch feat/planned-tasks-t0144-t0160 (status 'review' pending PR merge; flip to 'deployed' once merged). ONE additive migration PresentationLegalAndRoleRelink - nullable columns, the new regiment_documents table, an appended 'cancelled' enum member and one index - verified up -> down -> up; nothing rewrites an existing row, so it is safe against production. NEW CAPABILITY manage_regiment_details (Owner+Admin) gates the presentation and legal routes; it back-fills onto the live DB because seedRolePermissions is tier 1 but insert-only per (role, capability). T-0156 and T-0157 are FORWARD-ONLY by decision: existing wrong-time events and mislabelled promotion rows are NOT rewritten - see new tasks T-0163. NEAR MISS worth remembering: eager-loading applications.decidedByMember would have nulled decided_by_member_id on every decision, because TypeORM lets a LOADED relation outrank the raw FK column on save (same trap already documented for promotedMember); stampDecider() sets both in step and an e2e proves it against real MySQL. Gallery submit had a live hole - CreateGalleryItemDto persisted a client-supplied thumbnailUrl with no namespace check - now replaced by a validated posterKey. dist/ is recreated root-owned by the running dev container: use 'docker run --rm -v $PWD:/w:z alpine rm -rf /w/dist' rather than sudo, and typecheck with --tsBuildInfoFile pointed at scratch. NOTE settings.service.ts used to contain a literal NUL byte as a composite-key separator, which made the whole file invisible to grep; it is now '\\\\u0000'. LATE FIX (T-0165): AuthzService memoised role_permissions with no expiry, so a matrix change made OUTSIDE the API - notably seed:prod back-filling a new capability's default grant, which happens on EVERY deploy - stayed invisible until restart, while GET /settings/permissions read the table and reported it granted. Now has a 30s TTL. If a capability check ever disagrees with the permissions screen, that is the shape of the bug.",
+  "nextIdCounter": 187,
   "connections": [],
   "tasks": [
     {
@@ -12478,6 +12478,351 @@
           "to": "review",
           "by": "claude",
           "note": "fixed in the same branch"
+        }
+      ]
+    },
+    {
+      "id": "T-0182",
+      "title": "Stop leaking the staff-only moderator note into the applicant's decision DM",
+      "summary": "decline() and hold() forward the officer's internal note (and decline reason) to DiscordSyncService as `reviewerNote`, and buildDecisionEmbed renders it to the applicant as a 'Note from the reviewing officer' field. The applicant must only ever receive the officer's User message (discordDmMessage) or the house default.",
+      "status": "planned",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "moderation",
+      "subfeature": "decision-message",
+      "repo": "",
+      "paths": [
+        "src/applications/applications.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/embeds/notification-embeds.ts",
+        "src/applications/applications.service.spec.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "src/discord/embeds/notification-embeds.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "T-0183",
+        "lords-regiment-dashboard:T-0273"
+      ],
+      "questions": [
+        {
+          "q": "DeclineApplicationDto.reason is documented as 'shown/recorded for the decline' while note is staff-only \u2014 should an explicitly-typed decline reason still reach the applicant, or is discordDmMessage now the ONLY applicant-visible text? (Plan assumes the latter: drop reviewerNote from the applicant embed entirely.)",
+          "answer": null,
+          "askedAt": "2026-07-23T04:20:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "decline() with { note: 'too new, sock puppet' } enqueues a decision job whose embed contains neither the note text nor a 'Note from the reviewing officer' field",
+          "status": "pending"
+        },
+        {
+          "desc": "decline() with { reason: 'X', note: 'Y' } still audits the rationale and still persists declineReason/moderatorNote \u2014 only the DM payload changes",
+          "status": "pending"
+        },
+        {
+          "desc": "hold() with a staff note enqueues a hold DM carrying only the user message (or the house default), no note field",
+          "status": "pending"
+        },
+        {
+          "desc": "approve/decline/hold with a discordDmMessage still deliver that exact text as the embed description",
+          "status": "pending"
+        },
+        {
+          "desc": "approve/decline/hold with NO discordDmMessage fall back to defaultDecisionMessage for that outcome",
+          "status": "pending"
+        },
+        {
+          "desc": "unit test on buildDecisionEmbed asserts the rendered embed has no field sourced from staff-only input",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Touches the shared applicant decision path (approve/decline/hold) and the shared decision-embed builder used by every outcome; a DM-shape change must not alter persistence or audit detail",
+          "status": "open",
+          "notedAt": "2026-07-23T04:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-23T04:20:00Z",
+      "updatedAt": "2026-07-23T04:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-23T04:20:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0183",
+      "title": "Regression guard: no staff-only field may reach any applicant-facing channel",
+      "summary": "T-0154 fenced the staff-only columns out of the applicant API projection, but the Discord DM path bypassed that fence. Add a single explicit guard \u2014 a test that walks every applicant-facing surface (GET /api/applications/mine and the enqueued decision embed) and asserts moderatorNote / declineReason / internal audit detail never appear.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "moderation",
+      "subfeature": "visibility",
+      "repo": "",
+      "paths": [
+        "test/applications.e2e-spec.ts",
+        "src/applications/applications.service.spec.ts",
+        "src/discord/embeds/notification-embeds.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0182"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "e2e: staff decline an application with a distinctive staff-note sentinel; the applicant's GET /api/applications/mine response body does not contain the sentinel",
+          "status": "pending"
+        },
+        {
+          "desc": "e2e: the discord_sync_jobs row enqueued by that same decline does not contain the sentinel anywhere in its payload",
+          "status": "pending"
+        },
+        {
+          "desc": "the guard fails loudly if a future embed field is wired to a staff-only source",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Adds assertions over the shared applications e2e fixture; the sentinel must be unique enough not to collide with seeded text",
+          "status": "open",
+          "notedAt": "2026-07-23T04:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-23T04:20:00Z",
+      "updatedAt": "2026-07-23T04:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-23T04:20:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0184",
+      "title": "Honour a blank welcome message (fall back to the house default) and trim on save",
+      "summary": "DiscordSyncService uses `s.welcomeMessage ?? DEFAULT_WELCOME`, so an empty string saved from the settings editor produces a welcome embed with an empty description rather than the default. Normalise blank/whitespace-only input to null on update and treat blank as 'use the default' on send.",
+      "status": "planned",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "discord-bot",
+      "feature": "notifications",
+      "subfeature": "welcome-message",
+      "repo": "",
+      "paths": [
+        "src/discord/discord.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/dto/discord-settings.dto.ts",
+        "src/discord/discord-sync.service.spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "T-0185",
+        "lords-regiment-dashboard:T-0272"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PATCH bot settings with welcomeMessage: '' persists NULL, and GET returns welcomeMessage: null",
+          "status": "pending"
+        },
+        {
+          "desc": "PATCH with welcomeMessage: '  Fall in!  ' persists the trimmed 'Fall in!'",
+          "status": "pending"
+        },
+        {
+          "desc": "enqueueWelcome with a NULL welcomeMessage builds the embed from DEFAULT_WELCOME",
+          "status": "pending"
+        },
+        {
+          "desc": "enqueueWelcome with a configured message uses that message verbatim as the embed body",
+          "status": "pending"
+        },
+        {
+          "desc": "omitting welcomeMessage from the PATCH body leaves the stored value untouched",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Changes the update semantics of the shared discord_bot_settings PATCH; the same normalisation must not silently blank other optional string columns on that endpoint",
+          "status": "open",
+          "notedAt": "2026-07-23T04:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-23T04:20:00Z",
+      "updatedAt": "2026-07-23T04:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-23T04:20:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0185",
+      "title": "Support placeholder tokens in the configurable welcome message",
+      "summary": "So an admin-authored welcome can address the joiner, expand a small documented token set (e.g. {user} \u2192 a Discord mention, {regiment} \u2192 the regiment name) when composing the welcome embed. Unknown tokens are left as literal text, and the token list is surfaced in the settings API docs so the frontend editor can show the same hint.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "discord-bot",
+      "feature": "notifications",
+      "subfeature": "welcome-message",
+      "repo": "",
+      "paths": [
+        "src/discord/embeds/notification-embeds.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/dto/discord-settings.dto.ts",
+        "src/discord/embeds/notification-embeds.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0184"
+      ],
+      "blocks": [
+        "lords-regiment-dashboard:T-0272"
+      ],
+      "questions": [
+        {
+          "q": "Which token set do we commit to \u2014 {user} and {regiment} only, or also {memberCount} / {rulesChannel}? Whatever ships becomes an admin-facing contract the settings hint documents.",
+          "answer": null,
+          "askedAt": "2026-07-23T04:20:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "a welcome message containing {user} renders a working <@id> mention for the joining member",
+          "status": "pending"
+        },
+        {
+          "desc": "a welcome message containing {regiment} renders the regiment's brand name",
+          "status": "pending"
+        },
+        {
+          "desc": "an unknown token like {nope} is left verbatim and does not throw",
+          "status": "pending"
+        },
+        {
+          "desc": "a message with no tokens is byte-identical after expansion",
+          "status": "pending"
+        },
+        {
+          "desc": "expansion runs before the 512-char clamp so a long expansion cannot break the embed",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Introduces string interpolation into admin-authored text that is sent to Discord; expansion must not allow @everyone/@here injection or unescaped markdown that changes who gets pinged",
+          "status": "open",
+          "notedAt": "2026-07-23T04:20:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-07-23T04:20:00Z",
+      "updatedAt": "2026-07-23T04:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-23T04:20:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        }
+      ]
+    },
+    {
+      "id": "T-0186",
+      "title": "Attribute a decision with the deciding officer's Discord avatar",
+      "summary": "ApplicationDto read the decider's avatar from members.avatar_url alone, which is only ever written by an avatar UPLOAD - so for the common case of an officer who never uploaded one, decidedByAvatarUrl came back null and the console attribution fell back to bare initials while the same person's face rendered on their profile and in the sidebar. Resolve it the way MemberDto and the applicant's own currentAvatarUrl already do (uploaded avatar, else the linked Discord identity's), which needs the nested decidedByMember.discordIdentity relation loaded on all three paths a decision is read back through.",
+      "status": "review",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "moderation",
+      "subfeature": "decision-attribution",
+      "repo": "",
+      "paths": [
+        "src/applications/dto/application.dto.ts",
+        "src/applications/applications.service.ts",
+        "src/applications/applications.service.spec.ts",
+        "test/post-mvp.e2e-spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0274"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "the decider's avatar falls back to their linked Discord avatar when members.avatar_url is null",
+          "status": "passed"
+        },
+        {
+          "desc": "an uploaded avatar still wins over the Discord one",
+          "status": "passed"
+        },
+        {
+          "desc": "all three read paths carry the fallback against real MySQL - the decision response (stampDecider), the detail read (loadOrFail) and the queue page (the findAll join)",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "stampDecider now loads the deciding member WITH its discordIdentity relation before the application is saved. The relation carries no cascade, so TypeORM will not write through it - but this is the same code path as the documented trap where a LOADED relation outranks the raw FK on save, so any future change here must keep the e2e that proves decided_by_member_id survives a real decision.",
+          "status": "open",
+          "notedAt": "2026-07-23T05:25:13Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not extend the same Discord-avatar fallback to the applicant's currentAvatarUrl - it already has one (promoted member, else the applicant's own Discord identity) and was not part of the reported problem.",
+        "Did not verify the rendered result against the local dev API: that container runs a built production image with no watch mode, so seeing it would have meant rebuilding the user's running stack. Proved by e2e against real MySQL instead, and the chip's rendering with a non-null avatar was confirmed in the browser."
+      ],
+      "lastTouchedCommit": "0d8d2f6aad51504aa340b9b21f356de2429a3637",
+      "createdAt": "2026-07-23T05:25:13Z",
+      "updatedAt": "2026-07-23T05:25:13Z",
+      "history": [
+        {
+          "at": "2026-07-23T05:25:13Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "discovered while making the console's decision attribution clickable (lords-regiment-dashboard:T-0274): the chip had no avatar to show"
+        },
+        {
+          "at": "2026-07-23T05:25:13Z",
+          "from": "planned",
+          "to": "review",
+          "by": "claude",
+          "note": "fixed on feat/planned-tasks-t0163-t0178, commit 0d8d2f6"
         }
       ]
     }
