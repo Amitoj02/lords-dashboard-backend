@@ -162,7 +162,11 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     const start = await agent.get('/api/auth/discord').expect(302);
     const state = new URL(start.headers.location).searchParams.get('state');
     const cb = await agent.get(`/api/auth/discord/callback?code=c&state=${state}`).expect(302);
-    return { token: new URL(cb.headers.location).searchParams.get('token') as string };
+    // Token is in the URL fragment now (LDA-H4), not the query string.
+    const token = new URLSearchParams(new URL(cb.headers.location).hash.replace(/^#/, '')).get(
+      'token',
+    ) as string;
+    return { token };
   }
 
   const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });

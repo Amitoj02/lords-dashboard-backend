@@ -71,7 +71,10 @@ describe('last_seen_at bump (e2e)', () => {
     const cb = await agent
       .get(`/api/auth/discord/callback?code=fake-code&state=${state}`)
       .expect(302);
-    return new URL(cb.headers.location).searchParams.get('token') as string;
+    // Token is in the URL fragment now (LDA-H4), not the query string.
+    return new URLSearchParams(new URL(cb.headers.location).hash.replace(/^#/, '')).get(
+      'token',
+    ) as string;
   }
 
   it('advances last_seen_at on an authenticated request, beyond the login timestamp', async () => {
