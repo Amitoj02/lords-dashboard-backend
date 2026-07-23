@@ -33,10 +33,14 @@ import { UpdateSettingsDto } from './dto/update-settings.dto';
  * Capabilities too sensitive to ever grant to the Applicant role (LDA-M17):
  * management, moderation, and secret-reveal powers. Applicant is the implicit
  * role of every authenticated identity-only session, so granting one of these to
- * it would hand the power to every signed-in Discord user. The participation /
- * read capabilities (apply, RSVP, submit/view gallery, view directory) are
- * deliberately NOT here — delegating those to Applicant is a policy choice, not a
- * privilege escalation.
+ * it would hand the power to every signed-in Discord user.
+ *
+ * Deliberately EXCLUDED: the participation / read capabilities (apply, RSVP,
+ * submit/view gallery, view directory) AND `manage_regiment_details` — the last
+ * one is public-copy/legal-document authoring that T-0145 split out of
+ * `manage_settings` precisely so it can be delegated (e.g. to a copy writer)
+ * without handing over the control panel. Delegating any of these to Applicant is
+ * a policy choice, not a privilege escalation.
  */
 const PRIVILEGED_CAPABILITIES: ReadonlySet<Capability> = new Set([
   Capability.ManageSettings,
@@ -47,7 +51,6 @@ const PRIVILEGED_CAPABILITIES: ReadonlySet<Capability> = new Set([
   Capability.ManageEvents,
   Capability.ModerateGallery,
   Capability.RevealEventPasswords,
-  Capability.ManageRegimentDetails,
 ]);
 
 /** Editable keys that live on the regiment row (identity/branding/Discord invite). */
