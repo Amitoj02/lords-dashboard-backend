@@ -769,6 +769,7 @@ describe('Post-MVP feature modules (e2e)', () => {
     // a leftover application would make the second run 409 on submit.
     const USER_MSG_DISCORD_ID = '900900900900900904';
     const NO_WIPE_DISCORD_ID = '900900900900900905';
+    const AVATAR_FB_DISCORD_ID = '900900900900900906';
 
     const cleanupIdentity = async (discordUserId: string): Promise<void> => {
       const identity = await dataSource
@@ -781,7 +782,12 @@ describe('Post-MVP feature modules (e2e)', () => {
     };
 
     const cleanupSelf = async (): Promise<void> => {
-      for (const id of [SELF_DISCORD_ID, USER_MSG_DISCORD_ID, NO_WIPE_DISCORD_ID]) {
+      for (const id of [
+        SELF_DISCORD_ID,
+        USER_MSG_DISCORD_ID,
+        NO_WIPE_DISCORD_ID,
+        AVATAR_FB_DISCORD_ID,
+      ]) {
         await cleanupIdentity(id);
       }
     };
@@ -938,6 +944,60 @@ describe('Post-MVP feature modules (e2e)', () => {
       // decided_by_member_id = NULL on every decision. Only a real save proves it.
       expect(staff.body.decidedByMemberId).not.toBeNull();
       expect(staff.body.decidedByName).toBeTruthy();
+    });
+
+    it('attributes the decision with the officer’s Discord avatar when they uploaded none (T-0186)', async () => {
+      const profile = { ...selfProfile, id: AVATAR_FB_DISCORD_ID, username: 'e2e_avatarfb' };
+      const token = (await signIn(profile)).token;
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(token))
+        .send({ ...validApp, inGameName: 'AvatarFb1' })
+        .expect(201);
+
+      // Pin the precondition rather than inheriting it: the officer has NO
+      // uploaded avatar — members.avatar_url is only ever written by an upload,
+      // so this is what almost every real officer looks like — while their
+      // linked Discord identity does have one.
+      const officerAvatar = 'https://cdn.discordapp.com/avatars/e2e/officer.png';
+      const identities = dataSource.getRepository(DiscordIdentity);
+      const ownerIdentity = await identities.findOne({
+        where: { discordUserId: ownerProfile.id },
+      });
+      const restoreAvatar = ownerIdentity!.avatarUrl;
+      await identities.update({ id: ownerIdentity!.id }, { avatarUrl: officerAvatar });
+      const members = dataSource.getRepository(Member);
+      await members.update({ discordIdentityId: ownerIdentity!.id }, { avatarUrl: null });
+
+      try {
+        // Three reads, three different relation loads — mocks cannot tell them
+        // apart, and each one is a separate way to lose the nested identity:
+        // the decision response (stampDecider), the detail read (loadOrFail) and
+        // the queue page (the findAll join).
+        const decided = await request(server())
+          .post(`/api/applications/${created.body.id}/decline`)
+          .set(bearer(ownerToken))
+          .send({ reason: 'e2e avatar fallback' })
+          .expect(200);
+        expect(decided.body.decidedByAvatarUrl).toBe(officerAvatar);
+
+        const detail = await request(server())
+          .get(`/api/applications/${created.body.id}`)
+          .set(bearer(ownerToken))
+          .expect(200);
+        expect(detail.body.decidedByAvatarUrl).toBe(officerAvatar);
+
+        const queue = await request(server())
+          .get('/api/applications?status=declined&limit=100')
+          .set(bearer(ownerToken))
+          .expect(200);
+        const row = (queue.body.data as { id: string; decidedByAvatarUrl: string | null }[]).find(
+          (a) => a.id === created.body.id,
+        );
+        expect(row?.decidedByAvatarUrl).toBe(officerAvatar);
+      } finally {
+        await identities.update({ id: ownerIdentity!.id }, { avatarUrl: restoreAvatar });
+      }
     });
 
     it('a second decision with blank boxes does not wipe the stored text', async () => {

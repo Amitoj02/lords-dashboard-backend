@@ -612,7 +612,11 @@ describe('ApplicationsService', () => {
       const result = await service.findOne(STAFF, 'app-1');
       expect(applications.findOne).toHaveBeenCalledWith(
         expect.objectContaining({
-          relations: { discordIdentity: true, promotedMember: true, decidedByMember: true },
+          relations: {
+            discordIdentity: true,
+            promotedMember: true,
+            decidedByMember: { discordIdentity: true },
+          },
         }),
       );
       expect(result.blocked).toBe(true);
@@ -634,6 +638,47 @@ describe('ApplicationsService', () => {
       const result = await service.findOne(STAFF, 'app-1');
 
       expect(result.decidedByName).toBe('Sergeant Steel');
+      expect(result.decidedByAvatarUrl).toBe('https://cdn/staff.png');
+    });
+
+    it('falls the decider avatar back to their Discord avatar (T-0186)', async () => {
+      // members.avatar_url only holds an UPLOADED avatar, so the common case is
+      // an officer with none — reading it alone left the attribution chip on
+      // bare initials while the same person's face rendered on their profile.
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Approved,
+          decidedByMemberId: 'member-staff',
+          decidedByMember: {
+            id: 'member-staff',
+            inGameName: 'Sergeant Steel',
+            avatarUrl: null,
+            discordIdentity: { avatarUrl: 'https://cdn/discord-steel.png' } as DiscordIdentity,
+          } as Member,
+        }),
+      );
+
+      const result = await service.findOne(STAFF, 'app-1');
+
+      expect(result.decidedByAvatarUrl).toBe('https://cdn/discord-steel.png');
+    });
+
+    it('prefers the decider’s uploaded avatar over their Discord one (T-0186)', async () => {
+      applications.findOne!.mockResolvedValue(
+        baseApplication({
+          status: ApplicationStatus.Approved,
+          decidedByMemberId: 'member-staff',
+          decidedByMember: {
+            id: 'member-staff',
+            inGameName: 'Sergeant Steel',
+            avatarUrl: 'https://cdn/staff.png',
+            discordIdentity: { avatarUrl: 'https://cdn/discord-steel.png' } as DiscordIdentity,
+          } as Member,
+        }),
+      );
+
+      const result = await service.findOne(STAFF, 'app-1');
+
       expect(result.decidedByAvatarUrl).toBe('https://cdn/staff.png');
     });
 
@@ -1086,6 +1131,18 @@ describe('ApplicationsService', () => {
       expect(result.decidedByName).toBe('Sergeant Steel');
       expect(result.decidedByAvatarUrl).toBe('https://cdn/staff.png');
     });
+
+    it('loads the decider’s identity so the response can fall back to their Discord avatar (T-0186)', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      await service.decline(STAFF, 'app-1', {}, null);
+
+      // Without the nested relation the decision RESPONSE would attribute with
+      // bare initials until a reload picked the fallback up from the queue query.
+      expect(members.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ relations: { discordIdentity: true } }),
+      );
+    });
   });
 
   describe('findAll', () => {
@@ -1121,6 +1178,12 @@ describe('ApplicationsService', () => {
       // The decider is joined too, so attributing a page of decisions costs no
       // per-row member lookup (T-0155).
       expect(qb.leftJoinAndSelect).toHaveBeenCalledWith('a.decidedByMember', 'decidedByMember');
+      // …along with the decider's own identity, which carries the avatar the
+      // attribution falls back to (T-0186) — still one query, not one per row.
+      expect(qb.leftJoinAndSelect).toHaveBeenCalledWith(
+        'decidedByMember.discordIdentity',
+        'decidedByIdentity',
+      );
       expect(qb.where).toHaveBeenCalledWith('a.regimentId = :regimentId', {
         regimentId: 'regiment-1',
       });

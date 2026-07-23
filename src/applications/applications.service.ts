@@ -354,8 +354,10 @@ export class ApplicationsService {
       // identity (display name + avatar) without an N+1 (T-0129).
       .leftJoinAndSelect('a.promotedMember', 'promotedMember')
       // Join the deciding staffer so the queue can attribute each decision
-      // without a per-row member lookup (T-0155).
+      // without a per-row member lookup (T-0155), and their identity for the
+      // avatar fallback the attribution chip renders (T-0186) — still one query.
       .leftJoinAndSelect('a.decidedByMember', 'decidedByMember')
+      .leftJoinAndSelect('decidedByMember.discordIdentity', 'decidedByIdentity')
       .where('a.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('a.isDraft = :isDraft', { isDraft: false });
 
@@ -638,8 +640,13 @@ export class ApplicationsService {
       where: { id, regimentId: user.regimentId },
       // The identity carries the applications-block flag surfaced on the DTO (T-0128);
       // the promoted member carries the applicant's live identity (T-0129); the
-      // deciding staffer carries the decision attribution (T-0155).
-      relations: { discordIdentity: true, promotedMember: true, decidedByMember: true },
+      // deciding staffer carries the decision attribution (T-0155), and their own
+      // identity the Discord avatar the attribution falls back to (T-0186).
+      relations: {
+        discordIdentity: true,
+        promotedMember: true,
+        decidedByMember: { discordIdentity: true },
+      },
     });
     if (!application) {
       throw new NotFoundException('Application not found');
@@ -664,6 +671,11 @@ export class ApplicationsService {
     application.decidedByMember = user.memberId
       ? ((await this.members.findOne({
           where: { id: user.memberId, regimentId: user.regimentId },
+          // Their identity carries the avatar the attribution falls back to when
+          // the staffer never uploaded one (T-0186) — without it the decision
+          // RESPONSE would attribute the decision with bare initials until the
+          // next reload picked the fallback up from the queue query.
+          relations: { discordIdentity: true },
         })) ?? undefined)
       : null;
   }
