@@ -15,6 +15,7 @@ import { DiscordOAuthService } from './discord-oauth.service';
 import { GuildMembershipService } from './guild-membership.service';
 import { MockDiscordOAuthService } from './mock-discord-oauth.service';
 import { DiscordIdentity } from './entities/discord-identity.entity';
+import { GuildGateGuard } from './guards/guild-gate.guard';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
@@ -63,6 +64,9 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     JwtStrategy,
     // Protect every route by default; @Public() opts out.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Enforce the guild-membership gate server-side (LDA-M5). Registered AFTER
+    // JwtAuthGuard so request.user is populated; @AllowWhenGated() opts routes out.
+    { provide: APP_GUARD, useClass: GuildGateGuard },
   ],
   exports: [AuthService, GuildMembershipService],
 })

@@ -6,6 +6,7 @@ import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swa
 import { CookieOptions, Request, Response } from 'express';
 import { AppConfig } from '../config/configuration';
 import { AuthService } from './auth.service';
+import { AllowWhenGated } from './decorators/allow-when-gated.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { CurrentUserDto } from './dto/current-user.dto';
@@ -91,6 +92,8 @@ export class AuthController {
   }
 
   @Get('me')
+  // Reachable even when gated (LDA-M5): the SPA needs it to render the gate screen.
+  @AllowWhenGated()
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'The current authenticated user (CurrentUser projection)' })
   @ApiOkResponse({ type: CurrentUserDto })
@@ -99,6 +102,8 @@ export class AuthController {
   }
 
   @Get('guild-status')
+  // Reachable even when gated (LDA-M5): the caller uses it to re-check membership.
+  @AllowWhenGated()
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Re-check whether the caller is still in the regiment Discord guild',
@@ -114,6 +119,8 @@ export class AuthController {
   }
 
   @Post('logout')
+  // Reachable even when gated (LDA-M5): a gated user must still be able to sign out.
+  @AllowWhenGated()
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Clear the session cookie and invalidate outstanding tokens' })
