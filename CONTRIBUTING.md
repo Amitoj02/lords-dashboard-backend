@@ -253,6 +253,18 @@ more than one guild, a join anywhere triggers onboarding against whatever
 `DISCORD_GUILD_ID` is configured. Keep the bot in exactly one guild, or use a
 separate Discord application for staging.
 
+**Reseeding while the API is running can leave a stale capability matrix.**
+`AuthzService` memoises `role_permissions` per regiment, and `REGIMENT_ID` is a
+fixed seed constant — so wiping and reseeding the database produces the *same*
+cache key and the old entry survives. The symptom is self-contradictory and has
+cost real time: `GET /settings/permissions` reads the table and shows a
+capability as **granted**, while the guard reads the cache and **denies** it.
+Anything that writes the matrix outside the API (`seed:prod`, a migration, a
+manual `UPDATE`) hits this, because only an API-side edit can call
+`AuthzService.invalidate()`. There is now a 30-second TTL so it self-heals; if
+you need it *immediately*, `docker compose restart api` or toggle any permission
+in the admin UI.
+
 **Guard shape is load-bearing in the mercenary checks.** They read
 `settings && settings.allowMercenaries === false`, never a truthiness check. A
 settings object that *omits* the column must stay permissive; a truthiness check
