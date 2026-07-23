@@ -214,7 +214,10 @@ describe('MembersService', () => {
     (actor: AuthenticatedUser, targetId: string) => Promise<unknown>
   > = {
     changeRank: (actor, id) => service.changeRank(id, { rankId: 'rank-9' }, actor, null),
-    changeRole: (actor, id) => service.changeRole(id, { role: MemberRole.Mercenary }, actor, null),
+    // Grant Applicant (the tier every non-Applicant actor outranks) so this shared
+    // invocation isolates the target-hierarchy gate from the grant-ceiling gate
+    // (LDA-M4) — the ceiling has its own dedicated test below.
+    changeRole: (actor, id) => service.changeRole(id, { role: MemberRole.Applicant }, actor, null),
     awardMedal: (actor, id) => service.awardMedal(id, { medalId: 'medal-1' }, actor, null),
     removeMedal: (actor, id) => service.removeMedal(id, 'medal-1', actor, null),
     suspend: (actor, id) =>
@@ -549,6 +552,22 @@ describe('MembersService', () => {
       await expect(
         service.changeRole('member-1', { role: MemberRole.Owner }, user(), null),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('changeRole forbids granting a role at or above the caller’s own tier (LDA-M4)', async () => {
+      // A Moderator (tier 30) may act on a Member (30 > 20), but must not be able to
+      // mint a superior (Admin) or a peer (Moderator) — only a role strictly below.
+      const mod = user({ memberId: 'mod-1', role: MemberRole.Moderator });
+      memberRepo.findOne.mockResolvedValue(
+        buildMember({ id: 'member-9', role: MemberRole.Member }),
+      );
+      await expect(
+        service.changeRole('member-9', { role: MemberRole.Admin }, mod, null),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(
+        service.changeRole('member-9', { role: MemberRole.Moderator }, mod, null),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(memberRepo.save).not.toHaveBeenCalled();
     });
 
     it("changeRole forbids changing the regiment owner's role", async () => {

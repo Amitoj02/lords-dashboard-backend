@@ -36,6 +36,7 @@ import {
   MEMBER_ADMIN_CAPABILITIES,
   MemberAdminAction,
   assertCanActOn,
+  outranks,
   permittedActions,
 } from './member-hierarchy';
 import {
@@ -271,6 +272,14 @@ export class MembersService {
     // self-targeting this endpoint always gets one predictable answer (T-0150),
     // and the same holds for the owner/hierarchy refusals (T-0176).
     const ownerMemberId = await this.assertMayModerate(member, user, 'changeRole');
+
+    // Cap the GRANTED role at strictly below the caller's own tier (LDA-M4).
+    // assertMayModerate only checks that the caller outranks the target's CURRENT
+    // role; without this a manage_roles holder could mint a peer or a superior
+    // (e.g. a Moderator promoting a Member straight to Admin).
+    if (!outranks(user.role, dto.role)) {
+      throw new ForbiddenException('You cannot grant a role equal to or above your own');
+    }
 
     // A no-op change (same role) records nothing — no service-record entry, no
     // audit row, no session invalidation or Discord role sync (T-0101).
