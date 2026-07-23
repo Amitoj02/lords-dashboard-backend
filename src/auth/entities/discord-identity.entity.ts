@@ -51,6 +51,18 @@ export class DiscordIdentity {
   @Column({ default: false })
   guildMember: boolean;
 
+  /**
+   * When {@link guildMember} was last CONFIRMED by the bot (T-0167). Null means
+   * "never confirmed either way" — which is not the same as "not a member", and
+   * the difference is the whole point: a lookup that timed out, hit a
+   * disconnected bot or found no configured guild leaves this null and the
+   * verdict is read FAIL-OPEN (T-0168), so a bot outage can never lock the
+   * regiment out. Only a completed lookup (or a live join/leave event, T-0169)
+   * writes this pair.
+   */
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  guildCheckedAt: Date | null;
+
   @Column({ type: 'datetime', precision: 6, nullable: true })
   lastSignInAt: Date | null;
 

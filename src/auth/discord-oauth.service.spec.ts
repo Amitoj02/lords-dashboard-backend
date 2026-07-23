@@ -34,6 +34,14 @@ describe('DiscordOAuthService', () => {
     expect(url).toContain('response_type=code');
   });
 
+  it('still asks for identify+email ONLY — guild gating adds no OAuth scope (T-0166)', () => {
+    // Surfacing guild membership on the session (T-0166) must not widen the
+    // consent screen: the verdict comes from the bot, so asking the user for
+    // `guilds` would be re-collecting data we deliberately stopped collecting.
+    const scope = new URL(service.buildAuthorizeUrl('st8')).searchParams.get('scope');
+    expect(scope).toBe('identify email');
+  });
+
   it('exchangeCode returns the token payload on success', async () => {
     const token = {
       access_token: 'at',

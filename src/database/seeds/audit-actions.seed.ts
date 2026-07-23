@@ -80,6 +80,11 @@ const ACTIONS = [
   },
   { code: 'event.completed', label: 'Event completed', defaultSeverity: AuditSeverity.Info },
   {
+    code: 'event.reanchor',
+    label: 'Event re-anchored to its timezone',
+    defaultSeverity: AuditSeverity.Warn,
+  },
+  {
     code: 'event.password.reveal',
     label: 'Event password revealed',
     defaultSeverity: AuditSeverity.Warn,
@@ -131,16 +136,10 @@ const ACTIONS = [
     label: 'Permission matrix updated',
     defaultSeverity: AuditSeverity.Warn,
   },
-  {
-    code: 'settings.transfer_ownership',
-    label: 'Ownership transferred',
-    defaultSeverity: AuditSeverity.Warn,
-  },
-  {
-    code: 'settings.transfer_discord',
-    label: 'Discord server rebound',
-    defaultSeverity: AuditSeverity.Warn,
-  },
+  // `settings.transfer_ownership` and `settings.transfer_discord` were dropped
+  // in T-0170 with the endpoints that wrote them. Historical rows are safe:
+  // severity is denormalised onto each audit row at write time and no read path
+  // joins this catalog for a label, so the ledger still renders them correctly.
   { code: 'settings.dissolve', label: 'Regiment dissolved', defaultSeverity: AuditSeverity.Error },
   { code: 'user.ban', label: 'User banned', defaultSeverity: AuditSeverity.Warn },
   { code: 'auth.sign_in', label: 'User signed in', defaultSeverity: AuditSeverity.Info },

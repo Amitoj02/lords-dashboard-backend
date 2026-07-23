@@ -3,7 +3,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
-import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
 import { RolePermission } from '../authz/entities/role-permission.entity';
@@ -79,11 +78,15 @@ const buildSettings = (overrides: Partial<RegimentSettings> = {}): RegimentSetti
   ...overrides,
 });
 
-/** Owner granted the governance-critical core trio (the floor the guard defends). */
+/**
+ * Owner granted the governance-critical core PAIR — the whole floor the guard
+ * defends since T-0170 retired TransferOwnership. Deliberately no third row: a
+ * matrix carrying a retired capability would let the floor test pass without
+ * ever exercising the two clauses that are actually left.
+ */
 const ownerCoreRows = (): RolePermission[] =>
   [
     { role: MemberRole.Owner, capability: Capability.ManageSettings, granted: true },
-    { role: MemberRole.Owner, capability: Capability.TransferOwnership, granted: true },
     { role: MemberRole.Owner, capability: Capability.ManageRoles, granted: true },
   ].map((row, i) => ({ id: `perm-${i}`, regimentId: REGIMENT, ...row }));
 
@@ -107,7 +110,6 @@ describe('SettingsService', () => {
   };
   const authz = { invalidate: jest.fn() };
   const audit = { record: jest.fn() };
-  const sessionContext = { invalidate: jest.fn() };
   const dataSource = { transaction: jest.fn() };
 
   beforeEach(async () => {
@@ -131,7 +133,6 @@ describe('SettingsService', () => {
         { provide: StorageService, useValue: storage },
         { provide: AuthzService, useValue: authz },
         { provide: AuditService, useValue: audit },
-        { provide: SessionContextService, useValue: sessionContext },
         { provide: DataSource, useValue: dataSource },
       ],
     }).compile();
@@ -466,57 +467,49 @@ describe('SettingsService', () => {
     });
   });
 
-  describe('transferOwnership', () => {
-    it('swaps roles in a transaction and audits the transfer', async () => {
-      regimentRepo.findOne.mockResolvedValue(buildRegiment({ ownerMemberId: 'member-1' }));
-      memberRepo.findOne.mockResolvedValue({
-        id: 'member-2',
-        regimentId: REGIMENT,
-        inGameName: 'Jane',
-        role: MemberRole.Member,
-      });
-
-      const regimentTxRepo = { update: jest.fn() };
-      const memberTxRepo = { update: jest.fn() };
-      dataSource.transaction.mockImplementation((cb: (m: unknown) => unknown) =>
-        cb({
-          getRepository: (entity: unknown) => (entity === Regiment ? regimentTxRepo : memberTxRepo),
-        }),
-      );
-
-      const result = await service.transferOwnership(
-        user(),
-        { toMemberId: 'member-2', confirm: true },
-        null,
-      );
-
-      expect(result).toEqual({ ownerMemberId: 'member-2' });
-      expect(regimentTxRepo.update).toHaveBeenCalledWith(
-        { id: REGIMENT },
-        { ownerMemberId: 'member-2' },
-      );
-      expect(memberTxRepo.update).toHaveBeenCalledWith(
-        { id: 'member-2', regimentId: REGIMENT },
-        { role: MemberRole.Owner },
-      );
-      expect(memberTxRepo.update).toHaveBeenCalledWith(
-        { id: 'member-1', regimentId: REGIMENT },
-        { role: MemberRole.Admin },
-      );
-      expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: 'settings.transfer_ownership',
-          target: expect.objectContaining({ id: 'member-2', label: 'Jane' }),
-        }),
-      );
+  describe('retired transfer_ownership capability (T-0170)', () => {
+    it('rejects a matrix edit naming the retired capability', async () => {
+      // The capability axis is derived from the enum, so deleting the member is
+      // what makes this a 400 — this pins that the retirement is enforced, not
+      // merely undocumented.
+      await expect(
+        service.updatePermissions(
+          user(),
+          {
+            changes: [{ role: MemberRole.Owner, capability: 'transfer_ownership', granted: true }],
+          },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(permissionRepo.save).not.toHaveBeenCalled();
     });
 
-    it('rejects an unconfirmed transfer without loading anything', async () => {
+    it('does not project the retired capability onto the matrix', async () => {
+      permissionRepo.find.mockResolvedValue(ownerCoreRows());
+
+      const dto = await service.getPermissions(user());
+
+      expect(dto.capabilities).not.toContain('transfer_ownership');
+      expect(dto.matrix[MemberRole.Owner]).not.toHaveProperty('transfer_ownership');
+    });
+
+    it('keeps the floor guard on the remaining pair: ManageRoles is still undroppable', async () => {
+      // The guard lost a clause with the capability; it must not have lost its
+      // teeth. Stripping the OTHER core capability still has to 403.
+      permissionRepo.find.mockResolvedValue(ownerCoreRows());
+
       await expect(
-        service.transferOwnership(user(), { toMemberId: 'member-2', confirm: false }, null),
-      ).rejects.toBeInstanceOf(BadRequestException);
-      expect(memberRepo.findOne).not.toHaveBeenCalled();
-      expect(dataSource.transaction).not.toHaveBeenCalled();
+        service.updatePermissions(
+          user(),
+          {
+            changes: [
+              { role: MemberRole.Owner, capability: Capability.ManageRoles, granted: false },
+            ],
+          },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(authz.invalidate).not.toHaveBeenCalled();
     });
   });
 

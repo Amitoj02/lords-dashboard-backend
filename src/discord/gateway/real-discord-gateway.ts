@@ -6,15 +6,25 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ChannelType, Client, Events, GatewayIntentBits, Guild } from 'discord.js';
+import {
+  APIEmbed,
+  ChannelType,
+  Client,
+  Events,
+  GatewayIntentBits,
+  Guild,
+  MessageCreateOptions,
+} from 'discord.js';
 import { AppConfig } from '../../config/configuration';
 import {
   DiscordChannel,
+  DiscordEmbed,
   DiscordGateway,
   DiscordGuildMemberRef,
   DiscordGatewayStatus,
   DiscordRole,
   MemberJoinHandler,
+  MemberLeaveHandler,
 } from './discord-gateway';
 
 /**
@@ -38,7 +48,8 @@ export class RealDiscordGateway
   private readonly logger = new Logger(RealDiscordGateway.name);
   private client: Client | null = null;
   private ready = false;
-  private joinHandler: MemberJoinHandler | null = null;
+  private readonly joinHandlers: MemberJoinHandler[] = [];
+  private readonly leaveHandlers: MemberLeaveHandler[] = [];
 
   constructor(private readonly config: ConfigService<AppConfig, true>) {
     super();
@@ -59,7 +70,12 @@ export class RealDiscordGateway
         this.logger.log(`Discord bot connected as ${c.user.tag}`);
       });
       this.client.on(Events.GuildMemberAdd, (member) => {
-        void this.joinHandler?.(member.id);
+        if (!this.isBoundGuild(member.guild.id, 'GuildMemberAdd')) return;
+        void this.fanOut(this.joinHandlers, member.id, 'join');
+      });
+      this.client.on(Events.GuildMemberRemove, (member) => {
+        if (!this.isBoundGuild(member.guild.id, 'GuildMemberRemove')) return;
+        void this.fanOut(this.leaveHandlers, member.id, 'leave');
       });
       this.client.on(Events.Error, (err) => this.logger.error(`Gateway error: ${err.message}`));
       await this.client.login(discord.botToken);
@@ -82,7 +98,57 @@ export class RealDiscordGateway
   }
 
   registerMemberJoinHandler(handler: MemberJoinHandler): void {
-    this.joinHandler = handler;
+    this.joinHandlers.push(handler);
+  }
+
+  registerMemberLeaveHandler(handler: MemberLeaveHandler): void {
+    this.leaveHandlers.push(handler);
+  }
+
+  /**
+   * Ignore member events from any guild other than the bound DISCORD_GUILD_ID.
+   *
+   * The GuildMemberAdd handler used to discard `member.guild.id` entirely, so a
+   * bot invited to two guilds (the common "test server + live server" setup)
+   * fired onboarding for BOTH: a join in the test guild DM'd a production
+   * welcome and assigned a production role, and vice versa. Every other method
+   * here resolves the bound guild explicitly via {@link resolveGuild}; the event
+   * handlers must be scoped the same way. When no guild is configured nothing is
+   * bound, so no event can be attributed and all are dropped.
+   */
+  private isBoundGuild(guildId: string, event: string): boolean {
+    const bound = this.config.get('discord', { infer: true }).guildId;
+    if (!bound) {
+      this.logger.warn(`Ignoring ${event} from guild ${guildId}: no DISCORD_GUILD_ID configured`);
+      return false;
+    }
+    if (guildId !== bound) {
+      this.logger.debug?.(`Ignoring ${event} from unbound guild ${guildId}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Run every subscriber for a member event in registration order, isolating
+   * failures: one throwing subscriber must not stop the others, and nothing here
+   * may reject into discord.js's event emitter (an unhandled rejection there
+   * would take down the API process).
+   */
+  private async fanOut(
+    handlers: readonly MemberJoinHandler[],
+    discordUserId: string,
+    kind: string,
+  ): Promise<void> {
+    for (const handler of handlers) {
+      try {
+        await handler(discordUserId);
+      } catch (error) {
+        this.logger.error(
+          `A member-${kind} handler failed for ${discordUserId}: ${(error as Error).message}`,
+        );
+      }
+    }
   }
 
   async getStatus(): Promise<DiscordGatewayStatus> {
@@ -172,20 +238,98 @@ export class RealDiscordGateway
     await member.roles.remove(roleId);
   }
 
-  async sendChannelMessage(channelId: string, content: string): Promise<{ messageId: string }> {
+  async sendChannelMessage(
+    channelId: string,
+    content: string,
+    embeds?: DiscordEmbed[],
+  ): Promise<{ messageId: string }> {
     const client = this.requireClient();
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased() || !('send' in channel)) {
       throw new ServiceUnavailableException('Channel is not a sendable text channel');
     }
-    const message = await channel.send(content);
+    const message = await channel.send(this.toSendOptions(content, embeds));
     return { messageId: message.id };
   }
 
-  async sendDirectMessage(discordUserId: string, content: string): Promise<void> {
+  async sendDirectMessage(
+    discordUserId: string,
+    content: string,
+    embeds?: DiscordEmbed[],
+  ): Promise<{ messageId: string }> {
     const client = this.requireClient();
     const user = await client.users.fetch(discordUserId);
-    await user.send(content);
+    const message = await user.send(this.toSendOptions(content, embeds));
+    return { messageId: message.id };
+  }
+
+  /**
+   * THE discord.js boundary for outbound messages (T-0172). Everything upstream
+   * speaks the app's own {@link DiscordEmbed}; the conversion to discord.js
+   * happens here and nowhere else.
+   *
+   * `content` is omitted entirely when empty rather than sent as `''` — Discord
+   * rejects an empty-string content, so an embed-only message must not carry the
+   * key at all.
+   */
+  private toSendOptions(content: string, embeds?: DiscordEmbed[]): MessageCreateOptions {
+    const options: MessageCreateOptions = {};
+    if (content) options.content = content;
+    if (embeds?.length) options.embeds = embeds.map((embed) => this.toApiEmbed(embed));
+    // Neither half present would be an empty message; fall back to the content
+    // key so the API returns a clear error instead of us sending `{}`.
+    if (!options.content && !options.embeds) options.content = content;
+    return options;
+  }
+
+  /**
+   * Map one app embed onto Discord's wire shape.
+   *
+   * Built as a plain `APIEmbed` object rather than through `EmbedBuilder` ON
+   * PURPOSE: the builder's setters VALIDATE and THROW, and a throw inside the
+   * send path is indistinguishable from a transient Discord failure — the outbox
+   * would retry it five times and then fail it permanently. Composition is
+   * already clamped to Discord's limits at enqueue time (see `clampEmbed`), so
+   * the remaining risk is a malformed URL, which is dropped by the composer's
+   * `safeUrl` rather than thrown over. `EmbedBuilder#toJSON()` produces exactly
+   * this object.
+   */
+  private toApiEmbed(embed: DiscordEmbed): APIEmbed {
+    return {
+      ...(embed.title !== undefined ? { title: embed.title } : {}),
+      ...(embed.description !== undefined ? { description: embed.description } : {}),
+      ...(embed.url !== undefined ? { url: embed.url } : {}),
+      ...(embed.color !== undefined ? { color: embed.color } : {}),
+      ...(embed.timestamp !== undefined ? { timestamp: embed.timestamp } : {}),
+      ...(embed.fields?.length
+        ? {
+            fields: embed.fields.map((f) => ({
+              name: f.name,
+              value: f.value,
+              ...(f.inline !== undefined ? { inline: f.inline } : {}),
+            })),
+          }
+        : {}),
+      ...(embed.author
+        ? {
+            author: {
+              name: embed.author.name,
+              ...(embed.author.iconUrl ? { icon_url: embed.author.iconUrl } : {}),
+              ...(embed.author.url ? { url: embed.author.url } : {}),
+            },
+          }
+        : {}),
+      ...(embed.footer
+        ? {
+            footer: {
+              text: embed.footer.text,
+              ...(embed.footer.iconUrl ? { icon_url: embed.footer.iconUrl } : {}),
+            },
+          }
+        : {}),
+      ...(embed.thumbnailUrl ? { thumbnail: { url: embed.thumbnailUrl } } : {}),
+      ...(embed.imageUrl ? { image: { url: embed.imageUrl } } : {}),
+    };
   }
 
   async fetchMember(discordUserId: string): Promise<DiscordGuildMemberRef | null> {

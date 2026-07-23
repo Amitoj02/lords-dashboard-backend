@@ -6,11 +6,13 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppConfig } from '../config/configuration';
 import { DiscordModule } from '../discord/discord.module';
+import { DiscordBotSettings } from '../discord/entities/discord-bot-settings.entity';
 import { Member } from '../members/entities/member.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { DiscordOAuthService } from './discord-oauth.service';
+import { GuildMembershipService } from './guild-membership.service';
 import { MockDiscordOAuthService } from './mock-discord-oauth.service';
 import { DiscordIdentity } from './entities/discord-identity.entity';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -18,7 +20,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([DiscordIdentity, Member, Regiment]),
+    // DiscordBotSettings is registered (not just imported as a type) because the
+    // guild gate's master switch lives on it and GuildMembershipService reads it
+    // directly — DiscordModule exports only the sync service and the gateway.
+    TypeOrmModule.forFeature([DiscordIdentity, Member, Regiment, DiscordBotSettings]),
     PassportModule,
     // Provides DiscordGateway so sign-in can resolve guild membership via the bot
     // (T-0050) rather than the OAuth `guilds` scope. DiscordModule does not import
@@ -40,6 +45,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   controllers: [AuthController],
   providers: [
     AuthService,
+    // Deliberately NOT injected by JwtStrategy or SessionContextService: an
+    // ordinary authenticated request must never be able to trigger a Discord
+    // call (T-0167). Only sign-in and GET /auth/guild-status reach it.
+    GuildMembershipService,
     // Swap the real Discord OAuth client for the in-process mock when
     // `discord.mock` is set. AuthService depends on DiscordOAuthService by
     // class token, so nothing downstream knows which implementation it got.
@@ -55,6 +64,6 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     // Protect every route by default; @Public() opts out.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
-  exports: [AuthService],
+  exports: [AuthService, GuildMembershipService],
 })
 export class AuthModule {}

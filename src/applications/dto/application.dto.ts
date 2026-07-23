@@ -97,7 +97,9 @@ export class ApplicationDto {
 
   @ApiProperty({
     nullable: true,
-    description: 'Avatar URL of the staffer who decided (null when unknown or unset).',
+    description:
+      'Avatar URL of the staffer who decided — their uploaded avatar, else their linked ' +
+      'Discord avatar; null when unknown or neither is set.',
   })
   decidedByAvatarUrl: string | null;
 
@@ -133,7 +135,12 @@ export class ApplicationDto {
    * `decidedByName`/`decidedByAvatarUrl` need the `decidedByMember` relation
    * loaded (T-0155). The FK is ON DELETE SET NULL and a decider can also be
    * deleted from the roster, so a missing relation degrades to null attribution
-   * rather than failing the read.
+   * rather than failing the read. The avatar falls back to the decider's LINKED
+   * DISCORD avatar (T-0186), matching {@link MemberDto} and the applicant's own
+   * `currentAvatarUrl` above: `members.avatar_url` only holds an UPLOADED
+   * avatar, so reading it alone left almost every officer's chip showing bare
+   * initials while the same person's face rendered everywhere else. That needs
+   * the nested `decidedByMember.discordIdentity` relation loaded too.
    */
   static from(application: Application, blocked?: boolean): ApplicationDto {
     const member = application.promotedMember;
@@ -162,7 +169,7 @@ export class ApplicationDto {
       currentAvatarUrl: member?.avatarUrl ?? identity?.avatarUrl ?? null,
       decidedByMemberId: application.decidedByMemberId,
       decidedByName: decidedBy?.inGameName ?? null,
-      decidedByAvatarUrl: decidedBy?.avatarUrl ?? null,
+      decidedByAvatarUrl: decidedBy?.avatarUrl ?? decidedBy?.discordIdentity?.avatarUrl ?? null,
       submittedAt: application.submittedAt.toISOString(),
       decidedAt: application.decidedAt ? application.decidedAt.toISOString() : null,
       createdAt: application.createdAt.toISOString(),

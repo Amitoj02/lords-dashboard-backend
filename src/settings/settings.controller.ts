@@ -14,21 +14,22 @@ import {
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { RequireRole } from '../auth/decorators/require-role.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { RequireCapability } from '../authz/decorators/require-capability.decorator';
-import { Capability, RegimentDocumentSlug } from '../common/enums';
+import { Capability, MemberRole, RegimentDocumentSlug } from '../common/enums';
 import { PermissionsMatrixDto } from './dto/permissions-matrix.dto';
 import { PresentationDto, UpdatePresentationDto } from './dto/presentation.dto';
 import { AdminRegimentDocumentDto, UpdateRegimentDocumentDto } from './dto/regiment-document.dto';
 import { SettingsDto } from './dto/settings.dto';
-import { DissolveDto, TransferDiscordDto, TransferOwnershipDto } from './dto/settings-actions.dto';
+import { DissolveDto } from './dto/settings-actions.dto';
 import { UpdatePermissionsDto } from './dto/update-permissions.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { SettingsService } from './settings.service';
 
 /**
- * Regiment control panel. Most routes require ManageSettings; ownership
- * transfer and dissolution are gated on the stronger TransferOwnership, and the
+ * Regiment control panel. Most routes require ManageSettings; dissolution is
+ * gated on the Owner ROLE rather than a capability (T-0170), and the
  * public-presentation + legal-document routes on ManageRegimentDetails (T-0145)
  * so publishing rights can be delegated without handing over the regiment. All
  * routes are auth-guarded globally and scoped to the caller's regiment; the
@@ -92,7 +93,7 @@ export class SettingsController {
   // ── Public presentation + legal documents (T-0147 / T-0149) ────────────────
   // Gated on ManageRegimentDetails rather than ManageSettings. The split is the
   // point of the feature: whoever writes the public copy needs neither the
-  // permission matrix nor ownership transfer, and a ManageSettings holder does
+  // permission matrix nor the Discord binding, and a ManageSettings holder does
   // not implicitly gain the right to rewrite the privacy policy.
 
   @Get('presentation')
@@ -137,35 +138,14 @@ export class SettingsController {
     return this.settingsService.updateDocument(user, slug, dto, req.ip ?? null);
   }
 
-  @Post('transfer-ownership')
-  @HttpCode(HttpStatus.OK)
-  @RequireCapability(Capability.TransferOwnership)
-  @ApiOperation({ summary: 'Transfer regiment ownership to another member' })
-  @ApiOkResponse({ description: 'The new owner member id' })
-  transferOwnership(
-    @Body() dto: TransferOwnershipDto,
-    @CurrentUser() user: AuthenticatedUser,
-    @Req() req: Request,
-  ): Promise<{ ownerMemberId: string }> {
-    return this.settingsService.transferOwnership(user, dto, req.ip ?? null);
-  }
-
-  @Post('transfer-discord')
-  @HttpCode(HttpStatus.OK)
-  @RequireCapability(Capability.ManageSettings)
-  @ApiOperation({ summary: "Rebind the regiment's Discord guild" })
-  @ApiOkResponse({ description: 'The updated Discord binding' })
-  transferDiscord(
-    @Body() dto: TransferDiscordDto,
-    @CurrentUser() user: AuthenticatedUser,
-    @Req() req: Request,
-  ): Promise<{ discordServerId: string | null; discordServerName: string | null }> {
-    return this.settingsService.transferDiscord(user, dto, req.ip ?? null);
-  }
-
+  // Dissolution is the single most destructive action in the app, and it is
+  // deliberately NOT capability-gated (T-0170): every capability — including
+  // manage_settings — is delegable from the permission matrix, so a capability
+  // gate could be handed to anyone. Tying it to the Owner ROLE keeps it with
+  // the one seat that cannot be granted through the matrix.
   @Post('dissolve')
   @HttpCode(HttpStatus.OK)
-  @RequireCapability(Capability.TransferOwnership)
+  @RequireRole(MemberRole.Owner)
   @ApiOperation({ summary: 'Dissolve (soft-delete) the regiment — destructive' })
   @ApiOkResponse({ description: 'Confirmation the regiment was dissolved' })
   dissolve(

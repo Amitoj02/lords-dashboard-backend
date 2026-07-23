@@ -1,4 +1,9 @@
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -137,10 +142,10 @@ describe('EventsService', () => {
   };
 
   // Transaction manager repositories (rebuilt each test).
-  let eventTxRepo: { create: jest.Mock; save: jest.Mock; softDelete: jest.Mock };
+  let eventTxRepo: { create: jest.Mock; save: jest.Mock; softDelete: jest.Mock; update: jest.Mock };
   let platformTxRepo: { delete: jest.Mock; insert: jest.Mock };
   let tagTxRepo: { delete: jest.Mock; insert: jest.Mock };
-  let notifyTxRepo: { delete: jest.Mock; insert: jest.Mock };
+  let notifyTxRepo: { find: jest.Mock; delete: jest.Mock; insert: jest.Mock };
   const dataSource = { transaction: jest.fn() };
 
   beforeEach(async () => {
@@ -188,10 +193,13 @@ describe('EventsService', () => {
       })),
       save: jest.fn((e: RegimentEvent) => Promise.resolve(e)),
       softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     };
     platformTxRepo = { delete: jest.fn(), insert: jest.fn() };
     tagTxRepo = { delete: jest.fn(), insert: jest.fn() };
-    notifyTxRepo = { delete: jest.fn(), insert: jest.fn() };
+    // `find` backs the T-0174 sentAt carry-over: replaceChildren reads the
+    // existing offsets so a re-submitted lead time keeps its dispatch record.
+    notifyTxRepo = { find: jest.fn().mockResolvedValue([]), delete: jest.fn(), insert: jest.fn() };
 
     const manager = {
       getRepository: jest.fn((entity: unknown) => {
@@ -247,9 +255,10 @@ describe('EventsService', () => {
       expect(created.isDraft).toBe(false);
       expect(created.createdByMemberId).toBe(MEMBER);
       // The settings default flows into the notify-offset child rows.
+      // A brand-new event's offsets have no prior dispatch record (T-0174).
       expect(notifyTxRepo.insert).toHaveBeenCalledWith([
-        { eventId: 'event-new', minutes: 60 },
-        { eventId: 'event-new', minutes: 15 },
+        { eventId: 'event-new', minutes: 60, sentAt: null },
+        { eventId: 'event-new', minutes: 15, sentAt: null },
       ]);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'event.create', regimentId: REGIMENT }),
@@ -280,10 +289,15 @@ describe('EventsService', () => {
       const created = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
       expect(created.isDraft).toBe(false);
       expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledTimes(1);
+      // The announcement is composed by DiscordSyncService now (T-0174); the
+      // service hands over a projection of the event, never rendered text — and
+      // that projection structurally cannot carry the server password.
       expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledWith(
         REGIMENT,
-        expect.stringContaining('New event: Muster'),
+        expect.objectContaining({ title: 'Muster', rsvpCount: 0, eventType: 'One-off' }),
       );
+      const summary = discordSync.enqueueEventAnnounce.mock.calls[0][1] as Record<string, unknown>;
+      expect(summary).not.toHaveProperty('serverPassword');
     });
 
     it('stores a cadence as an active recurring template (T-0074)', async () => {
@@ -737,6 +751,27 @@ describe('EventsService', () => {
     });
   });
 
+  describe('notify offsets (T-0174)', () => {
+    it('carries sentAt across a wipe-and-rewrite so a fired reminder is not re-sent', async () => {
+      // replaceChildren deletes and re-inserts, so an edit that re-submits the
+      // SAME lead times after one already fired would resurrect it as unresolved
+      // and the sweep would send a duplicate reminder for the same event.
+      const alreadySent = new Date('2026-07-22T10:00:00.000Z');
+      events.findOne.mockResolvedValue(buildEvent());
+      notifyTxRepo.find.mockResolvedValue([
+        { eventId: 'event-1', minutes: 60, sentAt: alreadySent },
+      ]);
+
+      await service.update(user(), 'event-1', { notifyOffsets: [60, 15] }, null);
+
+      expect(notifyTxRepo.insert).toHaveBeenCalledWith([
+        { eventId: 'event-1', minutes: 60, sentAt: alreadySent },
+        // A newly added lead time has no prior dispatch and stays unresolved.
+        { eventId: 'event-1', minutes: 15, sentAt: null },
+      ]);
+    });
+  });
+
   describe('revealPassword', () => {
     it('refuses when the caller has no RSVP', async () => {
       events.findOne.mockResolvedValue(buildEvent());
@@ -1063,6 +1098,231 @@ describe('EventsService', () => {
       await expect(service.removeSeries(user(), 'missing', null)).rejects.toBeInstanceOf(
         NotFoundException,
       );
+    });
+  });
+
+  describe('reanchor (T-0163)', () => {
+    /** The wall clock a pre-T-0156 row encodes: its stored instant read as UTC. */
+    const WALL = '2026-07-20T21:57:00';
+    const STORED = new Date('2026-07-20T21:57:00.000Z');
+
+    /** An event damaged by the pre-T-0156 write path: right label, wrong instant. */
+    const damaged = (overrides: Partial<RegimentEvent> = {}): RegimentEvent =>
+      buildEvent({ timezone: 'America/New_York', startsAt: STORED, ...overrides });
+
+    /** The (criteria, patch) pairs handed to the repository, in write order. */
+    const writes = () =>
+      eventTxRepo.update.mock.calls as [{ id: string }, { startsAt: Date; endsAt: Date | null }][];
+
+    it('moves the instant onto the stored wall clock and leaves the timezone alone', async () => {
+      events.findOne.mockResolvedValue(damaged());
+
+      const result = await service.reanchor(user(), 'event-1', { expectStartsAtLocal: WALL }, null);
+
+      // 21:57 was written as 21:57Z; in New York that wall clock is 01:57Z next day.
+      expect(writes()[0][0]).toEqual({ id: 'event-1', regimentId: REGIMENT });
+      expect(writes()[0][1]).toEqual({
+        startsAt: new Date('2026-07-21T01:57:00.000Z'),
+        endsAt: null,
+      });
+      // The label was always right — only the instant was wrong.
+      expect(result.timezone).toBe('America/New_York');
+      expect(result.startsAt).toBe('2026-07-21T01:57:00.000Z');
+    });
+
+    it('audits event.reanchor with the before/after snapshot', async () => {
+      events.findOne.mockResolvedValue(damaged());
+
+      await service.reanchor(user(), 'event-1', { expectStartsAtLocal: WALL }, '1.2.3.4');
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'event.reanchor',
+          regimentId: REGIMENT,
+          before: expect.objectContaining({
+            startsAt: '2026-07-20T21:57:00.000Z',
+            timezone: 'America/New_York',
+          }),
+          after: expect.objectContaining({
+            startsAt: '2026-07-21T01:57:00.000Z',
+            timezone: 'America/New_York',
+          }),
+        }),
+      );
+    });
+
+    it('rejects a wall clock that does not match the stored one, writing nothing', async () => {
+      // The guard that makes a repeat run fail loudly: after the repair above the
+      // row reads 2026-07-21T01:57, so the original expectation no longer matches
+      // and the second call cannot double-shift it.
+      events.findOne.mockResolvedValue(damaged({ startsAt: new Date('2026-07-21T01:57:00.000Z') }));
+
+      await expect(
+        service.reanchor(user(), 'event-1', { expectStartsAtLocal: WALL }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('rejects a UTC event — there is no instant to shift', async () => {
+      events.findOne.mockResolvedValue(damaged({ timezone: 'UTC' }));
+
+      await expect(
+        service.reanchor(user(), 'event-1', { expectStartsAtLocal: WALL }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rejects cascade on an event that is not a recurring template', async () => {
+      events.findOne.mockResolvedValue(damaged());
+
+      await expect(
+        service.reanchor(user(), 'event-1', { expectStartsAtLocal: WALL, cascade: true }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('409s when an occurrence would land on a SOFT-DELETED sibling, writing nothing', async () => {
+      // MySQL unique indexes ignore deleted_at, so a cancelled occurrence still
+      // owns its slot — saving over it would raise a raw 500 instead of a 409.
+      const occurrence = damaged({ id: 'occ-1', recurrenceTemplateId: 'tmpl-1' });
+      const cancelled = damaged({
+        id: 'occ-2',
+        recurrenceTemplateId: 'tmpl-1',
+        startsAt: new Date('2026-07-21T01:57:00.000Z'),
+        deletedAt: new Date('2026-07-01T00:00:00.000Z'),
+      });
+      events.findOne.mockResolvedValue(occurrence);
+      events.find.mockResolvedValue([occurrence, cancelled]);
+
+      await expect(
+        service.reanchor(user(), 'occ-1', { expectStartsAtLocal: WALL }, null),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // The pre-flight read must include soft-deleted rows, and nothing is written.
+      expect(events.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          withDeleted: true,
+          where: { recurrenceTemplateId: 'tmpl-1', regimentId: REGIMENT },
+        }),
+      );
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('translates a duplicate-key loss to the recurrence sweep into a 409, not a 500', async () => {
+      events.findOne.mockResolvedValue(damaged({ id: 'occ-1', recurrenceTemplateId: 'tmpl-1' }));
+      dataSource.transaction.mockRejectedValue(
+        Object.assign(new Error('ER_DUP_ENTRY'), { code: 'ER_DUP_ENTRY' }),
+      );
+
+      await expect(
+        service.reanchor(user(), 'occ-1', { expectStartsAtLocal: WALL }, null),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    describe('cascade ordering', () => {
+      /** A template plus three weekly occurrences, all on the same wall clock. */
+      const series = (timezone: string) => {
+        const template = buildEvent({
+          id: 'tmpl-1',
+          timezone,
+          startsAt: new Date('2026-07-13T21:57:00.000Z'),
+          isRecurring: true,
+          recurrenceActive: true,
+          recurrenceCadence: RecurrenceCadence.Weekly,
+          recurrenceTemplateId: null,
+        });
+        const occurrences = ['2026-07-20', '2026-07-27', '2026-08-03'].map((day, i) =>
+          buildEvent({
+            id: `occ-${i + 1}`,
+            timezone,
+            startsAt: new Date(`${day}T21:57:00.000Z`),
+            recurrenceTemplateId: 'tmpl-1',
+          }),
+        );
+        events.findOne.mockResolvedValue(template);
+        events.find.mockResolvedValue(occurrences);
+      };
+
+      it('writes latest-first when the shift moves occurrences LATER', async () => {
+        // New York is west of UTC, so every row moves forward four hours onto the
+        // slot its later neighbour still holds — the last occurrence must vacate
+        // first. InnoDB unique indexes are not deferrable, so ordering, not the
+        // transaction, is what prevents the collision.
+        series('America/New_York');
+
+        await service.reanchor(
+          user(),
+          'tmpl-1',
+          { expectStartsAtLocal: '2026-07-13T21:57:00', cascade: true },
+          null,
+        );
+
+        expect(writes().map(([criteria]) => criteria.id)).toEqual([
+          'occ-3',
+          'occ-2',
+          'occ-1',
+          'tmpl-1',
+        ]);
+      });
+
+      it('writes earliest-first when the shift moves occurrences EARLIER', async () => {
+        // Berlin is east of UTC: the same series moves two hours back, so the
+        // earliest row has to vacate first instead.
+        series('Europe/Berlin');
+
+        await service.reanchor(
+          user(),
+          'tmpl-1',
+          { expectStartsAtLocal: '2026-07-13T21:57:00', cascade: true },
+          null,
+        );
+
+        expect(writes().map(([criteria]) => criteria.id)).toEqual([
+          'tmpl-1',
+          'occ-1',
+          'occ-2',
+          'occ-3',
+        ]);
+        // Every row keeps its wall clock: 21:57 Berlin is 19:57Z.
+        expect(writes().map(([, patch]) => patch.startsAt.toISOString())).toEqual([
+          '2026-07-13T19:57:00.000Z',
+          '2026-07-20T19:57:00.000Z',
+          '2026-07-27T19:57:00.000Z',
+          '2026-08-03T19:57:00.000Z',
+        ]);
+      });
+    });
+
+    it('preserves the wall-clock duration across a DST boundary', async () => {
+      // startsAt and endsAt are re-derived independently, so this 24-calendar-hour
+      // event over the 2026-03-08 spring-forward becomes 23 real hours instead of
+      // keeping a fixed millisecond delta and ending an hour late.
+      events.findOne.mockResolvedValue(
+        damaged({
+          startsAt: new Date('2026-03-07T12:00:00.000Z'),
+          endsAt: new Date('2026-03-08T12:00:00.000Z'),
+        }),
+      );
+
+      await service.reanchor(
+        user(),
+        'event-1',
+        { expectStartsAtLocal: '2026-03-07T12:00:00' },
+        null,
+      );
+
+      const [, patch] = writes()[0];
+      expect(patch.startsAt).toEqual(new Date('2026-03-07T17:00:00.000Z')); // 12:00 EST
+      expect(patch.endsAt).toEqual(new Date('2026-03-08T16:00:00.000Z')); // 12:00 EDT
+      expect(patch.endsAt!.getTime() - patch.startsAt.getTime()).toBe(23 * 3_600_000);
+    });
+
+    it('throws NotFound for a missing / wrong-regiment event', async () => {
+      events.findOne.mockResolvedValue(null);
+      await expect(
+        service.reanchor(user(), 'missing', { expectStartsAtLocal: WALL }, null),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

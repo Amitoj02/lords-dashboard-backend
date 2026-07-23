@@ -248,10 +248,13 @@ after.
 from the admin UI — controls whether anything is actually *enqueued*. The bot
 writes nothing until both are set.
 
-**The bot's `GuildMemberAdd` handler does not filter by guild.** If the bot is in
-more than one guild, a join anywhere triggers onboarding against whatever
-`DISCORD_GUILD_ID` is configured. Keep the bot in exactly one guild, or use a
-separate Discord application for staging.
+**The bot's member events are scoped to the bound guild (T-0180).** Both
+`GuildMemberAdd` and `GuildMemberRemove` filter on `DISCORD_GUILD_ID` and drop
+events from anywhere else, so a bot invited to a staging guild alongside the live
+one no longer cross-fires onboarding. Events are dropped entirely when no guild
+is configured — nothing is bound, so nothing can be attributed. Running one
+Discord application against both a test and the live guild is now safe; a
+separate application per environment is still tidier.
 
 **Reseeding while the API is running can leave a stale capability matrix.**
 `AuthzService` memoises `role_permissions` per regiment, and `REGIMENT_ID` is a

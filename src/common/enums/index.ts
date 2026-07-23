@@ -142,6 +142,15 @@ export enum DiscordSyncJobType {
   /** Strip managed roles + apply the configured Ban role on an app-side ban. */
   MemberBanRole = 'member.ban_role',
   Announce = 'announce',
+  /**
+   * A lead-time reminder for an event (T-0174), fired by the reminder scheduler
+   * from an `event_notify_offsets` row. Deliberately its OWN type rather than
+   * another {@link Announce}: the two are visually distinct messages, and a
+   * separate type is what lets the operations ledger, the delivery matrix and a
+   * future rate-limit tell "the event was created" apart from "the event is
+   * about to start".
+   */
+  EventReminder = 'event.reminder',
   Welcome = 'welcome',
   /** Post a new enlistment application to the enlistments channel (T-0042). */
   ApplicationSubmitted = 'application.submitted',
@@ -234,10 +243,17 @@ export enum RegimentDocumentSlug {
   Guidelines = 'guidelines',
 }
 
-/** Capability keys for the role/permission matrix (role_permissions.capability). */
+/**
+ * Capability keys for the role/permission matrix (role_permissions.capability).
+ *
+ * `transfer_ownership` was retired in T-0170 along with both transfer
+ * endpoints. The enum is the derived capability axis for GET/PATCH
+ * /api/settings/permissions, so deleting the member is what makes the row
+ * vanish from the matrix and makes an edit naming it a 400 — do not re-add it
+ * without also restoring a route that consumes it.
+ */
 export enum Capability {
   ManageSettings = 'manage_settings',
-  TransferOwnership = 'transfer_ownership',
   ManageRoles = 'manage_roles',
   ViewAuditLog = 'view_audit_log',
   EditRanksMedals = 'edit_ranks_medals',
@@ -254,8 +270,8 @@ export enum Capability {
    * Edit the regiment's public presentation (landing/login banners, quotes,
    * overlay density) and the legal documents (T-0145). Deliberately separate
    * from ManageSettings: this is the copy the whole internet sees, so it can be
-   * delegated to whoever writes it without also handing over ownership
-   * transfer, the permission matrix, or the Discord bot configuration.
+   * delegated to whoever writes it without also handing over the permission
+   * matrix or the Discord bot configuration.
    */
   ManageRegimentDetails = 'manage_regiment_details',
 }

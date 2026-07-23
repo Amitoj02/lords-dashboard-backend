@@ -94,6 +94,17 @@ export class DiscordBotSettings {
   @Column({ default: false })
   applyBanRoleOnBan: boolean;
 
+  /**
+   * Master switch for guild-membership gating (T-0167). OFF by default and
+   * shipped that way deliberately: production has ~576 real members and the bot
+   * rollout has not happened, so with no bot connected every membership verdict
+   * would be wrong and turning the gate on would lock the regiment out of its own
+   * dashboard. With this false the verdict is still computed and reported, but
+   * nothing is gated on it — behaviour is exactly as before the flag existed.
+   */
+  @Column({ default: false })
+  guildGateEnabled: boolean;
+
   @CreateDateColumn({ type: 'datetime', precision: 6 })
   createdAt: Date;
 

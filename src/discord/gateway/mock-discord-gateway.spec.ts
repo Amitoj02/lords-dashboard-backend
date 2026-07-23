@@ -58,4 +58,72 @@ describe('MockDiscordGateway', () => {
     await gateway.simulateMemberJoin('user-3');
     expect(handler).toHaveBeenCalledWith('user-3');
   });
+
+  it('invokes the registered leave handler on simulateMemberLeave (T-0169)', async () => {
+    const handler = jest.fn();
+    gateway.registerMemberLeaveHandler(handler);
+    await gateway.simulateMemberJoin('user-4');
+    await gateway.simulateMemberLeave('user-4');
+
+    expect(handler).toHaveBeenCalledWith('user-4');
+    // The in-memory guild forgets the member too, so a lookup racing the event
+    // cannot contradict the departure the mock just announced.
+    await expect(gateway.fetchMember('user-4')).resolves.toBeNull();
+  });
+
+  describe('recorded sent messages (T-0172)', () => {
+    it('records a plain-text channel post with no embeds', async () => {
+      const { messageId } = await gateway.sendChannelMessage('channel-1', 'hello');
+
+      expect(gateway.sentMessages).toEqual([
+        { kind: 'channel', target: 'channel-1', content: 'hello', embeds: [], messageId },
+      ]);
+    });
+
+    it('records the EMBED so its shape is assertable under DISCORD_BOT_MOCK', async () => {
+      // Without this the mock kept nothing at all, so an embed-only message was
+      // observable only as a log line — nothing could prove what was sent.
+      const embed = { title: 'New event: Muster', color: 0x3b5bdb };
+
+      await gateway.sendChannelMessage('channel-1', '', [embed]);
+
+      expect(gateway.sentMessages[0].content).toBe('');
+      expect(gateway.sentMessages[0].embeds).toEqual([embed]);
+    });
+
+    it('records a DM against the target user and returns a message id', async () => {
+      const { messageId } = await gateway.sendDirectMessage('user-9', '', [{ title: 'Declined' }]);
+
+      expect(gateway.sentMessages[0]).toEqual(
+        expect.objectContaining({ kind: 'dm', target: 'user-9', messageId }),
+      );
+    });
+
+    it('mints a distinct id per message even within the same millisecond', async () => {
+      const a = await gateway.sendChannelMessage('c', 'one');
+      const b = await gateway.sendChannelMessage('c', 'two');
+
+      expect(a.messageId).not.toBe(b.messageId);
+    });
+
+    it('clears the buffer on reset so a suite can start from empty', async () => {
+      await gateway.sendChannelMessage('c', 'x');
+      gateway.resetSentMessages();
+      expect(gateway.sentMessages).toHaveLength(0);
+    });
+  });
+
+  it('fans an event out to EVERY registered handler (T-0169)', async () => {
+    // Onboarding and the membership verdict writer both subscribe to
+    // GuildMemberAdd; neither may silently displace the other.
+    const first = jest.fn();
+    const second = jest.fn();
+    gateway.registerMemberJoinHandler(first);
+    gateway.registerMemberJoinHandler(second);
+
+    await gateway.simulateMemberJoin('user-5');
+
+    expect(first).toHaveBeenCalledWith('user-5');
+    expect(second).toHaveBeenCalledWith('user-5');
+  });
 });

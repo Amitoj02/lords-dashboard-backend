@@ -2,7 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
-import { DiscordSyncService, RoleRelinkPayload } from './discord-sync.service';
+import { Regiment } from '../regiments/entities/regiment.entity';
+import { DiscordSyncService, EventSummary, RoleRelinkPayload } from './discord-sync.service';
+import { DiscordEmbed } from './gateway/discord-gateway';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordSyncJob } from './entities/discord-sync-job.entity';
 
@@ -26,6 +28,7 @@ const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettin
   banRoleName: null,
   syncRolesOnChange: true,
   applyBanRoleOnBan: false,
+  guildGateEnabled: false,
   createdAt: new Date(),
   updatedAt: new Date(),
   ...overrides,
@@ -45,12 +48,36 @@ describe('DiscordSyncService', () => {
   };
   const settingsRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => x) };
   const membersRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
+  const regimentsRepo = { findOne: jest.fn() };
+
+  /** The embed a producer composed, read straight off the saved job payload. */
+  const savedEmbed = (call = 0): DiscordEmbed =>
+    (jobsRepo.create.mock.calls[call][0] as { payload: { embed: DiscordEmbed } }).payload.embed;
+
+  const event = (overrides: Partial<EventSummary> = {}): EventSummary => ({
+    title: 'Line Battle',
+    description: 'Bring your muskets.',
+    startsAt: '2026-08-01T19:00:00.000Z',
+    endsAt: '2026-08-01T21:00:00.000Z',
+    timezone: 'America/Toronto',
+    bannerUrl: 'https://cdn.example.com/banner.png',
+    eventType: 'One-off',
+    rsvpCount: 12,
+    ...overrides,
+  });
 
   /** The re-link holder query: a chainable builder over a fixed holder list. */
   let holdersQb: Record<string, jest.Mock>;
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    regimentsRepo.findOne.mockResolvedValue({
+      id: REGIMENT,
+      name: 'The Lords',
+      accentTone: 'crimson',
+      bannerUrl: 'https://cdn.example.com/regiment-banner.png',
+      crestUrl: 'https://cdn.example.com/crest.png',
+    });
     holdersQb = {
       innerJoin: jest.fn(() => holdersQb),
       where: jest.fn(() => holdersQb),
@@ -76,6 +103,7 @@ describe('DiscordSyncService', () => {
         { provide: getRepositoryToken(DiscordSyncJob), useValue: jobsRepo },
         { provide: getRepositoryToken(DiscordBotSettings), useValue: settingsRepo },
         { provide: getRepositoryToken(Member), useValue: membersRepo },
+        { provide: getRepositoryToken(Regiment), useValue: regimentsRepo },
       ],
     }).compile();
     service = module.get(DiscordSyncService);
@@ -87,7 +115,7 @@ describe('DiscordSyncService', () => {
         settings({ botEnabled: false, eventAnnouncementChannelId: 'evt-1' }),
       );
       expect(await service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).toBeNull();
-      expect(await service.enqueueEventAnnounce(REGIMENT, 'hey')).toBeNull();
+      expect(await service.enqueueEventAnnounce(REGIMENT, event())).toBeNull();
       expect(jobsRepo.save).not.toHaveBeenCalled();
     });
   });
@@ -185,14 +213,14 @@ describe('DiscordSyncService', () => {
 
     it('routes an event announce to the event channel, and no-ops when it is unset', async () => {
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
-      await service.enqueueEventAnnounce(REGIMENT, 'New event');
+      await service.enqueueEventAnnounce(REGIMENT, event());
       expect(jobsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ payload: expect.objectContaining({ channelId: 'evt-1' }) }),
       );
 
       jest.clearAllMocks();
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: null }));
-      expect(await service.enqueueEventAnnounce(REGIMENT, 'New event')).toBeNull();
+      expect(await service.enqueueEventAnnounce(REGIMENT, event())).toBeNull();
       expect(jobsRepo.create).not.toHaveBeenCalled();
     });
   });
@@ -371,6 +399,291 @@ describe('DiscordSyncService', () => {
         expect(await service.expandRelinkPage(cursorJob())).toBe(0);
         expect(jobsRepo.create).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  describe('embed composition (T-0172 / T-0173 / T-0174 / T-0175)', () => {
+    const summary = (overrides: Record<string, unknown> = {}) => ({
+      applicantName: 'Jane',
+      inGameName: 'JaneG',
+      currentRegiment: 'None',
+      howFound: 'Discord',
+      preferredClasses: 'Line',
+      skillsToImprove: 'Melee',
+      representativeNote: null,
+      ...overrides,
+    });
+
+    it('posts an enlistment as an EMBED, not as markdown text', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: 'enl-1' }));
+
+      await service.enqueueApplicationSubmitted(
+        REGIMENT,
+        summary({ avatarUrl: 'https://cdn.discordapp.com/avatars/1/a.png' }),
+      );
+
+      const payload = (jobsRepo.create.mock.calls[0][0] as { payload: Record<string, unknown> })
+        .payload;
+      expect(payload.content).toBe('');
+      const embed = savedEmbed();
+      expect(embed.title).toContain('New enlistment application');
+      expect(embed.thumbnailUrl).toBe('https://cdn.discordapp.com/avatars/1/a.png');
+      // The regiment's accent tone (crimson) colours the post.
+      expect(embed.color).toBe(0x8b2c2c);
+      const names = (embed.fields ?? []).map((f) => f.name);
+      expect(names).toEqual([
+        'In-game name',
+        'Current regiment',
+        'How they found us',
+        'Preferred classes',
+        'Wants to improve',
+      ]);
+    });
+
+    it('OMITS an empty optional answer rather than rendering a blank field', async () => {
+      // Discord rejects a field with an empty value (50035), so a blank optional
+      // answer would fail the whole post — omission is correctness, not polish.
+      settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: 'enl-1' }));
+
+      await service.enqueueApplicationSubmitted(REGIMENT, summary({ representativeNote: '   ' }));
+
+      expect((savedEmbed().fields ?? []).map((f) => f.name)).not.toContain('Representative note');
+    });
+
+    it('degrades to NO thumbnail when the applicant has no avatar', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: 'enl-1' }));
+
+      await service.enqueueApplicationSubmitted(REGIMENT, summary({ avatarUrl: null }));
+
+      expect(savedEmbed().thumbnailUrl).toBeUndefined();
+    });
+
+    it('composes the decision DM here, keeping the officer’s custom message', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      await service.enqueueApplicationDecision(REGIMENT, {
+        discordUserId: USER_ID,
+        outcome: 'decline',
+        customMessage: 'We need more line experience.',
+      });
+
+      const embed = savedEmbed();
+      expect(embed.title).toContain('The Lords');
+      expect(embed.description).toBe('We need more line experience.');
+    });
+
+    it('carries NO field beyond the officer’s message — the note stays with staff (T-0182)', async () => {
+      // The decision DM used to render a "Note from the reviewing officer" field
+      // fed from the staff-only moderator note. There is now no field at all, so
+      // there is nowhere for a staff-only value to be rendered.
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      await service.enqueueApplicationDecision(REGIMENT, {
+        discordUserId: USER_ID,
+        outcome: 'decline',
+        customMessage: 'We need more line experience.',
+      });
+
+      expect(savedEmbed().fields).toBeUndefined();
+    });
+
+    it('falls back to the per-outcome default when the officer wrote nothing', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      await service.enqueueApplicationDecision(REGIMENT, {
+        discordUserId: USER_ID,
+        outcome: 'approve',
+        customMessage: '   ',
+      });
+
+      expect(savedEmbed().description).toContain('The Lords');
+      expect(savedEmbed().description).toContain('approved');
+    });
+
+    it('colour-codes the gallery decline like an application decline', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      await service.enqueueGalleryDecision(REGIMENT, {
+        discordUserId: USER_ID,
+        title: 'Siege of Nowhere',
+        reason: 'Off-topic',
+      });
+
+      const embed = savedEmbed();
+      expect(embed.title).toContain('declined');
+      expect(embed.description).toContain('Siege of Nowhere');
+      expect(embed.fields?.[0]).toEqual(expect.objectContaining({ value: 'Off-topic' }));
+    });
+
+    it('announces an event with a relative timestamp, the banner and the RSVP count', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+
+      await service.enqueueEventAnnounce(REGIMENT, event());
+
+      const embed = savedEmbed();
+      expect(embed.title).toBe('📅 New event: Line Battle');
+      expect(embed.imageUrl).toBe('https://cdn.example.com/banner.png');
+      expect(embed.footer?.text).toBe('The Lords');
+      const fields = Object.fromEntries((embed.fields ?? []).map((f) => [f.name, f.value]));
+      expect(fields.Starts).toMatch(/^<t:\d+:R>/);
+      // The wall clock is rendered in the EVENT's zone, never the process zone.
+      expect(fields.Starts).toContain('15:00');
+      expect(fields.Duration).toBe('2h');
+      expect(fields.RSVPs).toBe('12');
+    });
+
+    it('posts a valid embed with no image when the event has no banner', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+
+      await service.enqueueEventAnnounce(REGIMENT, event({ bannerUrl: null }));
+
+      expect(savedEmbed().imageUrl).toBeUndefined();
+      expect(savedEmbed().title).toBe('📅 New event: Line Battle');
+    });
+
+    it('NEVER leaks the event server password — there is nowhere to put one', async () => {
+      // The password is gated behind an RSVP in the app; an announcement channel
+      // is readable by the whole guild, so a leak here would silently retire that
+      // gate. EventSummary structurally cannot carry it — this pins that even if
+      // a caller tries to smuggle one through.
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+
+      await service.enqueueEventAnnounce(REGIMENT, {
+        ...event({ description: 'Muster at the bridge.' }),
+        serverPassword: 'hunter2',
+        serverName: 'Lords Official',
+      } as unknown as EventSummary);
+
+      const serialised = JSON.stringify(jobsRepo.create.mock.calls[0][0]);
+      expect(serialised).not.toContain('hunter2');
+      expect(serialised).not.toContain('serverPassword');
+    });
+
+    it('makes a reminder visually distinct from the original announcement', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+
+      await service.enqueueEventAnnounce(REGIMENT, event());
+      await service.enqueueEventReminder(REGIMENT, event(), 60);
+
+      const announce = savedEmbed(0);
+      const reminder = savedEmbed(1);
+      expect(reminder.title).toContain('Reminder');
+      expect(reminder.title).toContain('in 1 hour');
+      expect(reminder.color).not.toBe(announce.color);
+      expect((jobsRepo.create.mock.calls[1][0] as { jobType: DiscordSyncJobType }).jobType).toBe(
+        DiscordSyncJobType.EventReminder,
+      );
+    });
+
+    it('keeps the audit mirror COMPACT and severity-coloured', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ auditLogChannelId: 'aud-1' }));
+
+      await service.enqueueAuditLog(
+        REGIMENT,
+        {
+          action: 'member.ban',
+          actorLabel: 'Owner',
+          detail: 'spam',
+          severity: 'warn',
+          targetLabel: 'Pvt Smith',
+          occurredAt: '2026-07-22T10:00:00.000Z',
+        },
+        'audit-1',
+      );
+
+      const embed = savedEmbed();
+      expect(embed.title).toBe('member.ban');
+      expect(embed.color).toBe(0xb8860b);
+      expect(embed.fields).toHaveLength(3);
+      expect(embed.thumbnailUrl).toBeUndefined();
+      expect(embed.imageUrl).toBeUndefined();
+      // The write-back id still rides along, untouched by the embed work.
+      expect(
+        (jobsRepo.create.mock.calls[0][0] as { payload: { auditEntryId: string } }).payload
+          .auditEntryId,
+      ).toBe('audit-1');
+    });
+
+    it('brands the welcome and keeps the DM fallback when no channel is set', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ welcomeChannelId: null, welcomeMessage: 'Fall in!' }),
+      );
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      const payload = (
+        jobsRepo.create.mock.calls[0][0] as { payload: { channelId: string | null } }
+      ).payload;
+      // Null channel is what routes the worker to the DM path — unchanged.
+      expect(payload.channelId).toBeNull();
+      const embed = savedEmbed();
+      expect(embed.title).toBe('Welcome to The Lords');
+      expect(embed.description).toBe('Fall in!');
+      expect(embed.imageUrl).toBe('https://cdn.example.com/regiment-banner.png');
+      expect(embed.fields?.[0].name).toBe('Next steps');
+    });
+
+    // ── T-0184: blank means "use the house default", on the READ side too ─────
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+      ['NULL', null],
+    ])('greets with the house default when the stored message is %s', async (_label, stored) => {
+      // `?? DEFAULT` was only nullish-safe, so a cleared editor box produced a
+      // welcome embed with NO body. Rows written before the PATCH normalisation
+      // are still out there, so the send path has to be correct on its own.
+      settingsRepo.findOne.mockResolvedValue(settings({ welcomeMessage: stored }));
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(savedEmbed().description).toBe('Welcome to the regiment!');
+      expect(savedEmbed().description).not.toBe('');
+    });
+
+    it('uses a configured message verbatim', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ welcomeMessage: 'Fall in, lads.' }));
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(savedEmbed().description).toBe('Fall in, lads.');
+    });
+
+    // ── T-0185: tokens expand, and admin text can never ping ─────────────────
+    it('expands {user} and {regiment} against the joining member (T-0185)', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ welcomeMessage: 'Welcome {user} to {regiment}!' }),
+      );
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(savedEmbed().description).toBe(`Welcome <@${USER_ID}> to The Lords!`);
+    });
+
+    it('keeps admin-authored welcome text out of the message CONTENT (T-0185)', async () => {
+      // THIS is the assertion that makes the injection risk unreachable. Discord
+      // does not resolve @everyone/@here inside an embed, so the text is inert
+      // exactly as long as it stays in `embed.description`. If a future change
+      // moves it to `content` — where mentions ARE parsed and the gateway sets no
+      // allowed_mentions — this fails.
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ welcomeMessage: '@everyone @here rally for {user}' }),
+      );
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      const payload = (jobsRepo.create.mock.calls[0][0] as { payload: { content: string } })
+        .payload;
+      expect(payload.content).toBe('');
+      expect(savedEmbed().description).toContain('@everyone');
+    });
+
+    it('still composes a usable notification when the regiment row is missing', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: 'enl-1' }));
+      regimentsRepo.findOne.mockResolvedValue(null);
+
+      await service.enqueueApplicationSubmitted(REGIMENT, summary());
+
+      expect(savedEmbed().description).toContain('the regiment');
     });
   });
 

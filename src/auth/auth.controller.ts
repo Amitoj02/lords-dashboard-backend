@@ -8,6 +8,8 @@ import { AuthService } from './auth.service';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { CurrentUserDto } from './dto/current-user.dto';
+import { GuildStatusDto } from './dto/guild-status.dto';
+import { GuildMembershipService } from './guild-membership.service';
 import { AuthenticatedUser } from './types/authenticated-user.interface';
 
 const STATE_COOKIE = 'discord_oauth_state';
@@ -19,6 +21,7 @@ export class AuthController {
   constructor(
     private readonly authService: AuthService,
     private readonly config: ConfigService<AppConfig, true>,
+    private readonly guildMembership: GuildMembershipService,
   ) {}
 
   @Public()
@@ -76,6 +79,21 @@ export class AuthController {
   @ApiOkResponse({ type: CurrentUserDto })
   me(@CurrentUser() user: AuthenticatedUser): Promise<CurrentUserDto> {
     return this.authService.getCurrentUser(user);
+  }
+
+  @Get('guild-status')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Re-check whether the caller is still in the regiment Discord guild',
+    description:
+      'The ONLY endpoint that may ask the bot about the caller (T-0167). The verdict is ' +
+      'cached per identity for 15 minutes and concurrent calls collapse to one lookup, so ' +
+      'polling this is cheap. When the bot cannot answer the last known verdict is kept and ' +
+      '`degraded` is true — the check fails OPEN and never denies on an outage.',
+  })
+  @ApiOkResponse({ type: GuildStatusDto })
+  guildStatus(@CurrentUser() user: AuthenticatedUser): Promise<GuildStatusDto> {
+    return this.guildMembership.getStatus(user);
   }
 
   @Post('logout')

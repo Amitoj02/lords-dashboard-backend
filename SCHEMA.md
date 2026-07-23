@@ -19,8 +19,8 @@ TypeORM entities and the initial migration.
 2. **Lookup tables over hardcoded enums where the UI offers CRUD.** Ranks and Medals are
    admin-editable (create / edit / delete / reorder / Discord-sync) → real tables, not enums. Truly
    fixed value-sets (role, status, platform, ribbon colour, statuses) stay as MySQL `ENUM`s.
-3. **Single-tenant now, multi-tenant-ready.** Onboarding creates a regiment and supports
-   ownership/Discord transfer, so every domain row carries `regiment_id`. v1 seeds exactly one
+3. **Single-tenant now, multi-tenant-ready.** Onboarding creates a regiment and the Discord guild it
+   is bound to is rebindable, so every domain row carries `regiment_id`. v1 seeds exactly one
    regiment.
 4. **Derived values are never trusted from the client.** `holders`, `events_attended`,
    `attendance_percent`, `rsvp_counts`, `likes`, `file_count` are computed in the service layer (or via
@@ -120,7 +120,7 @@ The tenant root. One row in v1.
 | `discord_server_name` | varchar(120) NULL | |
 | `setup_step` | tinyint NOT NULL DEFAULT 1 | onboarding wizard resume (1–5) |
 | `setup_complete` | boolean NOT NULL DEFAULT false | |
-| `owner_member_id` | char(36) NULL | FK → `members.id` (transfer-ownership reassigns) |
+| `owner_member_id` | char(36) NULL | FK → `members.id`; set at provisioning. No API path reassigns it since T-0170 retired ownership transfer |
 | `created_at` / `updated_at` | timestamp | |
 | `dissolved_at` | timestamp NULL | soft-delete (dissolution) |
 
@@ -225,6 +225,7 @@ sign-in. This is what "sign in with Discord creates a proper user record" produc
 | `token_expires_at` | timestamp NULL | |
 | `scopes` | varchar(255) NULL | granted scopes, space-separated |
 | `guild_member` | boolean DEFAULT false | cached "is in the regiment guild" check |
+| `guild_checked_at` | datetime(6) NULL | when that check was last **confirmed** by the bot (T-0167) |
 | `last_sign_in_at` | timestamp NULL | |
 | `last_sign_in_ip` | varchar(45) NULL | masked for display (admin Command Information) |
 | `created_at` / `updated_at` | timestamp | |
@@ -232,6 +233,18 @@ sign-in. This is what "sign in with Discord creates a proper user record" produc
 Indexes: `UNIQUE(discord_user_id)`. Relationship: **1—0..1 `members`** — an identity may exist with no
 member yet (someone who signed in but hasn't joined the roster). The member row is created at
 application time, **not** on every sign-in, so the roster never fills with idle Applicants.
+
+> **The guild pair is read together, and `NULL` is the load-bearing value (T-0167/T-0168).**
+> `guild_checked_at IS NULL` means *never confirmed*, which is not the same as *confirmed absent* —
+> only a completed bot lookup or a live `GuildMemberAdd`/`GuildMemberRemove` event writes the pair.
+> Every degraded case (no `DISCORD_GUILD_ID`, bot disconnected, lookup timeout, circuit breaker open)
+> leaves both columns alone, and a never-confirmed identity resolves **fail-open**: `guildMember` is
+> reported `true` with `degraded: true` on `GET /api/auth/guild-status`. That matters because every
+> row in the live database is never-confirmed on the day this ships — the opposite reading would gate
+> the entire regiment out of its own dashboard. Enforcement is additionally behind
+> `discord_bot_settings.guild_gate_enabled` (boolean, **default false**), and anyone holding
+> `manage_settings` is exempt from the gate unconditionally, so a bot or invite misconfiguration can
+> never lock the regiment out of the settings panel that would fix it.
 
 #### `members`
 The authoritative person record. Replaces the frontend's denormalized `rank`/`chevrons`/`medals[]`.
@@ -337,7 +350,6 @@ Capabilities & **default grants** (Owner column is locked = always granted):
 | Capability | Owner | Admin | Moderator | Member | Mercenary | Applicant |
 | --- | :-: | :-: | :-: | :-: | :-: | :-: |
 | Manage settings | ✔ | | | | | |
-| Transfer ownership | ✔ | | | | | |
 | Manage roles & permissions | ✔ | | | | | |
 | View audit log | ✔ | ✔ | | | | |
 | Edit ranks & medals (Award medals / Change rank) | ✔ | ✔ | | | | |
@@ -358,10 +370,19 @@ Capabilities & **default grants** (Owner column is locked = always granted):
 > **Manage regiment details** (`manage_regiment_details`, T-0145) is a *publishing* right, not an
 > ownership right: it governs the landing/sign-in presentation and the three legal documents — the copy
 > the whole internet sees — and deliberately grants nothing else. It is separate from **Manage settings**
-> so the person who writes the copy does not also receive ownership transfer, the permission matrix or
-> the Discord binding. Adding a capability needs no migration: `capability` is `varchar(60)`, and
+> so the person who writes the copy does not also receive the permission matrix or the Discord binding.
+> Adding a capability needs no migration: `capability` is `varchar(60)`, and
 > `seedRolePermissions` is tier 1 but insert-only per row, so the new default grants back-fill onto a
 > live database while every admin edit survives untouched.
+>
+> **Removing one DOES need a migration.** The seeder is insert-only in both directions — it never
+> deletes — so dropping a member from the `Capability` enum leaves its `role_permissions` rows behind on
+> an already-provisioned database as invisible, un-editable dead grants. The retirement must ship a data
+> purge (`DELETE FROM role_permissions WHERE capability = '…'`); see
+> `1784900000000-RetireTransferOwnership.ts`, which retired `transfer_ownership` in T-0170 together with
+> `POST /settings/transfer-ownership` and `POST /settings/transfer-discord`. `POST /discord/bind` is now
+> the sole guild binder, and `POST /settings/dissolve` is gated on the Owner **role** rather than a
+> capability, because every capability is delegable from this matrix and dissolution must not be.
 
 #### `service_record_entries`
 Member promotion/award/service timeline (hardcoded in profile today).
@@ -481,8 +502,18 @@ Normalizes `notifyBefore` codes/labels to integer **minutes**, multi-offset.
 | --- | --- | --- |
 | `event_id` | char(36) | FK |
 | `minutes` | int | e.g. 15, 30, 60, 1440 |
+| `sent_at` | datetime(6) NULL | when the reminder sweep claimed this offset — `NULL` means still due (T-0174) |
 
 PK: `(event_id, minutes)`.
+
+> `sent_at` is what makes reminders **at-most-once across a restart**. The sweep claims a row with a
+> conditional `UPDATE … WHERE sent_at IS NULL` and only enqueues when exactly one row was affected,
+> so two ticks — or two processes — can never both fire the same reminder. It is also stamped on
+> offsets the sweep deliberately *retires* without sending (an offset whose event has already
+> started, or the redundant ones when several come due at once after an outage), so a long downtime
+> produces one honest "starts soon" rather than a burst of stale reminders. An author re-saving the
+> same lead times mid-event carries `sent_at` across the wipe-and-rewrite rather than resurrecting a
+> spent offset.
 
 ---
 
@@ -692,6 +723,17 @@ broken by — the gateway. Key columns beyond the obvious:
 | `job_type` | varchar(40) | a `DiscordSyncJobType`; varchar, so a new type needs no migration |
 | `status` | enum | `pending` \| `processing` \| `succeeded` \| `failed` \| `cancelled` |
 | `batch_id` | char(36) NULL | groups every job of ONE bulk run (T-0158) |
+| `payload` | json NULL | job-kind-specific; carries `content` and/or a structured `embed` (T-0172) |
+
+> **`event.reminder`** joined `DiscordSyncJobType` with the reminder sweep (T-0174), deliberately as
+> its own type rather than reusing `announce`, so the operations ledger and the delivery matrix can
+> tell "an event was created" from "an event is about to start". Because `job_type` is a varchar it
+> needed no migration.
+>
+> **`payload` is `json`, which is why embeds needed no migration either.** A row may carry `content`,
+> an `embed`, or both. Jobs already sitting in the outbox when the embed transport deployed carry
+> only `content` and still deliver as plain text — the worker passes no embed argument at all for
+> those, so the call is byte-identical to the pre-T-0172 one.
 
 > **`batch_id`** ties together a bulk Discord role re-link: the cursor job, each of its re-enqueued
 > successors, and every per-member job it expands into. Progress and cancel (T-0160) are computed by

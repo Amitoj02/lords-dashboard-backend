@@ -163,6 +163,10 @@ export class ApplicationsService {
       preferredClasses: saved.preferredClasses,
       skillsToImprove: saved.skillsToImprove,
       representativeNote: saved.representativeNote,
+      // The applicant's Discord avatar becomes the post's thumbnail (T-0173).
+      // Null when they have none — the composer simply omits the thumbnail.
+      avatarUrl: identity?.avatarUrl ?? null,
+      submittedAt: saved.submittedAt ? saved.submittedAt.toISOString() : null,
     });
 
     // TODO(audit): no `application.submit` action code exists in the seed; the
@@ -350,8 +354,10 @@ export class ApplicationsService {
       // identity (display name + avatar) without an N+1 (T-0129).
       .leftJoinAndSelect('a.promotedMember', 'promotedMember')
       // Join the deciding staffer so the queue can attribute each decision
-      // without a per-row member lookup (T-0155).
+      // without a per-row member lookup (T-0155), and their identity for the
+      // avatar fallback the attribution chip renders (T-0186) — still one query.
       .leftJoinAndSelect('a.decidedByMember', 'decidedByMember')
+      .leftJoinAndSelect('decidedByMember.discordIdentity', 'decidedByIdentity')
       .where('a.regimentId = :regimentId', { regimentId: user.regimentId })
       .andWhere('a.isDraft = :isDraft', { isDraft: false });
 
@@ -529,6 +535,9 @@ export class ApplicationsService {
     });
 
     // Best-effort decision DM to the applicant (never affects the decline).
+    // ONLY the officer's user message travels (T-0182): `reason` and `note` are
+    // staff-only records — persisted above, audited immediately above — and the
+    // applicant gets the user message or the house default, nothing else.
     await this.enqueueDecisionDm(
       user.regimentId,
       application.discordIdentityId,
@@ -577,6 +586,7 @@ export class ApplicationsService {
     });
 
     // Best-effort decision DM to the applicant (never affects the hold).
+    // The staff note stays with the staff (T-0182) — see decline().
     await this.enqueueDecisionDm(
       user.regimentId,
       application.discordIdentityId,
@@ -590,9 +600,23 @@ export class ApplicationsService {
   /**
    * Best-effort applicant DM on a decision (approve/decline/hold). Resolves the
    * applicant's Discord user id from the linked identity; if there is no linked
-   * identity or no Discord user id, the DM is skipped silently. The message is
-   * the trimmed custom text when provided, else the per-decision default
-   * template. Wrapped so ANY failure here can never affect the decision result.
+   * identity or no Discord user id, the DM is skipped silently. Wrapped so ANY
+   * failure here can never affect the decision result.
+   *
+   * COMPOSITION MOVED (T-0173): this used to render the message text here and
+   * hand a finished string to the outbox, which is why the app had five
+   * different places that knew what a notification looks like. It now passes the
+   * FACTS — outcome and the officer's custom text — and DiscordSyncService
+   * composes the embed. The custom-message behaviour is unchanged: whatever the
+   * officer typed still wins over the default template.
+   *
+   * ⚠️ `customMessage` is the officer's "User message" and is the ONLY thing the
+   * applicant receives (T-0182). This used to take a second `reviewerNote`
+   * argument that callers filled with `declineReason ?? moderatorNote` — the
+   * staff-only note the console badges "the applicant is never shown this note"
+   * — and it was DM'd to the applicant as a labelled field. The parameter is
+   * removed, not merely left unfilled, so no future caller can restore the leak.
+   * The rationale is still recorded: `decline()`/`hold()` persist it and audit it.
    */
   private async enqueueDecisionDm(
     regimentId: string,
@@ -606,32 +630,13 @@ export class ApplicationsService {
       const discordUserId = identity?.discordUserId;
       if (!discordUserId) return;
 
-      const content =
-        givenText(customMessage) ?? (await this.defaultDecisionMessage(regimentId, decision));
-
-      await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
+      await this.discordSync.enqueueApplicationDecision(regimentId, {
+        discordUserId,
+        outcome: decision,
+        customMessage: givenText(customMessage),
+      });
     } catch (error) {
       this.logger.error(`Failed to enqueue ${decision} decision DM: ${(error as Error).message}`);
-    }
-  }
-
-  /** Render the default decision DM, substituting the regiment display name. */
-  private async defaultDecisionMessage(
-    regimentId: string,
-    decision: 'approve' | 'decline' | 'hold',
-  ): Promise<string> {
-    const settings = await this.settings.findOne({
-      where: { regimentId },
-      relations: { regiment: true },
-    });
-    const name = settings?.regiment?.name ?? 'the regiment';
-    switch (decision) {
-      case 'approve':
-        return `Your application to ${name} has been approved - welcome aboard! Check the dashboard for your next steps.`;
-      case 'decline':
-        return `Thank you for your interest in ${name}. After review, your application was not successful at this time.`;
-      case 'hold':
-        return `Your application to ${name} is on hold pending further review. We will be in touch soon.`;
     }
   }
 
@@ -641,8 +646,13 @@ export class ApplicationsService {
       where: { id, regimentId: user.regimentId },
       // The identity carries the applications-block flag surfaced on the DTO (T-0128);
       // the promoted member carries the applicant's live identity (T-0129); the
-      // deciding staffer carries the decision attribution (T-0155).
-      relations: { discordIdentity: true, promotedMember: true, decidedByMember: true },
+      // deciding staffer carries the decision attribution (T-0155), and their own
+      // identity the Discord avatar the attribution falls back to (T-0186).
+      relations: {
+        discordIdentity: true,
+        promotedMember: true,
+        decidedByMember: { discordIdentity: true },
+      },
     });
     if (!application) {
       throw new NotFoundException('Application not found');
@@ -667,6 +677,11 @@ export class ApplicationsService {
     application.decidedByMember = user.memberId
       ? ((await this.members.findOne({
           where: { id: user.memberId, regimentId: user.regimentId },
+          // Their identity carries the avatar the attribution falls back to when
+          // the staffer never uploaded one (T-0186) — without it the decision
+          // RESPONSE would attribute the decision with bare initials until the
+          // next reload picked the fallback up from the queue query.
+          relations: { discordIdentity: true },
         })) ?? undefined)
       : null;
   }

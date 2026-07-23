@@ -29,6 +29,12 @@ import { AccountDeletionRequest } from './entities/account-deletion-request.enti
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 import { Member } from './entities/member.entity';
 import { MembersService } from './members.service';
+import {
+  ACTION_CAPABILITY,
+  MEMBER_ADMIN_ACTIONS,
+  MemberAdminAction,
+  ROLE_PRECEDENCE,
+} from './member-hierarchy';
 
 const REGIMENT = 'regiment-1';
 
@@ -197,6 +203,37 @@ describe('MembersService', () => {
 
     service = module.get(MembersService);
   });
+
+  /**
+   * Every target-scoped admin action reduced to one shape, so a rule can be
+   * asserted against ALL of them (T-0176) instead of only the two that happened
+   * to carry a guard before. `service` is read lazily — it is rebuilt per test.
+   */
+  const invokeAction: Record<
+    MemberAdminAction,
+    (actor: AuthenticatedUser, targetId: string) => Promise<unknown>
+  > = {
+    changeRank: (actor, id) => service.changeRank(id, { rankId: 'rank-9' }, actor, null),
+    changeRole: (actor, id) => service.changeRole(id, { role: MemberRole.Mercenary }, actor, null),
+    awardMedal: (actor, id) => service.awardMedal(id, { medalId: 'medal-1' }, actor, null),
+    removeMedal: (actor, id) => service.removeMedal(id, 'medal-1', actor, null),
+    suspend: (actor, id) =>
+      service.suspend(id, { until: new Date(Date.now() + 86_400_000).toISOString() }, actor, null),
+    unsuspend: (actor, id) => service.unsuspend(id, actor, null),
+    ban: (actor, id) => service.ban(id, {}, actor, null),
+    unban: (actor, id) => service.unban(id, actor, null),
+  };
+
+  /**
+   * True when the action was refused by an authorization guard. A 404/409 from
+   * the action's own state (an unban of a member who is not banned, say) is NOT
+   * a refusal of the ACTOR, which is all the hierarchy has an opinion about.
+   */
+  const wasForbidden = (promise: Promise<unknown>): Promise<boolean> =>
+    promise.then(
+      () => false,
+      (error: unknown) => error instanceof ForbiddenException,
+    );
 
   describe('findAll', () => {
     it('scopes by regiment, applies filters, and computes derived fields + attendance count', async () => {
@@ -406,6 +443,12 @@ describe('MembersService', () => {
   });
 
   describe('admin actions', () => {
+    // A non-owner Admin acting on somebody else — the ordinary happy path once
+    // the role hierarchy is enforced (T-0176). buildMember() defaults to a
+    // Member, whom an Admin strictly outranks.
+    const admin = (overrides: Partial<AuthenticatedUser> = {}): AuthenticatedUser =>
+      user({ memberId: 'admin-1', role: MemberRole.Admin, ...overrides });
+
     beforeEach(() => {
       memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
       attendeeRepo.count.mockResolvedValue(0);
@@ -423,12 +466,7 @@ describe('MembersService', () => {
         precedence: 4,
       });
 
-      const dto = await service.changeRank(
-        'member-1',
-        { rankId: 'rank-9' },
-        user({ role: MemberRole.Admin }),
-        '1.2.3.4',
-      );
+      const dto = await service.changeRank('member-1', { rankId: 'rank-9' }, admin(), '1.2.3.4');
 
       expect(dto.rank).toBe('Captain');
       // The projection surfaces the new rank's insignia image URL.
@@ -479,7 +517,7 @@ describe('MembersService', () => {
       memberRepo.findOne.mockResolvedValue(buildMember({ rank: undefined }));
       rankRepo.findOne.mockResolvedValue({ id: 'rank-9', name: 'Recruit', precedence: 10 });
 
-      await service.changeRank('member-1', { rankId: 'rank-9' }, user({ memberId: 'mod' }), null);
+      await service.changeRank('member-1', { rankId: 'rank-9' }, admin(), null);
 
       expect(serviceRecordRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'promotion' }),
@@ -492,7 +530,7 @@ describe('MembersService', () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
       rankRepo.findOne.mockResolvedValue({ id: 'rank-1', name: 'Sergeant', precedence: 2 });
 
-      await service.changeRank('member-1', { rankId: 'rank-1' }, user({ memberId: 'mod' }), null);
+      await service.changeRank('member-1', { rankId: 'rank-1' }, admin(), null);
 
       expect(serviceRecordRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'promotion' }),
@@ -503,7 +541,7 @@ describe('MembersService', () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
       rankRepo.findOne.mockResolvedValue(null);
       await expect(
-        service.changeRank('member-1', { rankId: 'nope' }, user(), null),
+        service.changeRank('member-1', { rankId: 'nope' }, admin(), null),
       ).rejects.toBeInstanceOf(NotFoundException);
     });
 
@@ -524,12 +562,7 @@ describe('MembersService', () => {
       // buildMember defaults to MemberRole.Member, so assigning Member is a no-op.
       memberRepo.findOne.mockResolvedValue(buildMember());
 
-      const dto = await service.changeRole(
-        'member-1',
-        { role: MemberRole.Member },
-        user({ memberId: 'moderator-1' }),
-        null,
-      );
+      const dto = await service.changeRole('member-1', { role: MemberRole.Member }, admin(), null);
 
       // Projection is still returned, but nothing security-relevant is written.
       expect(dto.role).toBe(MemberRole.Member);
@@ -564,7 +597,7 @@ describe('MembersService', () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
       medalRepo.findOne.mockResolvedValue({ id: 'medal-1', title: 'Valor' });
 
-      await service.awardMedal('member-1', { medalId: 'medal-1' }, user(), null);
+      await service.awardMedal('member-1', { medalId: 'medal-1' }, admin(), null);
 
       expect(memberMedalRepo.save).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'medal.award' }));
@@ -573,9 +606,9 @@ describe('MembersService', () => {
     it('removeMedal 404s when the member holds no such medal', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
       memberMedalRepo.findOne.mockResolvedValue(null);
-      await expect(service.removeMedal('member-1', 'medal-1', user(), null)).rejects.toBeInstanceOf(
-        NotFoundException,
-      );
+      await expect(
+        service.removeMedal('member-1', 'medal-1', admin(), null),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
 
     it('suspend rejects a non-future date', async () => {
@@ -588,12 +621,7 @@ describe('MembersService', () => {
     it('suspend sets suspendedUntil + audits when the date is in the future', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember());
       const until = new Date(Date.now() + 86_400_000).toISOString();
-      await service.suspend(
-        'member-1',
-        { until, reason: 'cooldown' },
-        user({ memberId: 'moderator-1' }),
-        '9.9.9.9',
-      );
+      await service.suspend('member-1', { until, reason: 'cooldown' }, admin(), '9.9.9.9');
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'member.suspend' }),
       );
@@ -608,12 +636,7 @@ describe('MembersService', () => {
 
     it('ban marks bannedAt + Inactive and audits member.ban', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember({ bannedAt: null }));
-      const dto = await service.ban(
-        'member-1',
-        { reason: 'grief' },
-        user({ memberId: 'moderator-1' }),
-        null,
-      );
+      const dto = await service.ban('member-1', { reason: 'grief' }, admin(), null);
       expect(dto.bannedAt).not.toBeNull();
       expect(dto.status).toBe(MemberStatus.Inactive);
       expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'member.ban' }));
@@ -621,7 +644,7 @@ describe('MembersService', () => {
 
     it('unban conflicts when the member is not banned', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember({ bannedAt: null }));
-      await expect(service.unban('member-1', user(), null)).rejects.toBeInstanceOf(
+      await expect(service.unban('member-1', admin(), null)).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
@@ -635,7 +658,7 @@ describe('MembersService', () => {
 
     it('unsuspend conflicts when the member is not currently suspended', async () => {
       memberRepo.findOne.mockResolvedValue(buildMember({ suspendedUntil: null }));
-      await expect(service.unsuspend('member-1', user(), null)).rejects.toBeInstanceOf(
+      await expect(service.unsuspend('member-1', admin(), null)).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
@@ -644,7 +667,7 @@ describe('MembersService', () => {
       memberRepo.findOne.mockResolvedValue(
         buildMember({ suspendedUntil: new Date(Date.now() - 86_400_000) }),
       );
-      await expect(service.unsuspend('member-1', user(), null)).rejects.toBeInstanceOf(
+      await expect(service.unsuspend('member-1', admin(), null)).rejects.toBeInstanceOf(
         ConflictException,
       );
     });
@@ -653,7 +676,7 @@ describe('MembersService', () => {
       memberRepo.findOne.mockResolvedValue(
         buildMember({ suspendedUntil: new Date(Date.now() + 86_400_000) }),
       );
-      const dto = await service.unsuspend('member-1', user(), '9.9.9.9');
+      const dto = await service.unsuspend('member-1', admin(), '9.9.9.9');
       expect(dto.suspendedUntil).toBeNull();
       expect(memberRepo.save).toHaveBeenCalledTimes(1);
       expect(serviceRecordRepo.save).toHaveBeenCalledTimes(1);
@@ -725,7 +748,7 @@ describe('MembersService', () => {
         await service.ban(
           'member-1',
           {},
-          user({ memberId: 'moderator-1', discordUserId: 'discord-1' }),
+          user({ memberId: 'moderator-1', role: MemberRole.Admin, discordUserId: 'discord-1' }),
           null,
         );
 
@@ -751,6 +774,288 @@ describe('MembersService', () => {
         );
         expect(sessionContext.invalidateSessions).toHaveBeenCalledWith('identity-9');
         expect(discordSync.enqueueMemberBanRole).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    // The capability guard on the controller knows the caller's ROLE but never
+    // the target, so before T-0176 nothing stopped an Admin from demoting the
+    // Owner or a Moderator from banning an Admin. Each case below runs every
+    // one of the eight actions, because four of them (rank, medal award/remove,
+    // unban) previously carried no target guard whatsoever.
+    describe('role hierarchy guard (T-0176)', () => {
+      /**
+       * A target whose state would otherwise let every action through — banned
+       * AND actively suspended — so a refusal can only be the authorization
+       * guard, never an incidental 409, and so the guard is proven to run
+       * BEFORE the action's own state checks.
+       */
+      const moderatable = (overrides: Partial<Member>): Member =>
+        buildMember({
+          bannedAt: new Date('2024-01-01T00:00:00.000Z'),
+          suspendedUntil: new Date(Date.now() + 86_400_000),
+          ...overrides,
+        });
+
+      /** Asserts the refusal AND that the rejected action left no trace at all. */
+      const expectRefusedWithoutTrace = async (
+        action: MemberAdminAction,
+        actor: AuthenticatedUser,
+        target: Member,
+      ): Promise<void> => {
+        memberRepo.findOne.mockResolvedValue(target);
+
+        await expect(invokeAction[action](actor, target.id)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+
+        expect(memberRepo.save).not.toHaveBeenCalled();
+        expect(memberMedalRepo.save).not.toHaveBeenCalled();
+        expect(memberMedalRepo.remove).not.toHaveBeenCalled();
+        expect(serviceRecordRepo.save).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+        expect(sessionContext.invalidate).not.toHaveBeenCalled();
+        expect(sessionContext.invalidateSessions).not.toHaveBeenCalled();
+        expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+        expect(discordSync.enqueueMemberBanRole).not.toHaveBeenCalled();
+      };
+
+      it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s the regiment owner', async (action) => {
+        await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          moderatable({ id: 'owner-member', role: MemberRole.Owner }),
+        );
+      });
+
+      it.each(MEMBER_ADMIN_ACTIONS)('a Moderator cannot %s an Admin', async (action) => {
+        await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'moderator-1', role: MemberRole.Moderator }),
+          moderatable({ id: 'admin-9', role: MemberRole.Admin }),
+        );
+      });
+
+      // Peers do not moderate peers: only the Owner may act on an Admin. Two
+      // Admins who fall out must not be able to demote each other.
+      it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s a peer Admin', async (action) => {
+        await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          moderatable({ id: 'admin-9', role: MemberRole.Admin }),
+        );
+      });
+
+      // T-0150 covered role/suspend/ban only; the rank and medal actions were
+      // self-targetable until T-0176 folded them into the same guard.
+      it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s their own account', async (action) => {
+        await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          moderatable({ id: 'admin-1', role: MemberRole.Admin }),
+        );
+      });
+
+      it.each(MEMBER_ADMIN_ACTIONS)('a Moderator may %s a Member', async (action) => {
+        memberRepo.findOne.mockResolvedValue(moderatable({ id: 'member-9' }));
+
+        const refused = await wasForbidden(
+          invokeAction[action](
+            user({ memberId: 'moderator-1', role: MemberRole.Moderator }),
+            'member-9',
+          ),
+        );
+
+        expect(refused).toBe(false);
+      });
+
+      it.each(MEMBER_ADMIN_ACTIONS)('the Owner may %s an Admin', async (action) => {
+        memberRepo.findOne.mockResolvedValue(
+          moderatable({ id: 'admin-9', role: MemberRole.Admin }),
+        );
+
+        const refused = await wasForbidden(
+          invokeAction[action](
+            user({ memberId: 'owner-member', role: MemberRole.Owner }),
+            'admin-9',
+          ),
+        );
+
+        expect(refused).toBe(false);
+      });
+
+      it('reads the owner pointer once per action, not once per guard and again per projection', async () => {
+        memberRepo.findOne.mockResolvedValue(buildMember({ id: 'member-9', bannedAt: null }));
+
+        await service.ban(
+          'member-9',
+          {},
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          null,
+        );
+
+        // The guard hands its read to the projection that follows the write.
+        expect(regimentRepo.findOne).toHaveBeenCalledTimes(1);
+      });
+
+      // Mercenary sits strictly BELOW Member on the ladder (a mercenary rides
+      // along with the regiment but is not one of its members), so the rule is
+      // asymmetric in exactly that direction.
+      it('a Member may act on a Mercenary but not the other way round', async () => {
+        expect(ROLE_PRECEDENCE[MemberRole.Member]).toBeGreaterThan(
+          ROLE_PRECEDENCE[MemberRole.Mercenary],
+        );
+
+        memberRepo.findOne.mockResolvedValue(
+          moderatable({ id: 'merc-1', role: MemberRole.Mercenary }),
+        );
+        expect(
+          await wasForbidden(
+            invokeAction.ban(user({ memberId: 'member-9', role: MemberRole.Member }), 'merc-1'),
+          ),
+        ).toBe(false);
+
+        memberRepo.findOne.mockResolvedValue(
+          moderatable({ id: 'member-9', role: MemberRole.Member }),
+        );
+        expect(
+          await wasForbidden(
+            invokeAction.ban(user({ memberId: 'merc-1', role: MemberRole.Mercenary }), 'member-9'),
+          ),
+        ).toBe(true);
+      });
+    });
+  });
+
+  /**
+   * T-0177: the flags on the projection and the guard the endpoints enforce are
+   * the SAME verdict. This walks the whole (actor role × target × capability)
+   * space and, for every action, compares the advertised flag against what the
+   * service actually does — so a permitted flag can never accompany a 403, nor
+   * a 403 a permitted flag.
+   */
+  describe('permittedActions on the projection (T-0177)', () => {
+    const ROLES = Object.values(MemberRole);
+    const CAPABILITY_SETS = [
+      { label: 'both capabilities', held: [Capability.ManageRoles, Capability.EditRanksMedals] },
+      { label: 'only edit_ranks_medals', held: [Capability.EditRanksMedals] },
+      { label: 'no capabilities', held: [] },
+    ];
+    // The three target identities the rule distinguishes: an unrelated member,
+    // the regiment owner pointer, and the caller themselves.
+    const TARGET_IDS = ['target-1', 'owner-member', 'actor-1'];
+
+    beforeEach(() => {
+      memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
+      attendeeRepo.count.mockResolvedValue(0);
+    });
+
+    it.each(ROLES)('a caller with role %s sees flags that match the guard', async (actorRole) => {
+      const actor = user({ memberId: 'actor-1', role: actorRole });
+
+      for (const capabilities of CAPABILITY_SETS) {
+        const held = new Set<string>(capabilities.held);
+        authz.can.mockImplementation((_regimentId: string, _role: MemberRole, capability: string) =>
+          Promise.resolve(held.has(capability)),
+        );
+
+        for (const targetRole of ROLES) {
+          for (const targetId of TARGET_IDS) {
+            memberRepo.findOne.mockResolvedValue(buildMember({ id: targetId, role: targetRole }));
+            const projected = await service.findOne(targetId, actor);
+
+            for (const action of MEMBER_ADMIN_ACTIONS) {
+              // Banned AND actively suspended, so nothing but the authorization
+              // guard can refuse the action.
+              memberRepo.findOne.mockResolvedValue(
+                buildMember({
+                  id: targetId,
+                  role: targetRole,
+                  bannedAt: new Date('2024-01-01T00:00:00.000Z'),
+                  suspendedUntil: new Date(Date.now() + 86_400_000),
+                }),
+              );
+              const refused = await wasForbidden(invokeAction[action](actor, targetId));
+              const expected = !refused && held.has(ACTION_CAPABILITY[action]);
+              // Compared as a labelled string so a failure names the exact cell.
+              const cell = `${actorRole} → ${targetRole} (${targetId}), ${capabilities.label}, ${action}`;
+              expect(`${cell}: ${projected.permittedActions[action]}`).toBe(`${cell}: ${expected}`);
+            }
+          }
+        }
+      }
+    });
+
+    it('reads the regiment owner pointer once per list page, not once per row', async () => {
+      authz.can.mockResolvedValue(true);
+      memberQb.getManyAndCount.mockResolvedValue([
+        [buildMember({ id: 'row-1' }), buildMember({ id: 'row-2' }), buildMember({ id: 'row-3' })],
+        3,
+      ]);
+
+      const page = await service.findAll(
+        { page: 1, limit: 20, skip: 0 },
+        user({ memberId: 'owner-member', role: MemberRole.Owner }),
+      );
+
+      expect(page.data).toHaveLength(3);
+      expect(page.data[0].permittedActions.ban).toBe(true);
+      // The flags must not reintroduce an N+1: one owner-pointer read for the
+      // whole page, and the memoised capability lookups are asked once each.
+      expect(regimentRepo.findOne).toHaveBeenCalledTimes(1);
+      expect(authz.can).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  /**
+   * Owner decision, restated when the role hierarchy landed (T-0176): account
+   * deletion is SELF-ONLY. The hierarchy governs moderation, and deliberately
+   * does NOT open an admin-on-behalf deletion path — erasure is the data
+   * subject's right, not a moderation tool, and it destroys the target's
+   * Discord identity irreversibly. Admins remove people with ban/suspend.
+   */
+  describe('account deletion stays self-only (T-0176)', () => {
+    it('exposes no deletion entry point that accepts a target member id', () => {
+      const deletionMethods = Object.getOwnPropertyNames(MembersService.prototype)
+        .filter((name) => /deletion/i.test(name))
+        .sort();
+
+      // Adding e.g. `deleteMemberAccount(id, user)` breaks this deliberately.
+      expect(deletionMethods).toEqual([
+        'cancelSelfDeletion',
+        'confirmSelfDeletion',
+        'executeSelfDeletion',
+        'requestSelfDeletion',
+      ]);
+      // ...and each one's first parameter is the CALLER, never a member id.
+      expect(service.requestSelfDeletion.length).toBe(3);
+      expect(service.confirmSelfDeletion.length).toBe(2);
+      expect(service.executeSelfDeletion.length).toBe(2);
+      expect(service.cancelSelfDeletion.length).toBe(2);
+    });
+
+    it('executes against the caller’s own member id even when the caller is the Owner', async () => {
+      deletionRepo.findOne.mockResolvedValue({
+        id: 'req-1',
+        memberId: 'owner-member',
+        status: AccountDeletionStatus.Confirmed,
+        executedAt: null as Date | null,
+      });
+      deletionRepo.save.mockImplementation((r: unknown) => Promise.resolve(r));
+      memberRepo.findOne.mockResolvedValue(buildMember({ id: 'owner-member' }));
+
+      await service.executeSelfDeletion(
+        user({ memberId: 'owner-member', role: MemberRole.Owner }),
+        null,
+      );
+
+      // Both lookups are keyed off the session's member id — there is no
+      // parameter through which another member could be named.
+      expect(deletionRepo.findOne).toHaveBeenCalledWith({
+        where: { memberId: 'owner-member', status: AccountDeletionStatus.Confirmed },
+      });
+      expect(memberRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'owner-member', regimentId: REGIMENT },
+        relations: { rank: true, discordIdentity: true },
       });
     });
   });

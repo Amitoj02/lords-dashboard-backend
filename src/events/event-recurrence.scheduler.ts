@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DateTime, DurationLikeObject } from 'luxon';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { EventStatus, RecurrenceCadence } from '../common/enums';
+import { isDuplicateKeyError } from './duplicate-key';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
 import { EventPlatform } from './entities/event-platform.entity';
 import { EventTag } from './entities/event-tag.entity';
@@ -242,15 +243,9 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
       );
       return true;
     } catch (error) {
-      if (this.isDuplicateKey(error)) return false; // a concurrent sweep won the race
+      if (isDuplicateKeyError(error)) return false; // a concurrent sweep won the race
       throw error;
     }
-  }
-
-  /** True when the error is a MySQL duplicate-key (ER_DUP_ENTRY / errno 1062). */
-  private isDuplicateKey(error: unknown): boolean {
-    const e = error as { code?: string; errno?: number; driverError?: { errno?: number } };
-    return e?.code === 'ER_DUP_ENTRY' || e?.errno === 1062 || e?.driverError?.errno === 1062;
   }
 
   /** The template's platform/tag/notify-offset child rows, as plain value arrays. */
