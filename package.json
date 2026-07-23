@@ -6,6 +6,9 @@
   "type": "commonjs",
   "private": true,
   "license": "MIT",
+  "scarfSettings": {
+    "enabled": false
+  },
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
