@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import type { NextFunction, Request, Response } from 'express';
 import { AppModule } from './app.module';
 import { AppConfig } from './config/configuration';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -48,6 +49,16 @@ async function bootstrap(): Promise<void> {
   // Security headers + cookie parsing for the OAuth handoff.
   app.use(helmet());
   app.use(cookieParser());
+
+  // Default every API response to `Cache-Control: no-store` (LDA-M14): responses
+  // are personalised (resolved per caller from the DB) and must never be retained
+  // by a shared cache. Set as a default BEFORE routing so the few genuinely
+  // cacheable handlers (e.g. the public medal-thumbnail proxy) can override it by
+  // calling res.setHeader('Cache-Control', ...) later in their own handler.
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
 
   app.enableCors({
     origin: corsOrigins,

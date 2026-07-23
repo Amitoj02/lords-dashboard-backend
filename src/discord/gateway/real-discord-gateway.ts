@@ -255,6 +255,14 @@ export class RealDiscordGateway
     if (!channel || !channel.isTextBased() || !('send' in channel)) {
       throw new ServiceUnavailableException('Channel is not a sendable text channel');
     }
+    // Scope the send to the bound guild (LDA-M6): a channel id that resolves to a
+    // DIFFERENT guild the bot happens to be in must never receive this regiment's
+    // announcements. DMs have no guildId and are handled by sendDirectMessage.
+    const boundGuildId = this.config.get('discord', { infer: true }).guildId;
+    const channelGuildId = 'guildId' in channel ? channel.guildId : null;
+    if (!boundGuildId || channelGuildId !== boundGuildId) {
+      throw new ServiceUnavailableException('Channel is not in the configured regiment guild');
+    }
     const message = await channel.send(this.toSendOptions(content, embeds));
     return { messageId: message.id };
   }
@@ -280,7 +288,14 @@ export class RealDiscordGateway
    * key at all.
    */
   private toSendOptions(content: string, embeds?: DiscordEmbed[]): MessageCreateOptions {
-    const options: MessageCreateOptions = {};
+    const options: MessageCreateOptions = {
+      // Neutralise ALL mention resolution on every outbound message (LDA-M6). User
+      // free-text only lands in embed descriptions today (where Discord does not
+      // resolve mentions), but that is a fragile invariant one future `content:`
+      // producer would break; pinning parse:[] here makes @everyone/@here/role/user
+      // pings inert at the single send boundary, permanently.
+      allowedMentions: { parse: [] },
+    };
     if (content) options.content = content;
     if (embeds?.length) options.embeds = embeds.map((embed) => this.toApiEmbed(embed));
     // Neither half present would be an empty message; fall back to the content
