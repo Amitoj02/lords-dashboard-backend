@@ -254,18 +254,29 @@ export class DiscordSyncService {
     return !!job;
   }
 
-  /** Enqueue the welcome message for a newly-joined member (T-0175). */
+  /**
+   * Enqueue the welcome message for a newly-joined member (T-0175).
+   *
+   * BLANK MEANS DEFAULT (T-0184). This read `s.welcomeMessage ?? DEFAULT_WELCOME`,
+   * which is only nullish-safe: an admin who cleared the settings editor saved
+   * `''`, and `'' ?? x` is `''`, so the regiment greeted every new recruit with
+   * an embed that had no body at all. `updateSettings` now normalises blank to
+   * NULL on the way in, but rows written before that fix — and any written
+   * around it — are handled here too, so the read is correct on its own.
+   */
   async enqueueWelcome(regimentId: string, discordUserId: string): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
       const brand = await this.resolveBrand(regimentId);
-      const message = s.welcomeMessage ?? DEFAULT_WELCOME;
+      const message = s.welcomeMessage?.trim() || DEFAULT_WELCOME;
       return this.insertJob(regimentId, DiscordSyncJobType.Welcome, {
         discordUserId,
         // Null keeps the DM fallback intact: the worker still routes to a DM
         // whenever no welcome channel is configured.
         channelId: s.welcomeChannelId,
+        // The greeting is the EMBED, never the message content — that is what
+        // keeps admin-authored text unable to ping anyone (T-0185).
         content: '',
-        embed: buildWelcomeEmbed({ brand, message }),
+        embed: buildWelcomeEmbed({ brand, message, discordUserId }),
       });
     });
   }
@@ -278,6 +289,12 @@ export class DiscordSyncService {
    * officer's own words when they wrote any, and otherwise the per-outcome house
    * default — which is exactly the behaviour ApplicationsService had, moved to
    * where every other notification is written.
+   *
+   * ⚠️ `customMessage` is the ONLY applicant-visible text this producer accepts
+   * (T-0182). The officer's staff-only moderator note used to arrive here as a
+   * `reviewerNote` and be rendered to the applicant as a labelled embed field;
+   * the parameter is gone rather than merely unused, so the leak cannot be
+   * reinstated by a caller.
    */
   async enqueueApplicationDecision(
     regimentId: string,
@@ -286,8 +303,6 @@ export class DiscordSyncService {
       outcome: ApplicationDecisionOutcome;
       /** The officer's custom DM text, when they wrote one. */
       customMessage?: string | null;
-      /** The officer's rationale (decline reason / hold note), when recorded. */
-      reviewerNote?: string | null;
     },
   ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async () => {
@@ -298,12 +313,7 @@ export class DiscordSyncService {
       return this.insertJob(regimentId, DiscordSyncJobType.ApplicationDecision, {
         discordUserId: payload.discordUserId,
         content: '',
-        embed: buildDecisionEmbed({
-          outcome: payload.outcome,
-          brand,
-          message,
-          reviewerNote: payload.reviewerNote ?? null,
-        }),
+        embed: buildDecisionEmbed({ outcome: payload.outcome, brand, message }),
       });
     });
   }

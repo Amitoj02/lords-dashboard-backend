@@ -116,14 +116,23 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
 
   afterAll(async () => {
     await cleanup();
-    // Reset the bot to its dormant defaults.
+    // Reset the bot to its dormant defaults. The e2e suites share one MySQL
+    // database and this single-tenant settings row, so anything these cases
+    // write has to be put back — including the welcome copy and channel names
+    // the T-0184/T-0185 cases edit.
     await dataSource.getRepository(DiscordBotSettings).update(
       { regimentId: REGIMENT_ID },
       {
         botEnabled: false,
         applyBanRoleOnBan: false,
         banRoleId: null,
+        banRoleName: null,
         joinRoleId: null,
+        welcomeChannelId: null,
+        welcomeMessage: null,
+        enlistmentChannelId: null,
+        enlistmentChannelName: null,
+        auditLogChannelName: null,
       },
     );
     await app.close();
@@ -463,6 +472,230 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       expect(dm?.kind).toBe('dm');
       expect(dm?.embeds[0].title).toContain('Welcome to');
       expect(dm?.embeds[0].fields?.[0].name).toBe('Next steps');
+    });
+  });
+
+  /**
+   * T-0183 — the standing guard. T-0154 fenced the staff-only columns out of the
+   * applicant REST projection, but the Discord DM path went around that fence and
+   * delivered the moderator note to the very person it was written about. So the
+   * guard walks EVERY applicant-facing channel there is (the projection AND the
+   * outbox) and asserts one distinctive sentinel appears in neither.
+   *
+   * It runs against the mock gateway with the bot ENABLED on purpose: the whole
+   * decision-DM producer is wrapped in `guarded()`, which no-ops when the bot is
+   * off — so the same assertions in a suite that never enables the bot would find
+   * zero jobs and pass while the leak was live.
+   */
+  describe('staff-only fields never reach an applicant-facing channel (T-0183)', () => {
+    // High-entropy so `not.toContain` can never be satisfied by accident, and
+    // grep-verified absent from src/database/seeds.
+    const STAFF_SENTINEL = 'zz-staffnote-sentinel-7f21a9';
+    const REASON_SENTINEL = 'zz-declinereason-sentinel-3c84be';
+    const USER_MESSAGE = 'Thank you for applying — do try again after fifty more hours.';
+    const LEAK_APPLICANT_ID = '900900900900900906';
+
+    let applicantToken: string;
+    let applicationId: string;
+
+    beforeAll(async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true })
+        .expect(200);
+
+      applicantToken = (
+        await signIn({ ...applicantProfile, id: LEAK_APPLICANT_ID, email: 'leak@example.com' })
+      ).token;
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(applicantToken))
+        .send({
+          applicantName: 'Leak Applicant',
+          inGameName: 'LeakApp',
+          currentRegiment: 'None',
+          howFound: 'Discord invite',
+          preferredClasses: 'Line Infantry',
+          skillsToImprove: 'Melee',
+          interestConfirmed: true,
+        })
+        .expect(201);
+      applicationId = created.body.id as string;
+
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      mockGateway.resetSentMessages();
+
+      // The decline that carries BOTH staff-only fields plus the applicant's text.
+      await request(server())
+        .post(`/api/applications/${applicationId}/decline`)
+        .set(bearer(ownerToken))
+        .send({
+          reason: REASON_SENTINEL,
+          note: STAFF_SENTINEL,
+          discordDmMessage: USER_MESSAGE,
+        })
+        .expect(200);
+      await drainAll();
+    });
+
+    afterAll(async () => {
+      const identity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: LEAK_APPLICANT_ID } });
+      if (identity) {
+        await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+    });
+
+    it('enqueues the decision DM at all — the guard below must not pass vacuously', async () => {
+      const jobs = await jobsOfType(DiscordSyncJobType.ApplicationDecision);
+      expect(jobs.length).toBeGreaterThan(0);
+      expect(JSON.stringify(jobs[0].payload)).toContain(USER_MESSAGE);
+    });
+
+    it('keeps every staff-only field out of the enqueued decision payload', async () => {
+      // The WHOLE payload is stringified rather than one named field: that is what
+      // catches a future embed field wired to a staff-only source, which is the
+      // failure mode this guard exists for.
+      const jobs = await jobsOfType(DiscordSyncJobType.ApplicationDecision);
+      const serialised = JSON.stringify(jobs.map((j) => j.payload));
+      expect(serialised).not.toContain(STAFF_SENTINEL);
+      expect(serialised).not.toContain(REASON_SENTINEL);
+    });
+
+    it('keeps every staff-only field out of the message the gateway actually sent', () => {
+      const dm = mockGateway.sentMessages.find((m) => m.target === LEAK_APPLICANT_ID);
+      expect(dm).toBeDefined();
+      expect(dm?.kind).toBe('dm');
+      expect(dm?.embeds[0].description).toBe(USER_MESSAGE);
+      // Nowhere left to render a note: the decision embed has no fields at all.
+      expect(dm?.embeds[0].fields).toBeUndefined();
+      expect(JSON.stringify(dm)).not.toContain(STAFF_SENTINEL);
+      expect(JSON.stringify(dm)).not.toContain(REASON_SENTINEL);
+    });
+
+    it('keeps every staff-only field out of GET /api/applications/mine', async () => {
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(applicantToken))
+        .expect(200);
+
+      const serialised = JSON.stringify(mine.body);
+      expect(serialised).not.toContain(STAFF_SENTINEL);
+      expect(serialised).not.toContain(REASON_SENTINEL);
+      // The applicant DOES still get told what the officer wrote for them.
+      expect(mine.body.application.userMessage).toBe(USER_MESSAGE);
+    });
+
+    it('still records both staff-only fields for staff', async () => {
+      // Closing the leak must not close the RECORD.
+      const staffView = await request(server())
+        .get(`/api/applications/${applicationId}`)
+        .set(bearer(ownerToken))
+        .expect(200);
+
+      expect(staffView.body.moderatorNote).toBe(STAFF_SENTINEL);
+      expect(staffView.body.declineReason).toBe(REASON_SENTINEL);
+    });
+  });
+
+  /**
+   * T-0184 / T-0185 — the welcome message an admin authors in Settings.
+   * A blank box means "use the house default" rather than "greet with silence",
+   * and the two documented tokens expand against the joining member.
+   */
+  describe('configurable welcome message (T-0184 / T-0185)', () => {
+    const readSettings = async (): Promise<Record<string, unknown>> =>
+      (await request(server()).get('/api/discord/settings').set(bearer(ownerToken)).expect(200))
+        .body as Record<string, unknown>;
+
+    const patchSettings = (body: Record<string, unknown>) =>
+      request(server()).patch('/api/discord/settings').set(bearer(ownerToken)).send(body);
+
+    beforeEach(async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      mockGateway.resetSentMessages();
+      // welcomeChannelId back to null too: with a channel configured the greeting
+      // is posted there instead of DM'd, and the DM is what these cases read.
+      await patchSettings({
+        botEnabled: true,
+        welcomeMessage: null,
+        welcomeChannelId: null,
+      }).expect(200);
+    });
+
+    it('trims a saved message and stores a blank one as NULL', async () => {
+      await patchSettings({ welcomeMessage: '  Fall in!  ' }).expect(200);
+      expect((await readSettings()).welcomeMessage).toBe('Fall in!');
+
+      await patchSettings({ welcomeMessage: '   ' }).expect(200);
+      expect((await readSettings()).welcomeMessage).toBeNull();
+
+      await patchSettings({ welcomeMessage: '' }).expect(200);
+      expect((await readSettings()).welcomeMessage).toBeNull();
+    });
+
+    it('leaves every other optional setting untouched when only one field is PATCHed', async () => {
+      // The blanking guard for the recorded T-0184 risk: a normaliser applied one
+      // field too widely would blank a channel id or role name here. Comparing the
+      // WHOLE projection covers every optional string at once, so this keeps
+      // working as columns are added.
+      await patchSettings({
+        welcomeMessage: 'Fall in!',
+        welcomeChannelId: '910000000000000009',
+        enlistmentChannelName: 'new-enlistments',
+        auditLogChannelName: 'audit-logs',
+        banRoleName: 'Cashiered',
+      }).expect(200);
+      const before = await readSettings();
+
+      await patchSettings({ botEnabled: true }).expect(200);
+      const after = await readSettings();
+
+      expect(after).toEqual(before);
+    });
+
+    it('greets with the house default when the message is blank', async () => {
+      await patchSettings({ welcomeMessage: '' }).expect(200);
+
+      await request(server())
+        .post('/api/discord/simulate/member-join')
+        .set(bearer(ownerToken))
+        .send({ discordUserId: '555000000000000003' })
+        .expect(200);
+      await drainAll();
+
+      const dm = mockGateway.sentMessages.find((m) => m.target === '555000000000000003');
+      expect(dm?.embeds[0].description).toBe('Welcome to the regiment!');
+    });
+
+    it('expands {user} and {regiment}, and cannot ping through the embed', async () => {
+      await patchSettings({
+        welcomeMessage: 'Hello {user}, welcome to {regiment}! @everyone say hi. {nope}',
+      }).expect(200);
+
+      await request(server())
+        .post('/api/discord/simulate/member-join')
+        .set(bearer(ownerToken))
+        .send({ discordUserId: '555000000000000004' })
+        .expect(200);
+      await drainAll();
+
+      const dm = mockGateway.sentMessages.find((m) => m.target === '555000000000000004');
+      // `Lords Regiment` is the seeded brand name (src/database/seeds/regiment.seed.ts).
+      expect(dm?.embeds[0].description).toBe(
+        'Hello <@555000000000000004>, welcome to Lords Regiment! @everyone say hi. {nope}',
+      );
+      // The greeting IS the embed. `@everyone` in an embed body notifies nobody;
+      // it would only ping if the admin's text reached the message content.
+      expect(dm?.content).toBe('');
+    });
+
+    it('rejects a message longer than the documented 512-character limit', async () => {
+      await patchSettings({ welcomeMessage: 'x'.repeat(513) }).expect(400);
+      await patchSettings({ welcomeMessage: 'x'.repeat(512) }).expect(200);
     });
   });
 

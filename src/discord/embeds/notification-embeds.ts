@@ -223,16 +223,32 @@ export function defaultDecisionMessage(
   }
 }
 
-/** The applicant's approve/decline/hold DM (T-0173). */
+/**
+ * The applicant's approve/decline/hold DM (T-0173).
+ *
+ * ⚠️ THE APPLICANT SEES `message` AND NOTHING ELSE (T-0182). The staff console
+ * offers the deciding officer exactly two boxes — "User message", which IS this
+ * `message`, and "Moderator note", which is badged *Staff only* and promises
+ * "the applicant is never shown this note". This embed used to carry a second
+ * "Note from the reviewing officer" field fed from `declineReason ?? moderatorNote`,
+ * which broke that promise: the internal note was DM'd verbatim to the person it
+ * was written about.
+ *
+ * So this composer takes NO second text input. That is deliberate and structural
+ * — a future caller cannot re-introduce the leak by passing an extra argument,
+ * because there is no argument to pass. `declineReason` and `moderatorNote` stay
+ * persisted and audited for staff; they are simply not inputs here.
+ */
 export function buildDecisionEmbed(input: {
   outcome: ApplicationDecisionOutcome;
   brand: RegimentBrand;
-  /** The body text — the officer's custom message when they wrote one. */
+  /**
+   * The ONLY applicant-visible text: the officer's "User message" when they
+   * wrote one, otherwise {@link defaultDecisionMessage}.
+   */
   message: string;
-  /** The officer's rationale (decline reason / hold note), when recorded. */
-  reviewerNote?: string | null;
 }): DiscordEmbed {
-  const { outcome, brand, message, reviewerNote } = input;
+  const { outcome, brand, message } = input;
   const titles: Record<ApplicationDecisionOutcome, string> = {
     approve: `✅ Your application to ${brand.name} was approved`,
     decline: `Your application to ${brand.name} was not successful`,
@@ -244,7 +260,6 @@ export function buildDecisionEmbed(input: {
     color: OUTCOME_COLOURS[outcome],
     thumbnailUrl: safeUrl(brand.crestUrl),
     timestamp: new Date().toISOString(),
-    fields: field('Note from the reviewing officer', reviewerNote),
     footer: { text: brand.name },
   });
 }
@@ -342,15 +357,75 @@ export function buildAuditEmbed(entry: AuditSummary): DiscordEmbed {
   });
 }
 
-/** The guild-join welcome (T-0175): branded, with a short next-steps section. */
+/**
+ * The placeholder tokens an admin may use in the configurable welcome message
+ * (T-0185), paired with what each one renders. This array IS the admin-facing
+ * contract: it is what the settings API documents and what the settings editor
+ * shows as its hint, so the three never drift.
+ *
+ * Deliberately SHORT. Every token here is resolvable from data the welcome
+ * producer already holds, so none of them costs a query or can render stale.
+ */
+export const WELCOME_TOKENS = [
+  { token: '{user}', renders: 'A mention of the member who just joined' },
+  { token: '{regiment}', renders: 'The regiment name' },
+] as const;
+
+/**
+ * Expand {@link WELCOME_TOKENS} in an admin-authored welcome message (T-0185).
+ *
+ * Unknown tokens are left VERBATIM — `{nope}` stays `{nope}` rather than
+ * becoming an empty string, so a typo is visible to the admin who made it
+ * instead of quietly deleting part of their greeting. A message containing no
+ * token is returned byte-identical.
+ *
+ * SAFETY: the only thing this can inject is `<@snowflake>` built from digits we
+ * strip out of the id ourselves, and the regiment's own name. It cannot
+ * introduce a ping the admin did not already have, because the expanded text is
+ * only ever used as an embed DESCRIPTION — Discord does not resolve mentions
+ * inside an embed, so `@everyone` typed into the welcome message renders as
+ * literal text and notifies nobody. `notification-embeds.spec.ts` and
+ * `discord-sync.service.spec.ts` pin that the welcome text never reaches a
+ * message `content`, which is the only place it could ping.
+ */
+export function expandWelcomeTokens(
+  message: string,
+  context: { discordUserId?: string | null; regimentName: string },
+): string {
+  // Discord ids are snowflakes; anything else in that field is not an id and is
+  // not worth rendering as a broken mention chip.
+  const id = (context.discordUserId ?? '').replace(/\D/g, '');
+  const values: Record<string, string> = {
+    '{user}': id ? `<@${id}>` : 'recruit',
+    '{regiment}': context.regimentName,
+  };
+  // One pass, so a value that happens to contain a token is not re-expanded.
+  return message.replace(/\{user\}|\{regiment\}/g, (match) => values[match] ?? match);
+}
+
+/**
+ * The guild-join welcome (T-0175): branded, with a short next-steps section.
+ *
+ * Token expansion happens HERE rather than in the producer (T-0185) so it is
+ * structurally impossible for an expansion to escape the embed limits: this
+ * function ends in `clampEmbed`, so a message that grows past the description
+ * budget is truncated like any other, and the 512-character validator on the
+ * SAVED text stays a limit on what the admin types rather than on what renders.
+ */
 export function buildWelcomeEmbed(input: {
   brand: RegimentBrand;
-  /** The configured welcome message, or the default. */
+  /** The configured welcome message, or the default. May contain tokens. */
   message: string;
+  /** The joining member, used to expand `{user}`. Null ⇒ a neutral greeting. */
+  discordUserId?: string | null;
   /** The regiment dashboard URL, when one is configured. */
   siteUrl?: string | null;
 }): DiscordEmbed {
-  const { brand, message, siteUrl } = input;
+  const { brand, message, discordUserId, siteUrl } = input;
+  const body = expandWelcomeTokens(message, {
+    discordUserId,
+    regimentName: brand.name,
+  });
   const nextSteps = [
     '• Read the pinned rules and introduce yourself.',
     '• Submit an enlistment application when you are ready to join the ranks.',
@@ -358,7 +433,7 @@ export function buildWelcomeEmbed(input: {
   ].join('\n');
   return clampEmbed({
     title: `Welcome to ${brand.name}`,
-    description: message,
+    description: body,
     url: safeUrl(siteUrl),
     color: OUTCOME_COLOURS.welcome,
     // The banner is the brand statement; the crest is the fallback identity mark

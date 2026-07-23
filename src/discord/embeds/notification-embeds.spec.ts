@@ -6,8 +6,11 @@ import {
   buildAuditEmbed,
   buildEnlistmentEmbed,
   buildEventEmbed,
+  buildDecisionEmbed,
   buildWelcomeEmbed,
   defaultDecisionMessage,
+  expandWelcomeTokens,
+  WELCOME_TOKENS,
 } from './notification-embeds';
 
 const brand: RegimentBrand = {
@@ -148,10 +151,122 @@ describe('notification embeds (T-0173 / T-0174 / T-0175)', () => {
     });
   });
 
+  // ── T-0185: welcome placeholder tokens ──────────────────────────────────────
+  describe('welcome placeholder tokens (T-0185)', () => {
+    const ctx = { discordUserId: '123456789012345678', regimentName: 'The Lords' };
+
+    it('renders {user} as a working mention of the joining member', () => {
+      expect(expandWelcomeTokens('Hello {user}, fall in!', ctx)).toBe(
+        'Hello <@123456789012345678>, fall in!',
+      );
+    });
+
+    it('renders {regiment} as the regiment brand name', () => {
+      expect(expandWelcomeTokens('Welcome to {regiment}.', ctx)).toBe('Welcome to The Lords.');
+    });
+
+    it('leaves an unknown token verbatim rather than deleting it', () => {
+      // A typo must be visible to the admin who made it, not silently swallowed.
+      expect(expandWelcomeTokens('Hi {nope} and {user}', ctx)).toBe(
+        'Hi {nope} and <@123456789012345678>',
+      );
+    });
+
+    it('does not interpolate inherited Object properties', () => {
+      // A `key in table` lookup would turn {constructor} into "function Object()".
+      expect(expandWelcomeTokens('{constructor} {__proto__} {toString}', ctx)).toBe(
+        '{constructor} {__proto__} {toString}',
+      );
+    });
+
+    it('returns a token-free message byte-identical', () => {
+      const plain = 'Welcome to the regiment! Read the rules and say hello.';
+      expect(expandWelcomeTokens(plain, ctx)).toBe(plain);
+    });
+
+    it('drops a non-snowflake id rather than rendering a broken mention', () => {
+      expect(expandWelcomeTokens('Hi {user}', { discordUserId: null, regimentName: 'X' })).toBe(
+        'Hi recruit',
+      );
+    });
+
+    it('expands BEFORE the embed clamp, so a long expansion cannot break the embed', () => {
+      // The COLUMN caps the authored text at 512, but every {user} expands to ~21
+      // characters, so the rendered description can legitimately exceed what was
+      // typed. Expanding inside the composer means clampEmbed still governs.
+      const authored = `${'{user} '.repeat(70)}${'x'.repeat(20)}`;
+      expect(authored.length).toBeLessThanOrEqual(512);
+
+      const embed = buildWelcomeEmbed({
+        brand,
+        message: authored,
+        discordUserId: ctx.discordUserId,
+      });
+
+      expect(embed.description).toContain('<@123456789012345678>');
+      expect(embed.description!.length).toBeLessThanOrEqual(EMBED_LIMITS.description);
+      expect(embed.description).not.toContain('{user}');
+    });
+
+    it('renders @everyone as inert literal text inside the embed body', () => {
+      // Admin-authored text never becomes message CONTENT (see
+      // discord-sync.service.spec.ts), and Discord does not resolve mentions
+      // inside an embed — so this text reaches Discord unescaped and pings nobody.
+      const embed = buildWelcomeEmbed({
+        brand,
+        message: '@everyone say hello to {user}',
+        discordUserId: ctx.discordUserId,
+      });
+
+      expect(embed.description).toBe('@everyone say hello to <@123456789012345678>');
+    });
+
+    it('documents exactly the tokens it expands', () => {
+      // WELCOME_TOKENS is what Swagger and the settings editor hint render from,
+      // so a token added to one and not the other is caught here.
+      const documented = WELCOME_TOKENS.map((t) => t.token);
+      expect(documented).toEqual(['{user}', '{regiment}']);
+      for (const token of documented) {
+        expect(expandWelcomeTokens(token, ctx)).not.toBe(token);
+      }
+    });
+  });
+
   describe('defaultDecisionMessage', () => {
     it('names the regiment in every outcome', () => {
       for (const outcome of ['approve', 'decline', 'hold'] as const) {
         expect(defaultDecisionMessage(outcome, 'The Lords')).toContain('The Lords');
+      }
+    });
+  });
+
+  // ── T-0182: the applicant sees the user message and nothing else ────────────
+  describe('decision embed (T-0182)', () => {
+    const OUTCOMES = ['approve', 'decline', 'hold'] as const;
+
+    it('renders the officer’s message as the body for every outcome', () => {
+      for (const outcome of OUTCOMES) {
+        const embed = buildDecisionEmbed({ outcome, brand, message: 'Try again in a month.' });
+        expect(embed.description).toBe('Try again in a month.');
+        expect(embed.title).toContain('The Lords');
+      }
+    });
+
+    it('carries NO fields at all — there is nowhere a staff-only value could render', () => {
+      // The structural guarantee. `buildDecisionEmbed` takes exactly one text
+      // input, so a future field wired to a staff-only source would have to add
+      // both a parameter and a field, and this assertion fails the moment it does.
+      for (const outcome of OUTCOMES) {
+        const embed = buildDecisionEmbed({ outcome, brand, message: 'Anything.' });
+        expect(embed.fields).toBeUndefined();
+      }
+    });
+
+    it('cannot be handed the staff note: the whole embed contains only what was passed', () => {
+      const STAFF_TEXT = 'zz-staffnote-sentinel-7f21a9';
+      for (const outcome of OUTCOMES) {
+        const embed = buildDecisionEmbed({ outcome, brand, message: 'Thank you for applying.' });
+        expect(JSON.stringify(embed)).not.toContain(STAFF_TEXT);
       }
     });
   });

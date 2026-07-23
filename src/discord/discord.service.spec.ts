@@ -226,4 +226,74 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
       expect(jobsRepo.update).not.toHaveBeenCalled();
     });
   });
+
+  /**
+   * T-0184 — the welcome message is the one optional string on this endpoint read
+   * with `??` rather than for truthiness, so `''` and NULL are NOT interchangeable
+   * for it: an empty string produced an empty greeting instead of the house
+   * default. It normalises here; the sibling cases pin that the normalisation did
+   * not spread to the columns that must keep their existing semantics.
+   */
+  describe('welcome-message normalisation (T-0184)', () => {
+    const stored = (overrides: Partial<DiscordBotSettings> = {}) =>
+      ({
+        regimentId: REGIMENT,
+        botEnabled: true,
+        welcomeChannelId: 'channel-1',
+        welcomeMessage: 'Existing greeting',
+        enlistmentChannelName: 'new-enlistments',
+        auditLogChannelName: 'audit-logs',
+        joinRoleName: 'Guest',
+        banRoleId: null,
+        banRoleName: 'Cashiered',
+        applyBanRoleOnBan: false,
+        guildGateEnabled: false,
+        ...overrides,
+      }) as DiscordBotSettings;
+
+    /** The settings row `updateSettings` handed to the repository. */
+    const saved = (): DiscordBotSettings =>
+      settingsRepo.save.mock.calls[0][0] as DiscordBotSettings;
+
+    beforeEach(() => {
+      sync.getSettings.mockImplementation(() => Promise.resolve(stored()));
+      settingsRepo.save.mockImplementation((s: DiscordBotSettings) => Promise.resolve(s));
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+      ['null (what the editor posts when nothing is configured)', null],
+    ])('stores %s as NULL, so the send path falls back to the default', async (_l, input) => {
+      await service.updateSettings(user(), { welcomeMessage: input }, null);
+
+      expect(saved().welcomeMessage).toBeNull();
+    });
+
+    it('trims a message that has content', async () => {
+      await service.updateSettings(user(), { welcomeMessage: '  Fall in!  ' }, null);
+
+      expect(saved().welcomeMessage).toBe('Fall in!');
+    });
+
+    it('leaves the stored message untouched when the field is omitted', async () => {
+      await service.updateSettings(user(), { botEnabled: true }, null);
+
+      expect(saved().welcomeMessage).toBe('Existing greeting');
+    });
+
+    it('does not blank the other optional strings on the same endpoint', async () => {
+      // The recorded regression risk: a normaliser applied one field too widely.
+      // `joinRoleName` in particular is NOT NULL with a default, so a blanket
+      // `|| null` across this block would break the schema, not just behaviour.
+      await service.updateSettings(user(), { welcomeMessage: '' }, null);
+
+      const row = saved();
+      expect(row.welcomeChannelId).toBe('channel-1');
+      expect(row.enlistmentChannelName).toBe('new-enlistments');
+      expect(row.auditLogChannelName).toBe('audit-logs');
+      expect(row.joinRoleName).toBe('Guest');
+      expect(row.banRoleName).toBe('Cashiered');
+    });
+  });
 });

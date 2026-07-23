@@ -1032,10 +1032,10 @@ describe('ApplicationsService', () => {
       expect(result.userMessage).toBeNull();
     });
 
-    it('passes the officer’s own message AND their rationale to the composer (T-0173)', async () => {
+    it('passes the officer’s own message to the composer — and NOTHING staff-only (T-0182)', async () => {
       // The DM text is no longer rendered here; the outbox composes the embed
       // from these facts. The custom message must still win over the default,
-      // and the decline reason reaches the applicant as its own labelled field.
+      // and the officer's staff-only rationale must not travel with it.
       applications.findOne!.mockResolvedValue(baseApplication());
       identities.findOne!.mockResolvedValue({
         id: 'identity-applicant',
@@ -1046,16 +1046,74 @@ describe('ApplicationsService', () => {
       await service.decline(
         STAFF,
         'app-1',
-        { reason: 'Too new to the game.', discordDmMessage: 'Try again in a month.' },
+        {
+          reason: 'Too new to the game.',
+          note: 'Suspected sock puppet - do not tell them.',
+          discordDmMessage: 'Try again in a month.',
+        },
+        null,
+      );
+
+      // An exact-equality assertion, not objectContaining: the point of this
+      // test is that no THIRD key exists, so a future field added to the payload
+      // has to be looked at rather than sliding through.
+      expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledWith('regiment-1', {
+        discordUserId: 'discord-2',
+        outcome: 'decline',
+        customMessage: 'Try again in a month.',
+      });
+      expect(JSON.stringify(discordSync.enqueueApplicationDecision.mock.calls)).not.toContain(
+        'sock puppet',
+      );
+      expect(JSON.stringify(discordSync.enqueueApplicationDecision.mock.calls)).not.toContain(
+        'Too new to the game.',
+      );
+    });
+
+    it('still persists and audits the staff-only reason and note it no longer DMs (T-0182)', async () => {
+      // Removing the leak must not remove the RECORD: the officer's rationale is
+      // exactly as retrievable by staff as it was before.
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      const declined = await service.decline(
+        STAFF,
+        'app-1',
+        { reason: 'Too new to the game.', note: 'Suspected sock puppet.' },
+        null,
+      );
+
+      expect(declined.declineReason).toBe('Too new to the game.');
+      expect(declined.moderatorNote).toBe('Suspected sock puppet.');
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'application.decline',
+          detail: 'Too new to the game.',
+        }),
+      );
+    });
+
+    it('a held application DMs the user message only, never the staff note (T-0182)', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        discordUserId: 'discord-2',
+        applicationsBlockedAt: null,
+      });
+
+      const held = await service.hold(
+        STAFF,
+        'app-1',
+        { note: 'Waiting on a reference from Redcoats.', discordDmMessage: 'Sit tight.' },
         null,
       );
 
       expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledWith('regiment-1', {
         discordUserId: 'discord-2',
-        outcome: 'decline',
-        customMessage: 'Try again in a month.',
-        reviewerNote: 'Too new to the game.',
+        outcome: 'hold',
+        customMessage: 'Sit tight.',
       });
+      // The note is still on the record for staff.
+      expect(held.moderatorNote).toBe('Waiting on a reference from Redcoats.');
     });
 
     it('a decision with no message must not wipe the stored one', async () => {

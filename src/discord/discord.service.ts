@@ -179,7 +179,17 @@ export class DiscordService {
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
-    if (dto.welcomeMessage !== undefined) settings.welcomeMessage = dto.welcomeMessage;
+    // Blank means "use the house default", so it is stored as NULL rather than
+    // '' (T-0184). Every other optional string on this endpoint is only ever
+    // read for truthiness (`if (!s.joinRoleId)`, `if (!s.auditLogChannelId)`),
+    // where '' and null behave identically — the welcome message is the one
+    // column read with `??`, so '' silently became an EMPTY greeting instead of
+    // the default. Trimming here also means the editor cannot save trailing
+    // whitespace that reads as a difference on the next dirty-check.
+    // `?.` guards the null the editor really does post when nothing is configured.
+    if (dto.welcomeMessage !== undefined) {
+      settings.welcomeMessage = dto.welcomeMessage?.trim() || null;
+    }
     if (dto.enlistmentChannelId !== undefined)
       settings.enlistmentChannelId = dto.enlistmentChannelId || null;
     if (dto.enlistmentChannelName !== undefined)

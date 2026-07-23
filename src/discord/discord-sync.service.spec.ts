@@ -465,13 +465,26 @@ describe('DiscordSyncService', () => {
         discordUserId: USER_ID,
         outcome: 'decline',
         customMessage: 'We need more line experience.',
-        reviewerNote: 'Too new to the game.',
       });
 
       const embed = savedEmbed();
       expect(embed.title).toContain('The Lords');
       expect(embed.description).toBe('We need more line experience.');
-      expect(embed.fields?.[0]).toEqual(expect.objectContaining({ value: 'Too new to the game.' }));
+    });
+
+    it('carries NO field beyond the officer’s message — the note stays with staff (T-0182)', async () => {
+      // The decision DM used to render a "Note from the reviewing officer" field
+      // fed from the staff-only moderator note. There is now no field at all, so
+      // there is nowhere for a staff-only value to be rendered.
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      await service.enqueueApplicationDecision(REGIMENT, {
+        discordUserId: USER_ID,
+        outcome: 'decline',
+        customMessage: 'We need more line experience.',
+      });
+
+      expect(savedEmbed().fields).toBeUndefined();
     });
 
     it('falls back to the per-outcome default when the officer wrote nothing', async () => {
@@ -608,6 +621,60 @@ describe('DiscordSyncService', () => {
       expect(embed.description).toBe('Fall in!');
       expect(embed.imageUrl).toBe('https://cdn.example.com/regiment-banner.png');
       expect(embed.fields?.[0].name).toBe('Next steps');
+    });
+
+    // ── T-0184: blank means "use the house default", on the READ side too ─────
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+      ['NULL', null],
+    ])('greets with the house default when the stored message is %s', async (_label, stored) => {
+      // `?? DEFAULT` was only nullish-safe, so a cleared editor box produced a
+      // welcome embed with NO body. Rows written before the PATCH normalisation
+      // are still out there, so the send path has to be correct on its own.
+      settingsRepo.findOne.mockResolvedValue(settings({ welcomeMessage: stored }));
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(savedEmbed().description).toBe('Welcome to the regiment!');
+      expect(savedEmbed().description).not.toBe('');
+    });
+
+    it('uses a configured message verbatim', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ welcomeMessage: 'Fall in, lads.' }));
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(savedEmbed().description).toBe('Fall in, lads.');
+    });
+
+    // ── T-0185: tokens expand, and admin text can never ping ─────────────────
+    it('expands {user} and {regiment} against the joining member (T-0185)', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ welcomeMessage: 'Welcome {user} to {regiment}!' }),
+      );
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(savedEmbed().description).toBe(`Welcome <@${USER_ID}> to The Lords!`);
+    });
+
+    it('keeps admin-authored welcome text out of the message CONTENT (T-0185)', async () => {
+      // THIS is the assertion that makes the injection risk unreachable. Discord
+      // does not resolve @everyone/@here inside an embed, so the text is inert
+      // exactly as long as it stays in `embed.description`. If a future change
+      // moves it to `content` — where mentions ARE parsed and the gateway sets no
+      // allowed_mentions — this fails.
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ welcomeMessage: '@everyone @here rally for {user}' }),
+      );
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      const payload = (jobsRepo.create.mock.calls[0][0] as { payload: { content: string } })
+        .payload;
+      expect(payload.content).toBe('');
+      expect(savedEmbed().description).toContain('@everyone');
     });
 
     it('still composes a usable notification when the regiment row is missing', async () => {

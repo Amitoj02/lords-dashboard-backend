@@ -535,14 +535,14 @@ export class ApplicationsService {
     });
 
     // Best-effort decision DM to the applicant (never affects the decline).
+    // ONLY the officer's user message travels (T-0182): `reason` and `note` are
+    // staff-only records — persisted above, audited immediately above — and the
+    // applicant gets the user message or the house default, nothing else.
     await this.enqueueDecisionDm(
       user.regimentId,
       application.discordIdentityId,
       'decline',
       userMessage,
-      // The officer's rationale reaches the applicant as a labelled field on the
-      // decision embed — the same text the audit row records.
-      reason ?? note,
     );
 
     return ApplicationDto.from(saved);
@@ -586,12 +586,12 @@ export class ApplicationsService {
     });
 
     // Best-effort decision DM to the applicant (never affects the hold).
+    // The staff note stays with the staff (T-0182) — see decline().
     await this.enqueueDecisionDm(
       user.regimentId,
       application.discordIdentityId,
       'hold',
       userMessage,
-      note,
     );
 
     return ApplicationDto.from(saved);
@@ -606,16 +606,23 @@ export class ApplicationsService {
    * COMPOSITION MOVED (T-0173): this used to render the message text here and
    * hand a finished string to the outbox, which is why the app had five
    * different places that knew what a notification looks like. It now passes the
-   * FACTS — outcome, the officer's custom text, their rationale — and
-   * DiscordSyncService composes the embed. The custom-message behaviour is
-   * unchanged: whatever the officer typed still wins over the default template.
+   * FACTS — outcome and the officer's custom text — and DiscordSyncService
+   * composes the embed. The custom-message behaviour is unchanged: whatever the
+   * officer typed still wins over the default template.
+   *
+   * ⚠️ `customMessage` is the officer's "User message" and is the ONLY thing the
+   * applicant receives (T-0182). This used to take a second `reviewerNote`
+   * argument that callers filled with `declineReason ?? moderatorNote` — the
+   * staff-only note the console badges "the applicant is never shown this note"
+   * — and it was DM'd to the applicant as a labelled field. The parameter is
+   * removed, not merely left unfilled, so no future caller can restore the leak.
+   * The rationale is still recorded: `decline()`/`hold()` persist it and audit it.
    */
   private async enqueueDecisionDm(
     regimentId: string,
     discordIdentityId: string | null,
     decision: 'approve' | 'decline' | 'hold',
     customMessage?: string | null,
-    reviewerNote?: string | null,
   ): Promise<void> {
     try {
       if (!discordIdentityId) return;
@@ -627,7 +634,6 @@ export class ApplicationsService {
         discordUserId,
         outcome: decision,
         customMessage: givenText(customMessage),
-        reviewerNote: givenText(reviewerNote),
       });
     } catch (error) {
       this.logger.error(`Failed to enqueue ${decision} decision DM: ${(error as Error).message}`);
