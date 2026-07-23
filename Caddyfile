@@ -44,6 +44,28 @@
 {$SITE_ADDRESS} {
 	import security
 
+	# LDA-H3 — Authenticated Origin Pulls (mTLS), as an OPT-IN overlay.
+	#
+	# When the box mounts an overlay into /etc/caddy/aop/ (a client-auth snippet
+	# plus Cloudflare's origin-pull CA), that snippet adds a `tls { client_auth
+	# require_and_verify }` policy here, so the origin refuses any TLS handshake
+	# that did not arrive through Cloudflare. That is what makes trusting
+	# Cf-Connecting-Ip for rate limiting sound: a client reaching the origin
+	# directly can no longer be served, let alone forge the address used for logs
+	# and throttling. Zone-level AOP presents Cloudflare's SHARED cert (CN
+	# origin-pull.cloudflare.net), so this proves "arrived via some Cloudflare
+	# zone", which is enough to close the direct-origin bypass.
+	#
+	# A non-matching glob is a no-op (an empty glob is not an error in Caddy), so a
+	# clone — or any deploy without the overlay — serves normally and can never
+	# boot into a lockout. ORDER MATTERS when enabling: turn on zone-level AOP in
+	# the Cloudflare dashboard FIRST (so Cloudflare actually presents its client
+	# cert), THEN drop the overlay in — otherwise the origin requires a cert
+	# Cloudflare is not sending yet and every request 520s. ACME renewal is
+	# unaffected: it runs over HTTP-01 on :80, not this :443 client-auth policy.
+	# See deploy/README.md ("Authenticated Origin Pulls").
+	import /etc/caddy/aop/*.caddy
+
 	# CSP derived from what the frontend actually loads.
 	#
 	# - style-src needs 'unsafe-inline' because Angular injects component styles at

@@ -1,0 +1,9 @@
+# The Authenticated Origin Pulls overlay (LDA-H3) is box-only: a client-auth
+# snippet (*.caddy) plus Cloudflare's origin-pull CA (*.pem) are dropped into
+# this directory on the production host and must NEVER be committed. Keep the
+# directory in git (so the compose bind mount and the Caddyfile glob import have
+# something to point at), but ignore everything that lands in it.
+#
+# See deploy/README.md ("Authenticated Origin Pulls").
+*
+!.gitignore

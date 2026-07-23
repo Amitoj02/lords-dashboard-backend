@@ -274,6 +274,65 @@ Accepted commands: `deploy api|web|both <tag...>`, `status`. Tags must match
 
 ---
 
+## Authenticated Origin Pulls (LDA-H3)
+
+Locks the origin so it will only answer TLS handshakes that carry Cloudflare's
+origin-pull client certificate — i.e. only Cloudflare can reach it. This is what
+makes trusting `Cf-Connecting-Ip` for rate limiting sound (`TRUST_CF_CONNECTING_IP`),
+because a client can no longer bypass Cloudflare to hit the origin directly and
+forge that header.
+
+It is an **opt-in overlay**: the committed Caddyfile ends the site block with
+`import /etc/caddy/aop/*.caddy`, and compose mounts `./caddy/aop` there. That
+directory ships **empty** (a non-matching glob is a no-op in Caddy), so a clone
+serves normally. AOP turns on only when the box drops two files into it.
+
+**⚠️ Order matters — get it backwards and every request 520s:**
+
+1. **Cloudflare first.** Enable zone-level AOP so Cloudflare actually presents its
+   client cert: dashboard → SSL/TLS → Origin Server → *Authenticated Origin Pulls*
+   → on. (Or the API: `PUT /zones/<zone_id>/origin_tls_client_auth/settings`
+   with `{"enabled": true}`.) On its own this is harmless — the origin ignores the
+   cert until step 2. Verify Cloudflare is presenting it before proceeding
+   (`mode request` + `caddy` debug log shows a client cert on the CF request).
+2. **Origin second.** On the box, put Cloudflare's origin-pull CA and a client-auth
+   snippet into `~/lords/caddy/aop/` (both git-ignored there), then recreate caddy:
+
+   ```bash
+   cd ~/lords && mkdir -p caddy/aop
+   # Cloudflare's origin-pull CA (developers.cloudflare.com/ssl/static/authenticated_origin_pull_ca.pem):
+   mv cloudflare-origin-pull-ca.pem caddy/aop/
+   cat > caddy/aop/client-auth.caddy <<'SNIP'
+   tls {
+       client_auth {
+           mode require_and_verify
+           trust_pool file /etc/caddy/aop/cloudflare-origin-pull-ca.pem
+       }
+   }
+   SNIP
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy
+   ```
+
+3. **Verify.** Through Cloudflare must still work; direct-to-origin must now be
+   refused at the TLS layer:
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' https://lordsofholdfast.com/api/health/live   # 200
+   curl -sS --resolve lordsofholdfast.com:443:127.0.0.1 https://lordsofholdfast.com/api/health/live   # TLS handshake failure
+   ```
+
+4. Only once that passes, set `TRUST_CF_CONNECTING_IP=true` in `.env` and
+   `up -d api`.
+
+**Roll back** by emptying the overlay — `rm ~/lords/caddy/aop/client-auth.caddy`
+and `up -d caddy`. Zone-level AOP uses Cloudflare's shared cert (CN
+`origin-pull.cloudflare.net`), so this proves a request came via *some* Cloudflare
+zone, not specifically ours — enough to close the direct-origin bypass. ACME
+renewal is unaffected: it runs over HTTP-01 on `:80`, not the `:443` client-auth
+policy.
+
+---
+
 ## Rotating secrets
 
 | Secret | Effect | How |
