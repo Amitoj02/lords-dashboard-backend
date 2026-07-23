@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -27,6 +28,9 @@ export class StorageController {
   constructor(private readonly storage: StorageService) {}
 
   @Post('uploads')
+  // Presign minting is cheap to abuse (each ticket authorises a large PUT); cap it
+  // well below the global bucket (LDA-H3/M12).
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Request a presigned upload URL for a validated, authorized target' })
   @ApiCreatedResponse({ type: PresignedUploadDto })

@@ -33,6 +33,13 @@ services:
       # nothing serving traffic holds root.
       - ./mysql/init:/docker-entrypoint-initdb.d:ro
     environment:
+      # Fail closed on the root password (LDA-M2): the base file defaults this to
+      # the published constant `devpassword`, and the prod overlay used to inherit
+      # that silently — so an unset DB_PASSWORD provisioned root as `devpassword`,
+      # reachable from any container on the compose network. Require it here.
+      # (Only used when first provisioning an empty db-data volume; rotate an
+      # already-provisioned root password with ALTER USER — see deploy/README.)
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD (MySQL root password)}
       # Consumed by 01-app-users.sh, not by the mysql image itself.
       APP_DB_USERNAME: ${APP_DB_USERNAME:-lords_app}
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD}

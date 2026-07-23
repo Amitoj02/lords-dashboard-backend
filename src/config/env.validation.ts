@@ -15,6 +15,11 @@ export const envValidationSchema = Joi.object({
   PORT: Joi.number().port().default(3000),
   API_PREFIX: Joi.string().default('api'),
   CORS_ORIGINS: Joi.string().default('http://localhost:4200'),
+  // Trust the client-suppliable CF-Connecting-IP header for rate limiting (LDA-H3).
+  // Default false: only set true once Cloudflare-only ingress (AOP/mTLS or a
+  // firewall pinning :443 to Cloudflare) is enforced, so the header cannot be
+  // spoofed by a direct-to-origin client. Otherwise the socket peer IP is used.
+  TRUST_CF_CONNECTING_IP: Joi.boolean().default(false),
 
   // Database
   DB_HOST: Joi.string().default('localhost'),

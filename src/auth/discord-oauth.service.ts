@@ -12,6 +12,9 @@ import { DiscordTokenResponse, DiscordUser } from './types/discord-api.types';
 export class DiscordOAuthService {
   private readonly logger = new Logger(DiscordOAuthService.name);
   private readonly apiBase = 'https://discord.com/api/v10';
+  /** Ceiling on each Discord call so a hung response cannot tie up the
+   * unauthenticated callback request indefinitely (LDA-L8). */
+  private static readonly FETCH_TIMEOUT_MS = 10_000;
 
   constructor(protected readonly config: ConfigService<AppConfig, true>) {}
 
@@ -52,6 +55,7 @@ export class DiscordOAuthService {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
+      signal: AbortSignal.timeout(DiscordOAuthService.FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -65,6 +69,7 @@ export class DiscordOAuthService {
   async fetchUser(accessToken: string): Promise<DiscordUser> {
     const res = await fetch(`${this.apiBase}/users/@me`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(DiscordOAuthService.FETCH_TIMEOUT_MS),
     });
     if (!res.ok) {
       this.logger.warn(`Discord profile fetch failed: ${res.status}`);

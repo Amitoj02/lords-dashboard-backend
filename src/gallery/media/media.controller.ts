@@ -1,4 +1,5 @@
 import { Controller, Get, Param, Query, Res } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Response } from 'express';
 import { Public } from '../../auth/decorators/public.decorator';
@@ -26,6 +27,9 @@ export class MediaController {
 
   @Get('medal/:id/thumbnail')
   @Public()
+  // Unauthenticated + triggers a server-side outbound fetch, so it must not share
+  // the one global bucket (LDA-H3/M18). Cap per-IP well below the default.
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
   @ApiOperation({ summary: 'Proxy + cache a Medal.tv clip thumbnail (stable URL)' })
   async medalThumbnail(@Param('id') id: string, @Res() res: Response): Promise<void> {
     const thumb = await this.media.getMedalThumbnail(id);

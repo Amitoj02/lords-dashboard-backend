@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import { Controller, Get, HttpCode, HttpStatus, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CookieOptions, Request, Response } from 'express';
 import { AppConfig } from '../config/configuration';
@@ -25,6 +26,9 @@ export class AuthController {
   ) {}
 
   @Public()
+  // Stricter than the global 120/min: the sign-in surface is a favourite target
+  // for credential/OAuth abuse and warrants its own tighter bucket (LDA-H3).
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get('discord')
   @ApiOperation({
     summary: 'Begin Discord OAuth2 sign-in (302 redirect to Discord)',
@@ -45,6 +49,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get('discord/callback')
   @ApiOperation({
     summary: 'Discord OAuth2 callback — upserts the identity + member and issues a JWT',
