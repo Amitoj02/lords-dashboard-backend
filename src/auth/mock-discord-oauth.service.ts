@@ -61,6 +61,18 @@ export class MockDiscordOAuthService extends DiscordOAuthService {
 
   constructor(config: ConfigService<AppConfig, true>) {
     super(config);
+    // Fail closed (LDA-C1): this service is an authentication bypass and must never
+    // be constructed in production. The factory in AuthModule only builds it when
+    // discord.mock is true (which no longer auto-enables in prod), so reaching here
+    // in production means DISCORD_MOCK was explicitly set — refuse unless the
+    // operator opted in with ALLOW_MOCKS_IN_PROD=true.
+    const env = config.get('env', { infer: true });
+    if (env === 'production' && process.env.ALLOW_MOCKS_IN_PROD !== 'true') {
+      throw new Error(
+        'MockDiscordOAuthService must not be constructed in production (LDA-C1). ' +
+          'Set ALLOW_MOCKS_IN_PROD=true only if you truly intend to run the auth mock.',
+      );
+    }
     this.mockLogger.warn(
       'Discord OAuth is MOCKED (DISCORD_MOCK). No real Discord app is used — ' +
         'set DISCORD_MOCK=false with real credentials to go live.',

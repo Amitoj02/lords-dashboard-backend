@@ -34,9 +34,14 @@ export class AuthController {
       'Ignored by the real Discord flow.',
   })
   discordLogin(@Query('as') persona: string | undefined, @Res() res: Response): void {
+    // The `?as=` persona selector is ONLY meaningful when the Discord mock is
+    // active. Ignore it entirely otherwise (LDA-C1) so it can never influence the
+    // real OAuth flow — belt-and-suspenders on top of the real service ignoring it.
+    const mockActive = this.config.get('discord', { infer: true }).mock;
+    const requestedPersona = mockActive ? persona : undefined;
     const state = randomBytes(16).toString('hex');
     res.cookie(STATE_COOKIE, state, this.cookieOptions(10 * 60 * 1000));
-    res.redirect(this.authService.getLoginUrl(state, persona));
+    res.redirect(this.authService.getLoginUrl(state, requestedPersona));
   }
 
   @Public()
@@ -65,8 +70,15 @@ export class AuthController {
       const result = await this.authService.signInWithDiscord(code, req.ip ?? null);
       res.cookie(TOKEN_COOKIE, result.token, this.cookieOptions(7 * 24 * 60 * 60 * 1000));
       const url = new URL(frontend.authSuccessRedirect);
-      url.searchParams.set('token', result.token);
-      url.searchParams.set('isMember', String(result.isMember));
+      // Deliver the JWT in the URL FRAGMENT, never the query string (LDA-H4). A
+      // fragment is not transmitted to any server, so the token never lands in the
+      // nginx/Caddy/Cloudflare access logs or in the `Referer` header on the first
+      // same-origin navigation. The SPA reads it from location.hash and scrubs it
+      // immediately with history.replaceState. The httpOnly cookie set above is the
+      // primary, JS-inaccessible handoff. JWT chars (base64url + '.') are all
+      // fragment-safe, so no percent-encoding is needed.
+      url.hash = `token=${result.token}&isMember=${String(result.isMember)}`;
+      res.setHeader('Referrer-Policy', 'no-referrer');
       res.redirect(url.toString());
     } catch {
       res.redirect(`${frontend.authFailureRedirect}?error=auth_failed`);

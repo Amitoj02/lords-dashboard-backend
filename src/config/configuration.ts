@@ -114,68 +114,79 @@ export interface IntegrationsConfig {
   youtubeApiKey: string;
 }
 
-export default (): AppConfig => ({
-  env: (process.env.NODE_ENV as AppConfig['env']) ?? 'development',
-  port: parseInt(process.env.PORT ?? '3000', 10),
-  apiPrefix: process.env.API_PREFIX ?? 'api',
-  corsOrigins: csv(process.env.CORS_ORIGINS) || ['http://localhost:4200'],
-  database: {
-    host: process.env.DB_HOST ?? 'localhost',
-    port: parseInt(process.env.DB_PORT ?? '3306', 10),
-    username: process.env.DB_USERNAME ?? 'root',
-    password: process.env.DB_PASSWORD ?? '',
-    database: process.env.DB_DATABASE ?? 'lords_dashboard',
-    synchronize: toBool(process.env.DB_SYNCHRONIZE, false),
-    logging: toBool(process.env.DB_LOGGING, false),
-  },
-  jwt: {
-    secret: process.env.JWT_SECRET ?? '',
-    expiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
-    encryptionKey: process.env.ENCRYPTION_KEY ?? '',
-  },
-  discord: {
-    clientId: process.env.DISCORD_CLIENT_ID ?? '',
-    clientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',
-    callbackUrl:
-      process.env.DISCORD_CALLBACK_URL ?? 'http://localhost:3000/api/auth/discord/callback',
-    scopes: (process.env.DISCORD_SCOPES ?? 'identify email').split(' ').filter(Boolean),
-    guildId: process.env.DISCORD_GUILD_ID ?? '',
-    // Default the mock ON only when no real client id is configured, so a fresh
-    // `docker compose up` works with zero Discord setup; an explicit
-    // DISCORD_MOCK always wins.
-    mock: toBool(process.env.DISCORD_MOCK, !process.env.DISCORD_CLIENT_ID),
-    mockDefaultPersona: process.env.DISCORD_MOCK_DEFAULT_PERSONA ?? 'owner',
-    botToken: process.env.DISCORD_BOT_TOKEN ?? '',
-    applicationId: process.env.DISCORD_APPLICATION_ID ?? '',
-    // Default the bot mock ON when no bot token is configured, so the whole sync
-    // pipeline runs with zero Discord setup; an explicit DISCORD_BOT_MOCK wins.
-    botMock: toBool(process.env.DISCORD_BOT_MOCK, !process.env.DISCORD_BOT_TOKEN),
-  },
-  frontend: {
-    url: process.env.FRONTEND_URL ?? 'http://localhost:4200',
-    authSuccessRedirect:
-      process.env.FRONTEND_AUTH_SUCCESS_REDIRECT ?? 'http://localhost:4200/auth/callback',
-    authFailureRedirect:
-      process.env.FRONTEND_AUTH_FAILURE_REDIRECT ?? 'http://localhost:4200/login',
-  },
-  storage: (() => {
-    // Host-mapped MinIO by default (the browser PUTs here). capybara-rustfs holds
-    // 9000/9001 locally, so the dev compose maps MinIO to 9100/9101.
-    const endpoint = process.env.S3_ENDPOINT ?? 'http://localhost:9100';
-    const bucket = process.env.S3_BUCKET ?? 'lords-media';
-    return {
-      endpoint,
-      region: process.env.S3_REGION ?? 'us-east-1',
-      accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
-      secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
-      bucket,
-      publicBaseUrl: process.env.S3_PUBLIC_BASE_URL ?? `${endpoint}/${bucket}`,
-      forcePathStyle: toBool(process.env.S3_FORCE_PATH_STYLE, true),
-      presignExpirySeconds: parseInt(process.env.S3_PRESIGN_EXPIRY_SECONDS ?? '900', 10),
-      maxUploadMb: parseInt(process.env.S3_MAX_UPLOAD_MB ?? '100', 10),
-    };
-  })(),
-  integrations: {
-    youtubeApiKey: process.env.YOUTUBE_API_KEY ?? '',
-  },
-});
+export default (): AppConfig => {
+  const env = (process.env.NODE_ENV as AppConfig['env']) ?? 'development';
+  const isProd = env === 'production';
+  return {
+    env,
+    port: parseInt(process.env.PORT ?? '3000', 10),
+    apiPrefix: process.env.API_PREFIX ?? 'api',
+    corsOrigins: csv(process.env.CORS_ORIGINS) || ['http://localhost:4200'],
+    database: {
+      host: process.env.DB_HOST ?? 'localhost',
+      port: parseInt(process.env.DB_PORT ?? '3306', 10),
+      username: process.env.DB_USERNAME ?? 'root',
+      password: process.env.DB_PASSWORD ?? '',
+      database: process.env.DB_DATABASE ?? 'lords_dashboard',
+      synchronize: toBool(process.env.DB_SYNCHRONIZE, false),
+      logging: toBool(process.env.DB_LOGGING, false),
+    },
+    jwt: {
+      secret: process.env.JWT_SECRET ?? '',
+      expiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+      encryptionKey: process.env.ENCRYPTION_KEY ?? '',
+    },
+    discord: {
+      clientId: process.env.DISCORD_CLIENT_ID ?? '',
+      clientSecret: process.env.DISCORD_CLIENT_SECRET ?? '',
+      callbackUrl:
+        process.env.DISCORD_CALLBACK_URL ?? 'http://localhost:3000/api/auth/discord/callback',
+      scopes: (process.env.DISCORD_SCOPES ?? 'identify email').split(' ').filter(Boolean),
+      guildId: process.env.DISCORD_GUILD_ID ?? '',
+      // Default the mock ON only when no real client id is configured, so a fresh
+      // `docker compose up` works with zero Discord setup; an explicit DISCORD_MOCK
+      // always wins. NEVER auto-enable in production (LDA-C1): an absent
+      // DISCORD_CLIENT_ID must break login loudly rather than silently swap in an
+      // authentication bypass. In prod the mock is only ever on if DISCORD_MOCK is
+      // explicitly set — and the boot guard (main.ts) then refuses to start unless
+      // ALLOW_MOCKS_IN_PROD=true.
+      mock: toBool(process.env.DISCORD_MOCK, !isProd && !process.env.DISCORD_CLIENT_ID),
+      mockDefaultPersona: process.env.DISCORD_MOCK_DEFAULT_PERSONA ?? 'owner',
+      botToken: process.env.DISCORD_BOT_TOKEN ?? '',
+      applicationId: process.env.DISCORD_APPLICATION_ID ?? '',
+      // Default the bot mock ON when no bot token is configured, so the whole sync
+      // pipeline runs with zero Discord setup; an explicit DISCORD_BOT_MOCK wins.
+      // Not auto-enabled in production either — but unlike the OAuth mock, a mocked
+      // bot is NOT an auth bypass (it makes Discord side-effects no-ops), so prod may
+      // legitimately run it (and does today) with only a loud boot warning.
+      botMock: toBool(process.env.DISCORD_BOT_MOCK, !isProd && !process.env.DISCORD_BOT_TOKEN),
+    },
+    frontend: {
+      url: process.env.FRONTEND_URL ?? 'http://localhost:4200',
+      authSuccessRedirect:
+        process.env.FRONTEND_AUTH_SUCCESS_REDIRECT ?? 'http://localhost:4200/auth/callback',
+      authFailureRedirect:
+        process.env.FRONTEND_AUTH_FAILURE_REDIRECT ?? 'http://localhost:4200/login',
+    },
+    storage: (() => {
+      // Host-mapped MinIO by default (the browser PUTs here). capybara-rustfs holds
+      // 9000/9001 locally, so the dev compose maps MinIO to 9100/9101.
+      const endpoint = process.env.S3_ENDPOINT ?? 'http://localhost:9100';
+      const bucket = process.env.S3_BUCKET ?? 'lords-media';
+      return {
+        endpoint,
+        region: process.env.S3_REGION ?? 'us-east-1',
+        accessKeyId: process.env.S3_ACCESS_KEY_ID ?? 'minioadmin',
+        secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? 'minioadmin',
+        bucket,
+        publicBaseUrl: process.env.S3_PUBLIC_BASE_URL ?? `${endpoint}/${bucket}`,
+        forcePathStyle: toBool(process.env.S3_FORCE_PATH_STYLE, true),
+        presignExpirySeconds: parseInt(process.env.S3_PRESIGN_EXPIRY_SECONDS ?? '900', 10),
+        maxUploadMb: parseInt(process.env.S3_MAX_UPLOAD_MB ?? '100', 10),
+      };
+    })(),
+    integrations: {
+      youtubeApiKey: process.env.YOUTUBE_API_KEY ?? '',
+    },
+  };
+};
