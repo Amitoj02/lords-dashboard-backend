@@ -19,7 +19,6 @@ const ENROLLED = [
 /** capability → the roles that are granted it (the default permission matrix). */
 const MATRIX: Record<Capability, MemberRole[]> = {
   [Capability.ManageSettings]: [MemberRole.Owner],
-  [Capability.TransferOwnership]: [MemberRole.Owner],
   [Capability.ManageRoles]: [MemberRole.Owner],
   [Capability.ViewAuditLog]: ADMINS,
   [Capability.EditRanksMedals]: ADMINS,
@@ -49,6 +48,10 @@ const MATRIX: Record<Capability, MemberRole[]> = {
  * safe (unlike a rank name, an enum member cannot be renamed by a user), so a
  * capability added in a later release still receives its default grant here on
  * an already-provisioned database.
+ *
+ * The inverse does NOT hold: because this never deletes, REMOVING a capability
+ * from the enum leaves its rows behind on an already-provisioned database, so a
+ * retirement must ship a migration that purges them (T-0170).
  */
 export async function seedRolePermissions(ds: DataSource): Promise<void> {
   const repo = ds.getRepository(RolePermission);

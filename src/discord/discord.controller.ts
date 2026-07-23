@@ -29,7 +29,12 @@ import {
   DiscordVerifyConnectionDto,
 } from './dto/discord-connection.dto';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
-import { BindGuildDto, DiscordOperationsQueryDto, SimulateJoinDto } from './dto/discord-inputs.dto';
+import {
+  BindGuildDto,
+  DiscordOperationsQueryDto,
+  SimulateJoinDto,
+  SimulateLeaveDto,
+} from './dto/discord-inputs.dto';
 import { RoleRelinkProgressDto } from './dto/role-relink.dto';
 
 /**
@@ -192,5 +197,16 @@ export class DiscordController {
   })
   simulateMemberJoin(@Body() dto: SimulateJoinDto): Promise<{ ok: true }> {
     return this.discordService.simulateMemberJoin(dto);
+  }
+
+  @Post('simulate/member-leave')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.ManageSettings)
+  @ApiOperation({
+    summary:
+      'Dev/testing: simulate a guild-member-remove to exercise the membership flip via the mock',
+  })
+  simulateMemberLeave(@Body() dto: SimulateLeaveDto): Promise<{ ok: true }> {
+    return this.discordService.simulateMemberLeave(dto);
   }
 }

@@ -97,6 +97,58 @@ manual run    → Actions → Deploy to production
   → heartbeat ping (success path only)
 ```
 
+**A Discord message**
+
+```
+app mutation → DiscordSyncService.enqueue*   (best-effort, post-commit, never throws)
+             → row in discord_sync_jobs      (the outbox; MySQL `json` payload)
+             → DiscordSyncWorker drains every 3s
+             → DiscordGateway (discord.js Client in the API process)
+             → bot posts as the Lord Adjutant bot
+             → outcome recorded on bot_operations
+```
+
+**There is no webhook anywhere.** Every outbound message leaves through the bot
+— `sendChannelMessage` for a channel post, `sendDirectMessage` for a DM — so a
+single bot token is the only Discord write credential, and every message is
+retried, rate-limited and audited by the same outbox. Verified: `grep -rni
+webhook src/` returns **zero** matches.
+
+---
+
+## Discord delivery matrix
+
+Every row is one `enqueue*` method on `DiscordSyncService`, one for one. A
+message is only queued when `discord_bot_settings.bot_enabled` is on **and** the
+row's own channel/switch is set; otherwise the enqueue silently no-ops.
+
+| Event | Channel setting | Delivery | Job type | Producing call site |
+|---|---|---|---|---|
+| Enlistment application submitted | `enlistment_channel_id` | channel embed | `application.submitted` | `applications.service.ts` → `enqueueApplicationSubmitted` |
+| Application approved / declined / held | — (DM) | DM embed | `application.decision` | `applications.service.ts` `enqueueDecisionDm` → `enqueueApplicationDecision` |
+| Gallery submission declined | — (DM) | DM embed | `application.decision` | `gallery.service.ts` `enqueueDeclineDm` → `enqueueGalleryDecision` |
+| Event created | `event_announcement_channel_id` | channel embed | `announce` | `events.service.ts` `create` → `enqueueEventAnnounce` |
+| Event lead-time reminder | `event_announcement_channel_id` | channel embed | `event.reminder` | `event-reminder.scheduler.ts` sweep → `enqueueEventReminder` |
+| Audit entry mirrored | `audit_log_channel_id` | channel embed | `audit.log` | `audit.service.ts` `mirrorToDiscord` → `enqueueAuditLog` |
+| Member joined the guild — welcome | `welcome_channel_id`, **falls back to a DM when unset** | channel embed *or* DM embed | `welcome` | `discord-onboarding.service.ts` → `enqueueWelcome` |
+| Member joined the guild — Guest role | — (`join_role_id`) | role mutation | `role.assign` | `discord-onboarding.service.ts` → `enqueueJoinRole` |
+| Rank / role / medal changed | — | role mutation | `role.sync` | `members.service.ts` `syncMemberRoles` → `enqueueRoleSync` |
+| Member banned in the app | — (`ban_role_id`) | role mutation | `member.ban_role` | `members.service.ts` `ban` → `enqueueMemberBanRole` ⚠️ owner-gated, default off |
+| Rank/medal Discord role re-pointed | — | role mutation (bulk) | `role.relink_expand` → `role.relink_apply` | `ranks.service.ts` / `medals.service.ts` `fanOutRelink` → `enqueueRoleRelink` |
+| Manual "resync roles" | — | role mutation (bulk) | `role.sync` per member | `POST /api/discord/resync` → `resyncAll` |
+
+Notes:
+
+- The five embed rows are composed in one place — `src/discord/embeds/` — and
+  clamped to Discord's real embed limits before they are written to the outbox,
+  so an over-long answer is shortened rather than becoming a job that fails on
+  every retry forever.
+- `role.remove` is dispatched by the worker but has no producer; role removal is
+  always reached through a reconcile (`role.sync` / `role.relink_apply`).
+- An event's **server password is never announced**. It is gated behind an RSVP
+  in the app, and the projection the announcement is built from has no field
+  that could carry it.
+
 ---
 
 ## On the box

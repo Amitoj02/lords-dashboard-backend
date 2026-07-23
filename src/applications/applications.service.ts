@@ -163,6 +163,10 @@ export class ApplicationsService {
       preferredClasses: saved.preferredClasses,
       skillsToImprove: saved.skillsToImprove,
       representativeNote: saved.representativeNote,
+      // The applicant's Discord avatar becomes the post's thumbnail (T-0173).
+      // Null when they have none — the composer simply omits the thumbnail.
+      avatarUrl: identity?.avatarUrl ?? null,
+      submittedAt: saved.submittedAt ? saved.submittedAt.toISOString() : null,
     });
 
     // TODO(audit): no `application.submit` action code exists in the seed; the
@@ -534,6 +538,9 @@ export class ApplicationsService {
       application.discordIdentityId,
       'decline',
       userMessage,
+      // The officer's rationale reaches the applicant as a labelled field on the
+      // decision embed — the same text the audit row records.
+      reason ?? note,
     );
 
     return ApplicationDto.from(saved);
@@ -582,6 +589,7 @@ export class ApplicationsService {
       application.discordIdentityId,
       'hold',
       userMessage,
+      note,
     );
 
     return ApplicationDto.from(saved);
@@ -590,15 +598,22 @@ export class ApplicationsService {
   /**
    * Best-effort applicant DM on a decision (approve/decline/hold). Resolves the
    * applicant's Discord user id from the linked identity; if there is no linked
-   * identity or no Discord user id, the DM is skipped silently. The message is
-   * the trimmed custom text when provided, else the per-decision default
-   * template. Wrapped so ANY failure here can never affect the decision result.
+   * identity or no Discord user id, the DM is skipped silently. Wrapped so ANY
+   * failure here can never affect the decision result.
+   *
+   * COMPOSITION MOVED (T-0173): this used to render the message text here and
+   * hand a finished string to the outbox, which is why the app had five
+   * different places that knew what a notification looks like. It now passes the
+   * FACTS — outcome, the officer's custom text, their rationale — and
+   * DiscordSyncService composes the embed. The custom-message behaviour is
+   * unchanged: whatever the officer typed still wins over the default template.
    */
   private async enqueueDecisionDm(
     regimentId: string,
     discordIdentityId: string | null,
     decision: 'approve' | 'decline' | 'hold',
     customMessage?: string | null,
+    reviewerNote?: string | null,
   ): Promise<void> {
     try {
       if (!discordIdentityId) return;
@@ -606,32 +621,14 @@ export class ApplicationsService {
       const discordUserId = identity?.discordUserId;
       if (!discordUserId) return;
 
-      const content =
-        givenText(customMessage) ?? (await this.defaultDecisionMessage(regimentId, decision));
-
-      await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
+      await this.discordSync.enqueueApplicationDecision(regimentId, {
+        discordUserId,
+        outcome: decision,
+        customMessage: givenText(customMessage),
+        reviewerNote: givenText(reviewerNote),
+      });
     } catch (error) {
       this.logger.error(`Failed to enqueue ${decision} decision DM: ${(error as Error).message}`);
-    }
-  }
-
-  /** Render the default decision DM, substituting the regiment display name. */
-  private async defaultDecisionMessage(
-    regimentId: string,
-    decision: 'approve' | 'decline' | 'hold',
-  ): Promise<string> {
-    const settings = await this.settings.findOne({
-      where: { regimentId },
-      relations: { regiment: true },
-    });
-    const name = settings?.regiment?.name ?? 'the regiment';
-    switch (decision) {
-      case 'approve':
-        return `Your application to ${name} has been approved - welcome aboard! Check the dashboard for your next steps.`;
-      case 'decline':
-        return `Thank you for your interest in ${name}. After review, your application was not successful at this time.`;
-      case 'hold':
-        return `Your application to ${name} is on hold pending further review. We will be in touch soon.`;
     }
   }
 

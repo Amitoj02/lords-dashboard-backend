@@ -40,6 +40,13 @@ import { MembersService } from './members.service';
  * to all enrolled roles); profile edits are self-service; admin actions (rank/
  * role/medal/suspend/ban) are capability-gated and audited in the service. All
  * routes are auth-guarded globally and scoped to the caller's regiment.
+ *
+ * The capability decorators below are only half the gate: they know the
+ * caller's role but nothing about the TARGET, so every admin action is also
+ * subject to the role-hierarchy guard in the service (T-0176) — not yourself,
+ * not the regiment owner, and only against a strictly lower role. The
+ * `permittedActions` block on MemberDto reports the combined verdict per member
+ * so the client does not have to guess (T-0177).
  */
 @ApiTags('members')
 @ApiBearerAuth('access-token')
@@ -188,7 +195,9 @@ export class MembersController {
   @RequireCapability(Capability.ManageRoles)
   @ApiOperation({
     summary: "Change a member's role",
-    description: 'Forbidden against the regiment owner or the caller themselves.',
+    description:
+      'Forbidden against the regiment owner, the caller themselves, and any member ' +
+      'whose role equals or outranks the caller (T-0176).',
   })
   @ApiOkResponse({ type: MemberDto })
   changeRole(
@@ -232,7 +241,9 @@ export class MembersController {
   @RequireCapability(Capability.ManageRoles)
   @ApiOperation({
     summary: 'Suspend a member until a future date',
-    description: 'Forbidden against the regiment owner or the caller themselves.',
+    description:
+      'Forbidden against the regiment owner, the caller themselves, and any member ' +
+      'whose role equals or outranks the caller (T-0176).',
   })
   @ApiOkResponse({ type: MemberDto })
   suspend(
@@ -248,7 +259,9 @@ export class MembersController {
   @RequireCapability(Capability.ManageRoles)
   @ApiOperation({
     summary: 'Ban a member (app-side)',
-    description: 'Forbidden against the regiment owner or the caller themselves.',
+    description:
+      'Forbidden against the regiment owner, the caller themselves, and any member ' +
+      'whose role equals or outranks the caller (T-0176).',
   })
   @ApiOkResponse({ type: MemberDto })
   ban(

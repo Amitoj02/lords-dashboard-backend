@@ -128,6 +128,42 @@ describe('Auth (e2e)', () => {
       rank: null,
       isMember: false,
     });
+    // The guild-gate fields are on the identity-only projection too (T-0166):
+    // an applicant who is not in the guild is precisely who needs the invite.
+    expect(me.body).toMatchObject({ guildGateEnabled: false, guildGateExempt: false });
+    expect(me.body).toHaveProperty('guildMember');
+    expect(me.body).toHaveProperty('discordInviteUrl');
+  });
+
+  it('the authorize URL still asks for identify+email only — no guilds scope (T-0166)', async () => {
+    // Surfacing guild membership on the session must not widen the OAuth consent
+    // screen; the verdict comes from the bot, never from the `guilds` scope.
+    const res = await request(app.getHttpServer()).get('/api/auth/discord').expect(302);
+    expect(res.headers.location).not.toContain('guilds');
+  });
+
+  it('GET /api/auth/guild-status is authenticated and reports the gate as OFF by default', async () => {
+    await request(app.getHttpServer()).get('/api/auth/guild-status').expect(401);
+
+    currentProfile = {
+      id: NEW_DISCORD_ID,
+      username: 'freshrecruit',
+      global_name: 'Fresh Recruit',
+      discriminator: '0',
+      avatar: 'avatarhash',
+      email: 'fresh@example.com',
+    };
+    const { token } = await signIn();
+    const status = await request(app.getHttpServer())
+      .get('/api/auth/guild-status')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    // Shipped OFF (owner decision): with no bot rolled out, every verdict would
+    // be wrong and enforcing one would lock the regiment out.
+    expect(status.body).toMatchObject({ gateEnabled: false, exempt: false });
+    expect(typeof status.body.guildMember).toBe('boolean');
+    expect(typeof status.body.degraded).toBe('boolean');
   });
 
   it('a returning sign-in linked to a roster member resolves the member (owner)', async () => {

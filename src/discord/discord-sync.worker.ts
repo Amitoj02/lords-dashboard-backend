@@ -14,6 +14,11 @@ import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
+import {
+  ChannelMessagePayload,
+  DiscordJobPayloadMap,
+  DirectMessagePayload,
+} from './discord-job-payloads';
 import { DiscordSyncService } from './discord-sync.service';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
@@ -218,44 +223,94 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * Read a job's stored payload as the shape its job type declares (T-0172).
+   *
+   * This replaces `(job.payload ?? {}) as Record<string, string | undefined>`
+   * plus a `String(p.foo)` at every use. That old shape asserted every payload
+   * value was a STRING, which stopped being true the moment a payload had to
+   * carry an embed object — and `String(embed)` would have posted
+   * `[object Object]` to a live channel rather than failing loudly.
+   *
+   * Because {@link dispatch} switches on a narrowed `DiscordSyncJobType`, `type`
+   * is a literal inside each `case` and the returned payload is that arm's exact
+   * interface — so this is the single cast for the whole worker.
+   */
+  private payloadOf<T extends DiscordSyncJobType>(
+    job: DiscordSyncJob,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    type: T,
+  ): DiscordJobPayloadMap[T] {
+    return (job.payload ?? {}) as DiscordJobPayloadMap[T];
+  }
+
+  /**
+   * Post a composed message to a channel.
+   *
+   * ⚠️ BACKWARD COMPATIBILITY (T-0172): when the payload carries no embed the
+   * gateway is called with exactly the two arguments it was called with before
+   * this change. That is what makes an outbox row written by the OLD code — it
+   * has only `channelId` + `content` — deliver as plain text, byte for byte as
+   * it would have on the previous release.
+   */
+  private postToChannel(p: ChannelMessagePayload): Promise<{ messageId: string }> {
+    return p.embed
+      ? this.gateway.sendChannelMessage(p.channelId, p.content ?? '', [p.embed])
+      : this.gateway.sendChannelMessage(p.channelId, p.content ?? '');
+  }
+
+  /** DM a composed message. Same legacy-shaped call as {@link postToChannel}. */
+  private dmUser(p: DirectMessagePayload): Promise<{ messageId: string }> {
+    return p.embed
+      ? this.gateway.sendDirectMessage(p.discordUserId, p.content ?? '', [p.embed])
+      : this.gateway.sendDirectMessage(p.discordUserId, p.content ?? '');
+  }
+
   private async dispatch(job: DiscordSyncJob): Promise<void> {
-    // Payload values are JSON primitives (all strings for our job types).
-    const p = (job.payload ?? {}) as Record<string, string | undefined>;
-    switch (job.jobType as DiscordSyncJobType) {
-      case DiscordSyncJobType.RoleAssign:
-        await this.gateway.assignRole(String(p.discordUserId), String(p.roleId));
+    const type = job.jobType as DiscordSyncJobType;
+    switch (type) {
+      case DiscordSyncJobType.RoleAssign: {
+        const p = this.payloadOf(job, type);
+        await this.gateway.assignRole(p.discordUserId, p.roleId);
         return;
-      case DiscordSyncJobType.RoleRemove:
-        await this.gateway.removeRole(String(p.discordUserId), String(p.roleId));
+      }
+      case DiscordSyncJobType.RoleRemove: {
+        const p = this.payloadOf(job, type);
+        await this.gateway.removeRole(p.discordUserId, p.roleId);
         return;
-      case DiscordSyncJobType.RoleSync:
-        await this.reconcileRoles(job.regimentId, String(p.memberId), String(p.discordUserId));
+      }
+      case DiscordSyncJobType.RoleSync: {
+        const p = this.payloadOf(job, type);
+        await this.reconcileRoles(job.regimentId, p.memberId, p.discordUserId);
         return;
+      }
       case DiscordSyncJobType.RoleRelinkExpand:
         // Expands ONE page and re-enqueues itself; the gate re-check and the
         // cancel check live with the paging query (DiscordSyncService).
         await this.sync.expandRelinkPage(job);
         return;
       case DiscordSyncJobType.RoleRelinkApply: {
+        const p = this.payloadOf(job, type);
         // ⚠️ Re-check the gate at EXECUTION time, exactly like the ban-role job:
         // a fan-out spans minutes, and a re-link job that drains after the bot
         // (or role syncing) was switched off must not touch Discord.
         const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
         if (!settings?.botEnabled || !settings?.syncRolesOnChange) {
           this.logger.warn(
-            `Skipping queued re-link for ${String(p.discordUserId)}: botEnabled/syncRolesOnChange disabled since enqueue`,
+            `Skipping queued re-link for ${p.discordUserId}: botEnabled/syncRolesOnChange disabled since enqueue`,
           );
           return;
         }
         await this.reconcileRoles(
           job.regimentId,
-          String(p.memberId),
-          String(p.discordUserId),
+          p.memberId,
+          p.discordUserId,
           p.outgoingRoleId ?? null,
         );
         return;
       }
       case DiscordSyncJobType.MemberBanRole: {
+        const p = this.payloadOf(job, type);
         // ⚠️ SENSITIVE: re-check the gate at EXECUTION time. A ban-role job can
         // sit in the queue (or in retry backoff) after being enqueued; if the
         // owner turned off applyBanRoleOnBan, cleared the Ban role, or disabled
@@ -264,51 +319,64 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
         if (!settings?.botEnabled || !settings?.applyBanRoleOnBan) {
           this.logger.warn(
-            `Skipping queued ban-role for ${String(p.discordUserId)}: applyBanRoleOnBan/botEnabled disabled since enqueue`,
+            `Skipping queued ban-role for ${p.discordUserId}: applyBanRoleOnBan/botEnabled disabled since enqueue`,
           );
           return;
         }
         if (!settings.banRoleId) {
           this.logger.warn(
-            `Skipping queued ban-role for ${String(p.discordUserId)}: no Ban role configured`,
+            `Skipping queued ban-role for ${p.discordUserId}: no Ban role configured`,
           );
           return;
         }
-        await this.applyBanRole(job.regimentId, String(p.discordUserId), settings.banRoleId);
+        await this.applyBanRole(job.regimentId, p.discordUserId, settings.banRoleId);
         await this.audit.record({
           regimentId: job.regimentId,
           action: 'discord.member.ban_role',
           actor: { type: AuditActorType.Bot, memberId: null, label: 'Lord Adjutant bot' },
-          detail: `Stripped managed roles and applied the Ban role to ${String(p.discordUserId)}`,
+          detail: `Stripped managed roles and applied the Ban role to ${p.discordUserId}`,
         });
         return;
       }
       case DiscordSyncJobType.Announce:
+      case DiscordSyncJobType.EventReminder:
       case DiscordSyncJobType.ApplicationSubmitted:
-        // Announcements and enlistment posts are pre-composed channel messages
-        // (content + channelId resolved at enqueue), so they drain identically.
-        await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
+        // Announcements, event reminders and enlistment posts are pre-composed
+        // channel messages (channel + content/embed resolved at enqueue), so they
+        // drain identically. They stay separate JOB TYPES because the operations
+        // ledger and the delivery matrix report on them separately.
+        await this.postToChannel(this.payloadOf(job, type));
         return;
-      case DiscordSyncJobType.AuditLog:
-        await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
+      case DiscordSyncJobType.AuditLog: {
+        const p = this.payloadOf(job, type);
+        await this.postToChannel(p);
         // The mirror landed: write the outcome back onto the source audit entry.
         // Guarded so it can NEVER throw here — a throw would retry the job and
-        // re-post a duplicate channel message.
+        // re-post a duplicate channel message. Unchanged by the embed work
+        // (T-0175): what the mirror LOOKS like moved, what it RECORDS did not.
         if (p.auditEntryId) {
-          await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Synced);
+          await this.markAuditSync(p.auditEntryId, DiscordSyncStatus.Synced);
         }
         return;
+      }
       case DiscordSyncJobType.ApplicationDecision:
         // A decision DM to the applicant (approve/decline/hold) — direct message.
-        await this.gateway.sendDirectMessage(String(p.discordUserId), String(p.content));
+        await this.dmUser(this.payloadOf(job, type));
         return;
-      case DiscordSyncJobType.Welcome:
+      case DiscordSyncJobType.Welcome: {
+        const p = this.payloadOf(job, type);
+        // The DM fallback is unchanged: no welcome channel ⇒ deliver privately.
         if (p.channelId) {
-          await this.gateway.sendChannelMessage(String(p.channelId), String(p.content));
+          await this.postToChannel({ channelId: p.channelId, content: p.content, embed: p.embed });
         } else {
-          await this.gateway.sendDirectMessage(String(p.discordUserId), String(p.content));
+          await this.dmUser({
+            discordUserId: p.discordUserId,
+            content: p.content,
+            embed: p.embed,
+          });
         }
         return;
+      }
       default:
         throw new Error(`Unknown sync job type: ${job.jobType}`);
     }
@@ -501,9 +569,9 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     await this.recordOperation(job, false, true);
     // A mirror job that failed terminally: reflect that on its source audit row.
     if ((job.jobType as DiscordSyncJobType) === DiscordSyncJobType.AuditLog) {
-      const p = (job.payload ?? {}) as Record<string, string | undefined>;
+      const p = this.payloadOf(job, DiscordSyncJobType.AuditLog);
       if (p.auditEntryId) {
-        await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Failed);
+        await this.markAuditSync(p.auditEntryId, DiscordSyncStatus.Failed);
       }
     }
     // One audit row per failed member would be 600 rows AND 600 mirrored channel
@@ -553,9 +621,9 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
           // A terminally-failed AuditLog mirror must reflect on its source entry,
           // else discordSyncStatus is stuck at 'pending' forever (mirrors handleFailure).
           if ((job.jobType as DiscordSyncJobType) === DiscordSyncJobType.AuditLog) {
-            const p = (job.payload ?? {}) as Record<string, string | undefined>;
+            const p = this.payloadOf(job, DiscordSyncJobType.AuditLog);
             if (p.auditEntryId) {
-              await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Failed);
+              await this.markAuditSync(p.auditEntryId, DiscordSyncStatus.Failed);
             }
           }
         }

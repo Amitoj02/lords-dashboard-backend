@@ -9,6 +9,8 @@ import { DiscordIdentity } from '../src/auth/entities/discord-identity.entity';
 import { Application } from '../src/applications/entities/application.entity';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../src/common/enums';
 import { DiscordSyncWorker } from '../src/discord/discord-sync.worker';
+import { DiscordGateway } from '../src/discord/gateway/discord-gateway';
+import { MockDiscordGateway } from '../src/discord/gateway/mock-discord-gateway';
 import { BotOperation } from '../src/discord/entities/bot-operation.entity';
 import { DiscordBotSettings } from '../src/discord/entities/discord-bot-settings.entity';
 import { DiscordConnection } from '../src/discord/entities/discord-connection.entity';
@@ -47,6 +49,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
   let app: INestApplication;
   let dataSource: DataSource;
   let worker: DiscordSyncWorker;
+  let mockGateway: MockDiscordGateway;
 
   let ownerToken: string;
   let memberId: string;
@@ -82,6 +85,9 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
 
     dataSource = app.get(DataSource);
     worker = app.get(DiscordSyncWorker);
+    // The bot runs mocked, so the gateway IS the MockDiscordGateway and its
+    // recorded sent-message buffer is how message/embed shape is asserted.
+    mockGateway = app.get(DiscordGateway);
     await cleanup();
 
     // Enrol a test member (with a linked Discord identity) via the apply→approve loop.
@@ -297,6 +303,167 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     await drainAll();
     const welcomes = await jobsOfType(DiscordSyncJobType.Welcome);
     expect(welcomes.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+  });
+
+  describe('embed transport (T-0172 / T-0173 / T-0174 / T-0175)', () => {
+    beforeEach(async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      mockGateway.resetSentMessages();
+    });
+
+    it('delivers an enlistment post as an EMBED, recorded by the mock gateway', async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true, enlistmentChannelId: '910000000000000002' })
+        .expect(200);
+
+      const applicant = await signIn({
+        ...applicantProfile,
+        id: '900900900900900904',
+        email: 'embed@example.com',
+      });
+      await request(server())
+        .post('/api/applications')
+        .set(bearer(applicant.token))
+        .send({
+          applicantName: 'Embed Applicant',
+          inGameName: 'EmbedApp',
+          currentRegiment: 'None',
+          howFound: 'Discord invite',
+          preferredClasses: 'Line Infantry',
+          skillsToImprove: 'Melee',
+          interestConfirmed: true,
+        })
+        .expect(201);
+
+      await drainAll();
+
+      const post = mockGateway.sentMessages.find((m) => m.target === '910000000000000002');
+      expect(post).toBeDefined();
+      expect(post?.embeds).toHaveLength(1);
+      expect(post?.embeds[0].title).toContain('New enlistment application');
+      expect(post?.embeds[0].fields?.map((f) => f.name)).toContain('In-game name');
+      // The message IS the embed — nothing is duplicated as markdown text.
+      expect(post?.content).toBe('');
+
+      const jobs = await jobsOfType(DiscordSyncJobType.ApplicationSubmitted);
+      expect(jobs.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+      // The embed survived the MySQL `json` round-trip as a real object.
+      expect((jobs[0].payload as { embed: { title: string } }).embed.title).toContain('enlistment');
+
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ enlistmentChannelId: null })
+        .expect(200);
+      await dataSource
+        .getRepository(DiscordIdentity)
+        .delete({ discordUserId: '900900900900900904' });
+    });
+
+    it('still delivers a LEGACY content-only job as plain text', async () => {
+      // The hard backward-compatibility requirement: rows written by the previous
+      // release carry only `content`. This inserts exactly such a row.
+      await dataSource.getRepository(DiscordSyncJob).save(
+        dataSource.getRepository(DiscordSyncJob).create({
+          regimentId: REGIMENT_ID,
+          jobType: DiscordSyncJobType.Announce,
+          payload: { channelId: '910000000000000004', content: '📅 **Legacy announcement**' },
+          scheduledAt: new Date(),
+        }),
+      );
+
+      await drainAll();
+
+      const post = mockGateway.sentMessages.find((m) => m.target === '910000000000000004');
+      expect(post?.content).toBe('📅 **Legacy announcement**');
+      expect(post?.embeds).toEqual([]);
+      const jobs = await jobsOfType(DiscordSyncJobType.Announce);
+      expect(jobs.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+    });
+
+    /**
+     * The clamp cannot be reached through HTTP, and that is the finding worth
+     * pinning: EVERY free-text DTO cap sits BELOW the Discord limit it feeds —
+     * `skillsToImprove` is `@MaxLength(1000)` against a 1024-character field
+     * value, an event description is 512 against 4096, and the whole enlistment
+     * body sums to roughly 3 000 against the 6 000-character embed total. So no
+     * request a client can send produces an over-limit embed; the compose-time
+     * clamp is defence in depth for server-composed text, and its edges are
+     * pinned by `src/discord/embeds/embed-limits.spec.ts`.
+     *
+     * What this case proves end to end is the property that actually protects
+     * the outbox: the LARGEST answer the API will accept still composes to a
+     * legal embed and the job SUCCEEDS rather than failing forever on a
+     * Discord validation error.
+     */
+    it('composes a legal embed from the largest answer the API accepts (T-0172)', async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true, enlistmentChannelId: '910000000000000002' })
+        .expect(200);
+
+      const applicant = await signIn({
+        ...applicantProfile,
+        id: '900900900900900905',
+        email: 'huge@example.com',
+      });
+      await request(server())
+        .post('/api/applications')
+        .set(bearer(applicant.token))
+        .send({
+          applicantName: 'Verbose Applicant',
+          inGameName: 'VerboseApp',
+          currentRegiment: 'None',
+          howFound: 'Discord invite',
+          preferredClasses: 'Line Infantry',
+          // Exactly the DTO ceiling — one more character is a 400.
+          skillsToImprove: 'M'.repeat(1000),
+          interestConfirmed: true,
+        })
+        .expect(201);
+
+      await drainAll();
+
+      const post = mockGateway.sentMessages.find((m) => m.target === '910000000000000002');
+      const improve = post?.embeds[0].fields?.find((f) => f.name === 'Wants to improve');
+      expect(improve?.value).toHaveLength(1000);
+      expect(improve?.value.length).toBeLessThanOrEqual(1024);
+      const jobs = await jobsOfType(DiscordSyncJobType.ApplicationSubmitted);
+      expect(jobs.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ enlistmentChannelId: null })
+        .expect(200);
+      await dataSource
+        .getRepository(DiscordIdentity)
+        .delete({ discordUserId: '900900900900900905' });
+    });
+
+    it('delivers the welcome as a branded embed and keeps the DM fallback', async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true, joinRoleId: '900000000000000001' })
+        .expect(200);
+
+      await request(server())
+        .post('/api/discord/simulate/member-join')
+        .set(bearer(ownerToken))
+        .send({ discordUserId: '555000000000000002' })
+        .expect(200);
+      await drainAll();
+
+      // No welcome channel is configured, so it must still arrive as a DM.
+      const dm = mockGateway.sentMessages.find((m) => m.target === '555000000000000002');
+      expect(dm?.kind).toBe('dm');
+      expect(dm?.embeds[0].title).toContain('Welcome to');
+      expect(dm?.embeds[0].fields?.[0].name).toBe('Next steps');
+    });
   });
 
   it('stops enqueuing entirely when the bot is disabled', async () => {

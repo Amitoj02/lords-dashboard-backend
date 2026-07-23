@@ -37,8 +37,11 @@ export class IsCalendarDate implements ValidatorConstraintInterface {
  * whitelisted keys are applied (the rest are left untouched) and audited. Keys
  * split across two tables server-side: profile/branding on the regiment,
  * everything else on regiment_settings. The Discord GUILD binding
- * (`discordServerId`) is intentionally NOT editable here — it moves through the
- * dedicated `transfer-discord` action.
+ * (`discordServerId`) is intentionally NOT editable here — `POST
+ * /api/discord/bind` is the sole binder (T-0170), because rebinding also has to
+ * materialise the bot-settings and connection rows, which a blind PATCH of a
+ * whitelisted column would skip. `discordServerName` IS editable here: renaming
+ * the guild is a label change, not a rebind.
  */
 export class UpdateSettingsDto {
   // ── Regiment profile ─────────────────────────────────────────────────────────

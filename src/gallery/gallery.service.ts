@@ -755,10 +755,15 @@ export class GalleryService {
       if (!discordUserId) {
         return;
       }
-      const trimmed = reason?.trim();
-      const content =
-        `Your gallery submission "${title}" was declined.` + (trimmed ? ` Reason: ${trimmed}` : '');
-      await this.discordSync.enqueueApplicationDecision(regimentId, { discordUserId, content });
+      // COMPOSITION MOVED (T-0173): the DM text used to be assembled right here,
+      // one of five services that each knew what a notification looks like. The
+      // facts go to DiscordSyncService and it renders the moderation-outcome
+      // embed — same colour language as an application decline.
+      await this.discordSync.enqueueGalleryDecision(regimentId, {
+        discordUserId,
+        title,
+        reason: reason?.trim() || null,
+      });
     } catch (error) {
       this.logger.error(`Failed to enqueue gallery decline DM: ${(error as Error).message}`);
     }

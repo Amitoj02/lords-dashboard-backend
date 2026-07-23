@@ -23,6 +23,13 @@ export class DiscordBotSettingsDto {
     description: '⚠ When true, an app ban strips managed roles and applies the Ban role.',
   })
   applyBanRoleOnBan: boolean;
+  @ApiProperty({
+    description:
+      'Master switch for guild-membership gating (T-0167). Default false: with no bot ' +
+      'connected every membership verdict would be wrong, so the gate stays off until the ' +
+      'regiment deliberately turns it on.',
+  })
+  guildGateEnabled: boolean;
 
   static from(s: DiscordBotSettings): DiscordBotSettingsDto {
     return {
@@ -41,6 +48,7 @@ export class DiscordBotSettingsDto {
       banRoleName: s.banRoleName,
       syncRolesOnChange: s.syncRolesOnChange,
       applyBanRoleOnBan: s.applyBanRoleOnBan,
+      guildGateEnabled: s.guildGateEnabled,
     };
   }
 }
@@ -83,4 +91,14 @@ export class UpdateDiscordSettingsDto {
   @IsOptional()
   @IsBoolean()
   applyBanRoleOnBan?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      '⚠ SENSITIVE: when enabled, members who are not in the regiment Discord guild are ' +
+      'gated out of the dashboard. Off by default. manage_settings holders are always ' +
+      'exempt, so turning this on cannot lock you out of turning it back off.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  guildGateEnabled?: boolean;
 }

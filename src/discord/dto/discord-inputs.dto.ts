@@ -24,5 +24,18 @@ export class SimulateJoinDto {
   discordUserId: string;
 }
 
+/**
+ * Simulate a guild-member-remove (dev/testing). Mirrors {@link SimulateJoinDto}
+ * so the leave half of the membership flow (T-0169) is exercisable with
+ * DISCORD_BOT_MOCK=true — otherwise a departure could only be tested against a
+ * real guild.
+ */
+export class SimulateLeaveDto {
+  @ApiProperty()
+  @IsString()
+  @MaxLength(20)
+  discordUserId: string;
+}
+
 /** Query for the recent bot operations list. */
 export class DiscordOperationsQueryDto extends PaginationQueryDto {}

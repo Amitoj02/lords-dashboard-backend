@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -21,6 +22,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { EventDto, MyRsvpDto, RsvpCountsDto } from './dto/event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { ReanchorEventDto } from './dto/reanchor-event.dto';
 import { RevealedPasswordDto } from './dto/revealed-password.dto';
 import { RsvpDto } from './dto/rsvp.dto';
 import { RsvpRosterEntryDto } from './dto/rsvp-roster-entry.dto';
@@ -31,7 +33,14 @@ import { EventPlatform } from './entities/event-platform.entity';
 import { EventRsvp } from './entities/event-rsvp.entity';
 import { EventTag } from './entities/event-tag.entity';
 import { RegimentEvent } from './entities/event.entity';
-import { resolveEventInstant } from './event-time';
+import { isDuplicateKeyError } from './duplicate-key';
+import {
+  matchesStoredWallClock,
+  reanchorInstant,
+  resolveEventInstant,
+  storedWallClock,
+} from './event-time';
+import { toEventSummary } from './event-summary';
 
 /** New arrays of child rows to REPLACE on an event (undefined = leave untouched). */
 interface ChildCollections {
@@ -321,11 +330,11 @@ export class EventsService {
 
     // Best-effort: announce the newly published event to the dedicated
     // event-announcements channel (T-0044). No-ops when the bot is disabled.
-    const desc = saved.description ? `\n${saved.description}` : '';
-    await this.discordSync.enqueueEventAnnounce(
-      user.regimentId,
-      `📅 **New event: ${saved.title}**${desc}\nStarts: ${saved.startsAt.toISOString()}`,
-    );
+    // What the announcement LOOKS like is no longer decided here (T-0174) — this
+    // hands over a projection and DiscordSyncService composes the embed, so the
+    // create path and the reminder sweep cannot drift apart. A brand-new event
+    // has no RSVPs yet, hence the literal 0 rather than a count query.
+    await this.discordSync.enqueueEventAnnounce(user.regimentId, toEventSummary(saved, 0));
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
   }
@@ -479,6 +488,144 @@ export class EventsService {
     });
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
+  }
+
+  /**
+   * Repair one event (or one whole series) written before T-0156: keep the wall
+   * clock the author typed, move the stored instant onto it. T-0156 shipped
+   * forward-only, so rows written earlier anchored the author's naive input to
+   * the PROCESS zone (UTC in the container) instead of the event's own zone —
+   * and a recurring template keeps generating every future occurrence from that
+   * wrong anchor, forever. This is the per-event, explicit, reviewable
+   * alternative to a bulk data migration.
+   *
+   * `timezone` is deliberately NOT touched: the label was always right, only the
+   * instant was wrong. `startsAt` and `endsAt` are each re-derived independently
+   * ({@link reanchorInstant}) rather than moved by one shared millisecond delta,
+   * so an event straddling a DST boundary keeps its wall-clock duration — the
+   * same rule the recurrence scheduler applies via `templateDurationUnits`.
+   *
+   * IDEMPOTENCY is the whole design problem: no column distinguishes a repaired
+   * instant from one that was always correct, so a second run would shift again.
+   * `expectStartsAtLocal` is the guard — the caller states the wall clock it
+   * expects to see and a disagreement is a 400, so a repeat fails loudly instead
+   * of silently double-shifting.
+   *
+   * Collisions: re-anchoring moves rows across UQ_event_occurrence
+   * (recurrence_template_id, starts_at), which MySQL enforces over soft-deleted
+   * rows too — a cancelled occurrence still holds its slot. So the target
+   * instants are pre-flighted against every sibling (deleted ones included) and
+   * reported as a 409 before anything is written; the writes are ordered by the
+   * sign of the shift so an occurrence never lands on a slot its neighbour has
+   * not vacated yet (InnoDB unique indexes are not deferrable — the transaction
+   * alone would not save us); and a duplicate-key error lost to the concurrent
+   * 5-minute recurrence sweep is caught as a backstop and answered 409, never a
+   * 500. The sweep tolerates losing this race; so does this.
+   *
+   * Expected side effect: the status sweep derives `status` from `startsAt`, so a
+   * re-anchor can legitimately move an event from ongoing/previous back to
+   * upcoming.
+   */
+  async reanchor(
+    user: AuthenticatedUser,
+    id: string,
+    dto: ReanchorEventDto,
+    ip: string | null,
+  ): Promise<EventDto> {
+    const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
+    const before = this.snapshot(event);
+
+    if (event.timezone === 'UTC') {
+      throw new BadRequestException('Event is anchored to UTC — there is no instant to shift');
+    }
+    if (!matchesStoredWallClock(event.startsAt, dto.expectStartsAtLocal)) {
+      throw new BadRequestException(
+        `Event starts at ${storedWallClock(event.startsAt)}, not ${dto.expectStartsAtLocal}` +
+          ' — it may already have been re-anchored',
+      );
+    }
+
+    // An occurrence points at its template; a template carries a cadence and no
+    // template id (a stopped template still has its cadence) — same test
+    // removeSeries uses.
+    const isOccurrence = event.recurrenceTemplateId !== null;
+    const isTemplate = !isOccurrence && event.recurrenceCadence !== null;
+    if (dto.cascade === true && !isTemplate) {
+      throw new BadRequestException('cascade applies only to a recurring template');
+    }
+    const templateId = isOccurrence ? event.recurrenceTemplateId : isTemplate ? event.id : null;
+
+    // One read of the whole series, soft-deleted rows INCLUDED: the unique index
+    // ignores deleted_at, so a cancelled occurrence still owns its instant and
+    // must be counted both as a collision target and (when cascading) as a row
+    // that moves with the rest — otherwise the sweep would regenerate it.
+    const siblings = templateId
+      ? await this.events.find({
+          where: { recurrenceTemplateId: templateId, regimentId: user.regimentId },
+          withDeleted: true,
+        })
+      : [];
+    const targets = dto.cascade === true ? [event, ...siblings] : [event];
+
+    // Shift earlier → move the earliest row first; shift later → the latest
+    // first. Either way row N's target slot is already vacated when it is
+    // written.
+    const shiftMs =
+      reanchorInstant(event.startsAt, event.timezone).getTime() - event.startsAt.getTime();
+    const plan = targets
+      .slice()
+      .sort((a, b) =>
+        shiftMs < 0
+          ? a.startsAt.getTime() - b.startsAt.getTime()
+          : b.startsAt.getTime() - a.startsAt.getTime(),
+      )
+      .map((row) => ({
+        row,
+        startsAt: reanchorInstant(row.startsAt, row.timezone),
+        endsAt: row.endsAt ? reanchorInstant(row.endsAt, row.timezone) : null,
+      }));
+
+    this.assertNoOccurrenceCollision(plan, siblings);
+
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const eventRepo = manager.getRepository(RegimentEvent);
+        for (const step of plan) {
+          // A targeted UPDATE, not save(): it must reach soft-deleted occurrences
+          // and it leaves every other column — notably the encrypted server
+          // password — untouched.
+          await eventRepo.update(
+            { id: step.row.id, regimentId: user.regimentId },
+            { startsAt: step.startsAt, endsAt: step.endsAt },
+          );
+        }
+      });
+    } catch (error) {
+      if (isDuplicateKeyError(error)) {
+        throw new ConflictException(
+          'Re-anchoring collided with an occurrence created while it ran; nothing was changed',
+        );
+      }
+      throw error;
+    }
+
+    for (const step of plan) {
+      step.row.startsAt = step.startsAt;
+      step.row.endsAt = step.endsAt;
+    }
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'event.reanchor',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'event', id: event.id, label: event.title },
+      before,
+      after: this.snapshot(event),
+      detail:
+        dto.cascade === true ? `Cascaded to ${siblings.length} generated occurrence(s)` : null,
+    });
+
+    return this.serializeOne(event, { includeServer: true, memberId: user.memberId });
   }
 
   /** Soft-delete an event (children cascade-delete at the DB level on hard delete). */
@@ -702,6 +849,43 @@ export class EventsService {
   }
 
   /**
+   * Pre-flight a re-anchor plan against UQ_event_occurrence and 409 before a
+   * single row is written (T-0163). Two ways to collide: a target instant is
+   * already held by a sibling that is NOT moving — including a soft-deleted /
+   * cancelled one, because the index does not see `deleted_at` — or two moving
+   * rows land on the same instant, which a DST spring-forward gap can cause by
+   * collapsing two distinct wall clocks onto one. Template rows are skipped:
+   * their `recurrence_template_id` is NULL and MySQL treats NULLs as distinct.
+   */
+  private assertNoOccurrenceCollision(
+    plan: { row: RegimentEvent; startsAt: Date }[],
+    siblings: RegimentEvent[],
+  ): void {
+    const moving = new Set(plan.map((step) => step.row.id));
+    const held = new Set(
+      siblings.filter((s) => !moving.has(s.id)).map((s) => s.startsAt.getTime()),
+    );
+
+    const claimed = new Set<number>();
+    const conflicts: string[] = [];
+    for (const step of plan) {
+      if (step.row.recurrenceTemplateId === null) continue;
+      const ms = step.startsAt.getTime();
+      if (held.has(ms) || claimed.has(ms)) {
+        conflicts.push(step.startsAt.toISOString());
+      }
+      claimed.add(ms);
+    }
+
+    if (conflicts.length > 0) {
+      throw new ConflictException(
+        'Re-anchoring would collide with an existing occurrence (a cancelled one still holds its' +
+          ` slot) at: ${conflicts.join(', ')}`,
+      );
+    }
+  }
+
+  /**
    * Replace an event's child rows in a transaction. Only the collections that are
    * provided (not undefined) are wiped and rewritten; each is de-duplicated to
    * respect the junctions' composite primary keys.
@@ -729,10 +913,24 @@ export class EventsService {
     }
     if (data.notifyOffsets !== undefined) {
       const repo = manager.getRepository(EventNotifyOffset);
+      // ⚠️ Carry `sentAt` across the delete/re-insert (T-0174). A reminder is a
+      // non-idempotent side effect and this method is a wipe-and-rewrite, so an
+      // edit that re-submits the SAME offsets after one of them has already
+      // fired would otherwise resurrect it as unresolved and send a duplicate
+      // reminder for the same event. An offset the author genuinely adds is new,
+      // has no prior dispatch, and is correctly left unresolved.
+      const existing = await repo.find({ where: { eventId } });
+      const sentByMinutes = new Map(existing.map((o) => [o.minutes, o.sentAt]));
       await repo.delete({ eventId });
       const unique = [...new Set(data.notifyOffsets)];
       if (unique.length > 0) {
-        await repo.insert(unique.map((minutes) => ({ eventId, minutes })));
+        await repo.insert(
+          unique.map((minutes) => ({
+            eventId,
+            minutes,
+            sentAt: sentByMinutes.get(minutes) ?? null,
+          })),
+        );
       }
     }
   }

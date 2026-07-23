@@ -91,13 +91,13 @@ describe('Post-MVP feature modules (e2e)', () => {
   });
 
   afterAll(async () => {
-    // Revert the live permission grant so the seeded matrix is unchanged.
-    await dataSource
-      .getRepository(RolePermission)
-      .update(
-        { role: MemberRole.Applicant, capability: 'view_members_directory' },
-        { granted: false },
-      );
+    // Revert every live permission grant this spec makes, so the seeded matrix
+    // is unchanged and the suite stays re-runnable.
+    for (const capability of ['view_members_directory', 'manage_regiment_details']) {
+      await dataSource
+        .getRepository(RolePermission)
+        .update({ role: MemberRole.Applicant, capability }, { granted: false });
+    }
     if (eventId) await dataSource.getRepository(RegimentEvent).delete(eventId);
     if (galleryId) await dataSource.getRepository(GalleryItem).delete(galleryId);
     await cleanupApplicant();
@@ -157,6 +157,151 @@ describe('Post-MVP feature modules (e2e)', () => {
           changes: [{ role: 'Owner', capability: 'manage_settings', granted: false }],
         })
         .expect(403);
+    });
+
+    // ── T-0178: the settings capability gating, pinned ───────────────────────
+    // The bug report ("settings reachable without manage_settings") turned out
+    // to be frontend-only — every /settings route already carries
+    // @RequireCapability. These cases exist so a future refactor that drops one
+    // fails here instead of silently exposing the control panel.
+    it('T-0178: 403s a caller without manage_settings on every control-panel route', async () => {
+      await request(server()).get('/api/settings').set(bearer(applicantToken)).expect(403);
+      await request(server())
+        .patch('/api/settings')
+        .set(bearer(applicantToken))
+        .send({ publicGallery: false })
+        .expect(403);
+      await request(server())
+        .get('/api/settings/permissions')
+        .set(bearer(applicantToken))
+        .expect(403);
+      await request(server())
+        .patch('/api/settings/permissions')
+        .set(bearer(applicantToken))
+        .send({ changes: [{ role: 'Applicant', capability: 'manage_settings', granted: true }] })
+        .expect(403);
+      // The one route that is not obviously a settings write: completing setup
+      // flips first-run routing for the whole regiment.
+      await request(server())
+        .post('/api/settings/complete-setup')
+        .set(bearer(applicantToken))
+        .expect(403);
+    });
+
+    it('T-0178: 403s a caller without manage_settings on the Discord bot settings', async () => {
+      // Same control panel, different module: the bot configuration carries the
+      // ban-role and channel wiring, so it must not fall outside the
+      // manage_settings perimeter just because it lives under /api/discord.
+      await request(server()).get('/api/discord/settings').set(bearer(applicantToken)).expect(403);
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(applicantToken))
+        .send({ botEnabled: false })
+        .expect(403);
+    });
+
+    it('T-0178: manage_regiment_details grants presentation + legal ONLY, never settings', async () => {
+      // The whole point of the T-0145 split: publishing rights are delegable
+      // without handing over the control panel. Grant the Applicant role just
+      // the publishing capability and prove the boundary holds in both
+      // directions. Reverted at the end of the case, and again in afterAll.
+      const permissions = dataSource.getRepository(RolePermission);
+      await request(server())
+        .patch('/api/settings/permissions')
+        .set(bearer(ownerToken))
+        .send({
+          changes: [{ role: 'Applicant', capability: 'manage_regiment_details', granted: true }],
+        })
+        .expect(200);
+
+      try {
+        // Granted: read + write presentation, read + write legal documents.
+        await request(server())
+          .get('/api/settings/presentation')
+          .set(bearer(applicantToken))
+          .expect(200);
+        await request(server())
+          .patch('/api/settings/presentation')
+          .set(bearer(applicantToken))
+          .send({ loginQuote: 'Delegated copy.' })
+          .expect(200);
+        await request(server())
+          .get('/api/settings/documents')
+          .set(bearer(applicantToken))
+          .expect(200);
+        await request(server())
+          .put('/api/settings/documents/guidelines')
+          .set(bearer(applicantToken))
+          .send({ body: '# Delegated' })
+          .expect(200);
+
+        // NOT granted: anything behind manage_settings.
+        await request(server()).get('/api/settings').set(bearer(applicantToken)).expect(403);
+        await request(server())
+          .patch('/api/settings')
+          .set(bearer(applicantToken))
+          .send({ publicGallery: false })
+          .expect(403);
+        await request(server())
+          .get('/api/settings/permissions')
+          .set(bearer(applicantToken))
+          .expect(403);
+      } finally {
+        await request(server())
+          .patch('/api/settings/permissions')
+          .set(bearer(ownerToken))
+          .send({
+            changes: [{ role: 'Applicant', capability: 'manage_regiment_details', granted: false }],
+          })
+          .expect(200);
+        // Belt and braces: the guard reads the row, so make sure it is off even
+        // if the request above failed for an unrelated reason.
+        await permissions.update(
+          { role: MemberRole.Applicant, capability: 'manage_regiment_details' },
+          { granted: false },
+        );
+      }
+
+      // Restore the presentation/legal state the earlier cases in this file rely on.
+      await request(server())
+        .patch('/api/settings/presentation')
+        .set(bearer(ownerToken))
+        .send({ loginQuote: null })
+        .expect(200);
+      await request(server())
+        .put('/api/settings/documents/guidelines')
+        .set(bearer(ownerToken))
+        .send({ body: '' })
+        .expect(200);
+    });
+
+    it('T-0178/T-0170: transfer_ownership is gone from the matrix and unsettable', async () => {
+      const matrix = await request(server())
+        .get('/api/settings/permissions')
+        .set(bearer(ownerToken))
+        .expect(200);
+      // The capability axis is derived from the enum, so the retirement is only
+      // real if the row is actually absent here.
+      expect(matrix.body.capabilities).not.toContain('transfer_ownership');
+      expect(matrix.body.matrix.Owner).not.toHaveProperty('transfer_ownership');
+
+      await request(server())
+        .patch('/api/settings/permissions')
+        .set(bearer(ownerToken))
+        .send({ changes: [{ role: 'Owner', capability: 'transfer_ownership', granted: true }] })
+        .expect(400);
+
+      // Both retired endpoints are 404, not 403 — the routes no longer exist.
+      await request(server())
+        .post('/api/settings/transfer-ownership')
+        .set(bearer(ownerToken))
+        .send({ toMemberId: 'aaaaaaaaaaaa', confirm: true })
+        .expect(404);
+      await request(server())
+        .post('/api/settings/transfer-discord')
+        .set(bearer(ownerToken))
+        .send({ discordServerId: '123456789012345678' })
+        .expect(404);
     });
 
     it('a live matrix edit immediately changes a CapabilitiesGuard decision', async () => {
@@ -319,7 +464,7 @@ describe('Post-MVP feature modules (e2e)', () => {
         .expect(400);
     });
 
-    it('403s a caller without manage_regiment_details on every write route', async () => {
+    it('403s a caller without manage_regiment_details on every route (T-0178)', async () => {
       await request(server())
         .get('/api/settings/presentation')
         .set(bearer(applicantToken))
@@ -328,6 +473,13 @@ describe('Post-MVP feature modules (e2e)', () => {
         .patch('/api/settings/presentation')
         .set(bearer(applicantToken))
         .send({ charterQuote: 'nope' })
+        .expect(403);
+      // The admin documents READ is gated too, not just the write: it carries
+      // edit attribution (who last saved each doc), which the anonymous
+      // /api/regiment/documents projection deliberately withholds.
+      await request(server())
+        .get('/api/settings/documents')
+        .set(bearer(applicantToken))
         .expect(403);
       await request(server())
         .put('/api/settings/documents/terms')

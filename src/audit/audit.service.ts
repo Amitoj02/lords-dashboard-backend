@@ -12,7 +12,7 @@ import {
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { AuditActorType, AuditSeverity, DiscordSyncStatus } from '../common/enums';
-import { DiscordSyncService } from '../discord/discord-sync.service';
+import { AuditSummary, DiscordSyncService } from '../discord/discord-sync.service';
 import { AuditQueryDto } from './dto/audit-query.dto';
 import { AuditLogEntryDto } from './dto/audit-log-entry.dto';
 import { AuditAction } from './entities/audit-action.entity';
@@ -115,14 +115,17 @@ export class AuditService {
       // Best-effort mirror to the audit-log Discord channel; the returned flag
       // says whether a mirror job was actually enqueued so we can record a
       // truthful sync status (pending vs not_applicable) on the entry.
-      const enqueued = await this.mirrorToDiscord(
-        input.regimentId,
-        saved.id,
-        input.action,
-        actor.label ?? null,
+      const enqueued = await this.mirrorToDiscord(input.regimentId, saved.id, {
+        action: input.action,
+        actorLabel: actor.label ?? null,
+        detail: input.detail ?? null,
         severity,
-        input.detail ?? null,
-      );
+        // The compact mirror embed (T-0175) names what was acted ON, not just
+        // what happened — read off the row we just saved so it matches the
+        // ledger exactly.
+        targetLabel: saved.targetLabel,
+        occurredAt: saved.occurredAt.toISOString(),
+      });
       // Record the truthful sync status. The mirror job is drainable the instant
       // it is enqueued, so a fast worker can flip this entry to synced/failed
       // before we get here; guard the pending write with `discordSyncStatus IS
@@ -154,12 +157,9 @@ export class AuditService {
   private async mirrorToDiscord(
     regimentId: string,
     auditEntryId: string,
-    action: string,
-    actorLabel: string | null,
-    severity: AuditSeverity,
-    detail: string | null,
+    entry: AuditSummary,
   ): Promise<boolean> {
-    if (action === 'discord.sync.failed') return false;
+    if (entry.action === 'discord.sync.failed') return false;
     let sync: DiscordSyncService;
     try {
       sync = this.moduleRef.get(DiscordSyncService, { strict: false });
@@ -167,11 +167,7 @@ export class AuditService {
       return false; // DiscordSyncService not available (e.g. narrow test module) — skip.
     }
     try {
-      return await sync.enqueueAuditLog(
-        regimentId,
-        { action, actorLabel, detail, severity },
-        auditEntryId,
-      );
+      return await sync.enqueueAuditLog(regimentId, entry, auditEntryId);
     } catch (error) {
       this.logger.error(`Audit Discord mirror failed: ${(error as Error).message}`);
       return false;

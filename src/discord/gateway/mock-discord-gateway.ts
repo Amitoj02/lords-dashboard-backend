@@ -1,12 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   DiscordChannel,
+  DiscordEmbed,
   DiscordGateway,
   DiscordGuildMemberRef,
   DiscordGatewayStatus,
   DiscordRole,
   MemberJoinHandler,
+  MemberLeaveHandler,
 } from './discord-gateway';
+
+/**
+ * One message the mock "delivered" (T-0172). The mock used to log
+ * `content.slice(0, 80)` and keep nothing, which made embed SHAPE unassertable:
+ * under DISCORD_BOT_MOCK the only observable was a log line. Recording the whole
+ * message is what lets a test prove an enlistment post actually went out as an
+ * embed with the right fields, rather than merely that a job reached `succeeded`.
+ */
+export interface RecordedMessage {
+  kind: 'channel' | 'dm';
+  /** Channel snowflake for a channel post; the Discord user id for a DM. */
+  target: string;
+  content: string;
+  embeds: DiscordEmbed[];
+  messageId: string;
+}
 
 /** A canned role set so listRoles()/status look realistic in the wizard. */
 const MOCK_ROLES: DiscordRole[] = [
@@ -38,6 +56,17 @@ const MOCK_CHANNELS: DiscordChannel[] = [
 const PRE_JOINED_MEMBER_IDS = ['100000000000000001'];
 
 /**
+ * A one-line log summary of a message. An embed-only send has EMPTY content, so
+ * the old `content.slice(0, 80)` would have logged an empty string and made the
+ * dev log silently useless for exactly the messages T-0173..T-0175 added.
+ */
+function describe(content: string, embeds?: DiscordEmbed[]): string {
+  if (content) return content.slice(0, 80);
+  const title = embeds?.[0]?.title;
+  return embeds?.length ? `[embed] ${title ?? '(untitled)'}` : '(empty)';
+}
+
+/**
  * Drop-in {@link DiscordGateway} that performs NO network I/O. It keeps an
  * in-memory guild (roles + members) so role assign/remove/kick and message sends
  * are observable and deterministic, and logs each operation. Wired in place of
@@ -50,7 +79,12 @@ export class MockDiscordGateway extends DiscordGateway {
   private readonly logger = new Logger(MockDiscordGateway.name);
   /** discordUserId → the roles the mock believes they hold. */
   private readonly members = new Map<string, Set<string>>();
-  private joinHandler: MemberJoinHandler | null = null;
+  private readonly joinHandlers: MemberJoinHandler[] = [];
+  private readonly leaveHandlers: MemberLeaveHandler[] = [];
+  /** Everything "delivered", so tests can assert message + embed shape. */
+  private readonly sent: RecordedMessage[] = [];
+  /** Monotonic, so two messages sent in the same millisecond get distinct ids. */
+  private messageCounter = 0;
 
   constructor() {
     super();
@@ -104,14 +138,51 @@ export class MockDiscordGateway extends DiscordGateway {
     return Promise.resolve();
   }
 
-  sendChannelMessage(channelId: string, content: string): Promise<{ messageId: string }> {
-    this.logger.log(`[mock] #${channelId} <- ${content.slice(0, 80)}`);
-    return Promise.resolve({ messageId: `mock-msg-${Date.now()}` });
+  sendChannelMessage(
+    channelId: string,
+    content: string,
+    embeds?: DiscordEmbed[],
+  ): Promise<{ messageId: string }> {
+    const messageId = this.record('channel', channelId, content, embeds);
+    this.logger.log(`[mock] #${channelId} <- ${describe(content, embeds)}`);
+    return Promise.resolve({ messageId });
   }
 
-  sendDirectMessage(discordUserId: string, content: string): Promise<void> {
-    this.logger.log(`[mock] DM ${discordUserId} <- ${content.slice(0, 80)}`);
-    return Promise.resolve();
+  sendDirectMessage(
+    discordUserId: string,
+    content: string,
+    embeds?: DiscordEmbed[],
+  ): Promise<{ messageId: string }> {
+    const messageId = this.record('dm', discordUserId, content, embeds);
+    this.logger.log(`[mock] DM ${discordUserId} <- ${describe(content, embeds)}`);
+    return Promise.resolve({ messageId });
+  }
+
+  /** Everything sent since construction (or the last {@link resetSentMessages}). */
+  get sentMessages(): readonly RecordedMessage[] {
+    return this.sent;
+  }
+
+  /**
+   * Drop the recorded buffer. Required, not a convenience: the mock is a
+   * long-lived singleton inside a booted app, so an e2e suite that asserts "this
+   * action sent exactly one embed" must be able to start from empty. It also
+   * stops the buffer growing without bound in a dev session.
+   */
+  resetSentMessages(): void {
+    this.sent.length = 0;
+  }
+
+  /** Append to the buffer and mint the id the caller gets back. */
+  private record(
+    kind: RecordedMessage['kind'],
+    target: string,
+    content: string,
+    embeds?: DiscordEmbed[],
+  ): string {
+    const messageId = `mock-msg-${++this.messageCounter}`;
+    this.sent.push({ kind, target, content, embeds: embeds ? [...embeds] : [], messageId });
+    return messageId;
   }
 
   fetchMember(discordUserId: string): Promise<DiscordGuildMemberRef | null> {
@@ -125,12 +196,31 @@ export class MockDiscordGateway extends DiscordGateway {
   }
 
   registerMemberJoinHandler(handler: MemberJoinHandler): void {
-    this.joinHandler = handler;
+    this.joinHandlers.push(handler);
+  }
+
+  registerMemberLeaveHandler(handler: MemberLeaveHandler): void {
+    this.leaveHandlers.push(handler);
   }
 
   /** Test/dev helper: simulate a GuildMemberAdd so onboarding can be exercised. */
   async simulateMemberJoin(discordUserId: string): Promise<void> {
     this.members.set(discordUserId, new Set());
-    await this.joinHandler?.(discordUserId);
+    for (const handler of this.joinHandlers) {
+      await handler(discordUserId);
+    }
+  }
+
+  /**
+   * Test/dev helper: simulate a GuildMemberRemove (T-0169). The in-memory guild
+   * forgets the member FIRST, so a fetchMember that races the handlers agrees
+   * with the event — the mock must not report someone as present after the
+   * departure it just announced.
+   */
+  async simulateMemberLeave(discordUserId: string): Promise<void> {
+    this.members.delete(discordUserId);
+    for (const handler of this.leaveHandlers) {
+      await handler(discordUserId);
+    }
   }
 }

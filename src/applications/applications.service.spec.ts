@@ -965,24 +965,52 @@ describe('ApplicationsService', () => {
     });
 
     it('stores nothing when the officer wrote nothing — the default template is not persisted', async () => {
-      // The applicant still receives a DM (rendered from the default template),
-      // but the column records only text an officer actually chose to write, so
-      // "what were they told?" never answers with a machine-generated sentence.
+      // The applicant still receives a DM (rendered from the default template by
+      // DiscordSyncService since T-0173), but the column records only text an
+      // officer actually chose to write, so "what were they told?" never answers
+      // with a machine-generated sentence.
       applications.findOne!.mockResolvedValue(baseApplication());
       identities.findOne!.mockResolvedValue({
         id: 'identity-applicant',
         discordUserId: 'discord-2',
         applicationsBlockedAt: null,
       });
-      settings.findOne!.mockResolvedValue({ regiment: { name: 'The Lords' } });
 
       const result = await service.hold(STAFF, 'app-1', { discordDmMessage: '' }, null);
 
+      // A blank box reaches the outbox as "no custom message", which is what
+      // selects the house default there.
       expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledWith(
         'regiment-1',
-        expect.objectContaining({ content: expect.stringContaining('The Lords') }),
+        expect.objectContaining({ outcome: 'hold', customMessage: null }),
       );
       expect(result.userMessage).toBeNull();
+    });
+
+    it('passes the officer’s own message AND their rationale to the composer (T-0173)', async () => {
+      // The DM text is no longer rendered here; the outbox composes the embed
+      // from these facts. The custom message must still win over the default,
+      // and the decline reason reaches the applicant as its own labelled field.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        discordUserId: 'discord-2',
+        applicationsBlockedAt: null,
+      });
+
+      await service.decline(
+        STAFF,
+        'app-1',
+        { reason: 'Too new to the game.', discordDmMessage: 'Try again in a month.' },
+        null,
+      );
+
+      expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledWith('regiment-1', {
+        discordUserId: 'discord-2',
+        outcome: 'decline',
+        customMessage: 'Try again in a month.',
+        reviewerNote: 'Too new to the game.',
+      });
     });
 
     it('a decision with no message must not wipe the stored one', async () => {

@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuditLogEntry } from '../audit/entities/audit-log-entry.entity';
-import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
+import { DiscordSyncJobStatus, DiscordSyncJobType, DiscordSyncStatus } from '../common/enums';
 import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
@@ -565,6 +565,152 @@ describe('DiscordSyncWorker', () => {
       // The announcement queued LAST still went out in this very tick.
       expect(gateway.sendChannelMessage).toHaveBeenCalledWith('c1', 'hello');
       expect(announce.status).toBe(DiscordSyncJobStatus.Succeeded);
+    });
+  });
+
+  describe('embed transport (T-0172)', () => {
+    const embed = { title: 'New event: Muster', color: 0x3b5bdb };
+
+    beforeEach(() => {
+      gateway.sendChannelMessage.mockResolvedValue({ messageId: 'm-1' });
+      gateway.sendDirectMessage.mockResolvedValue({ messageId: 'm-2' });
+    });
+
+    it('delivers an embed job AS an embed', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.ApplicationSubmitted,
+          payload: { channelId: 'c1', content: '', embed },
+        }),
+      ]);
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).toHaveBeenCalledWith('c1', '', [embed]);
+    });
+
+    it('delivers a LEGACY content-only job as plain text, byte for byte', async () => {
+      // The hard backward-compatibility requirement: rows already sitting in the
+      // outbox at deploy time carry only `content`. They must reach the gateway
+      // with exactly the two arguments the pre-embed code passed — no empty
+      // embeds array, no third argument at all.
+      const legacy = job({
+        jobType: DiscordSyncJobType.Announce,
+        payload: { channelId: 'c1', content: '📅 **New event: Muster**\nStarts: …' },
+      });
+      queue([legacy]);
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).toHaveBeenCalledWith(
+        'c1',
+        '📅 **New event: Muster**\nStarts: …',
+      );
+      expect(gateway.sendChannelMessage.mock.calls[0]).toHaveLength(2);
+      expect(legacy.status).toBe(DiscordSyncJobStatus.Succeeded);
+    });
+
+    it('delivers a legacy content-only DECISION DM as plain text too', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.ApplicationDecision,
+          payload: { discordUserId: 'u1', content: 'Your application was approved.' },
+        }),
+      ]);
+
+      await worker.drain();
+
+      expect(gateway.sendDirectMessage).toHaveBeenCalledWith(
+        'u1',
+        'Your application was approved.',
+      );
+      expect(gateway.sendDirectMessage.mock.calls[0]).toHaveLength(2);
+    });
+
+    it('routes an event reminder down the channel-post arm', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.EventReminder,
+          payload: { channelId: 'evt-1', content: '', embed },
+        }),
+      ]);
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).toHaveBeenCalledWith('evt-1', '', [embed]);
+    });
+
+    it('keeps the welcome DM fallback when no channel is configured', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.Welcome,
+          payload: { discordUserId: 'u1', channelId: null, content: '', embed },
+        }),
+      ]);
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).not.toHaveBeenCalled();
+      expect(gateway.sendDirectMessage).toHaveBeenCalledWith('u1', '', [embed]);
+    });
+
+    it('still writes the audit mirror outcome back with an embed payload', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.AuditLog,
+          payload: { channelId: 'aud-1', content: '', embed, auditEntryId: 'audit-1' },
+        }),
+      ]);
+
+      await worker.drain();
+
+      expect(auditEntriesRepo.update).toHaveBeenCalledWith(
+        { id: 'audit-1' },
+        { discordSyncStatus: DiscordSyncStatus.Synced },
+      );
+    });
+
+    it('retries a failed EMBED send and records it exactly like a text send', async () => {
+      // The failure path must not be special-cased for embeds: same backoff,
+      // same terminal ledger row, same audit entry.
+      const j = job({
+        jobType: DiscordSyncJobType.ApplicationSubmitted,
+        payload: { channelId: 'c1', content: '', embed },
+        attempts: 0,
+        maxAttempts: 5,
+      });
+      queue([j]);
+      gateway.sendChannelMessage.mockRejectedValue(new Error('socket hang up'));
+
+      await worker.drain();
+
+      expect(j.status).toBe(DiscordSyncJobStatus.Pending);
+      expect(j.attempts).toBe(1);
+      expect(j.scheduledAt.getTime()).toBeGreaterThan(Date.now());
+
+      jest.clearAllMocks();
+      const terminal = job({
+        jobType: DiscordSyncJobType.ApplicationSubmitted,
+        payload: { channelId: 'c1', content: '', embed },
+        attempts: 0,
+        maxAttempts: 1,
+      });
+      queue([terminal]);
+      gateway.sendChannelMessage.mockRejectedValue(new Error('socket hang up'));
+
+      await worker.drain();
+
+      expect(terminal.status).toBe(DiscordSyncJobStatus.Failed);
+      expect(operationsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operation: DiscordSyncJobType.ApplicationSubmitted,
+          success: false,
+          resolvable: true,
+        }),
+      );
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'discord.sync.failed' }),
+      );
     });
   });
 

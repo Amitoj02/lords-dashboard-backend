@@ -195,7 +195,9 @@ Goal: the read-only ledger, member dispatches, and all regiment configuration + 
   admin), `POST /:id/read`, `GET /notifications/unread-count` (`notification_reads`).
 - `SettingsModule`: `GET/PATCH /settings` (profile, visibility toggles, gallery/event defaults,
   Holdfast server, backups/retention), `GET/PATCH /settings/permissions` (edit the `role_permissions`
-  matrix), and hazardous ops: `POST /settings/transfer-ownership`, `/transfer-discord`, `/dissolve`.
+  matrix), and the hazardous op `POST /settings/dissolve`. (The two transfer routes originally planned
+  here were retired in T-0170: `POST /discord/bind` is the sole guild binder and ownership is no longer
+  reassignable through the API.)
 - **GDPR**: `POST /members/me/deletion-request` (deferred, Discord-reauth-gated per
   `account_deletion_requests`), confirm endpoint, `GET /members/me/export` (data download).
 - **DoD:** e2e for permission-matrix edits taking effect on the guard, and the deferred-deletion flow.
@@ -316,9 +318,14 @@ C:manage_applications · `POST /applications/:id/approve|decline|hold` C:manage_
 **Notifications (dispatches):** `GET /notifications` M · `GET /notifications/unread-count` M · `POST
 /notifications/:id/read` M · `POST /notifications` C:manage_events (compose/announce).
 
-**Settings:** `GET /settings` M · `PATCH /settings` C:manage_settings · `GET /settings/permissions` M ·
-`PATCH /settings/permissions` C:manage_roles · `POST /settings/transfer-ownership` C:transfer_ownership
-· `POST /settings/transfer-discord` + `POST /settings/dissolve` C:manage_settings.
+**Settings** (as shipped — this line was stale until T-0170): `GET /settings` + `PATCH /settings` +
+`POST /settings/complete-setup` + `GET /settings/permissions` + `PATCH /settings/permissions` — all
+C:manage_settings · `GET/PATCH /settings/presentation` + `GET /settings/documents` + `PUT
+/settings/documents/:slug` C:manage_regiment_details (T-0145) · `POST /settings/dissolve` **R:Owner** —
+a role check, not a capability, because every capability is delegable from the matrix and the single
+most destructive action in the app must not be. `POST /settings/transfer-ownership` and `POST
+/settings/transfer-discord` were retired in T-0170 (404); the guild binding moves through `POST
+/discord/bind`.
 
 **Regiment:** `GET /regiment` P · `GET /regiment/stats` P(if `public_stats`) · onboarding `GET/PATCH
 /onboarding/state`, `POST /onboarding/complete`.
@@ -373,7 +380,9 @@ Built content side is solid; these are the real gaps the full-stack scope must c
    nav stubs. → Phase 11.
 6. **`/auth/callback` route** — required for real OAuth handoff; doesn't exist. → Phase 10.
 7. Invite-Mercenary flow (dead roster button). → Phase 11.
-8. Compliance flows: transfer-Discord-server / transfer-ownership (buttons without flows). → Phase 11.
+8. ~~Compliance flows: transfer-Discord-server / transfer-ownership (buttons without flows).~~ Closed by
+   T-0170 as WON'T DO: the Discord rebind is served by `POST /discord/bind`, and ownership transfer was
+   retired outright — a single-tenant deployment with one live Owner never needed it.
 9. Mobile — responsive strategy is acceptable; no dedicated components needed.
 
 ---

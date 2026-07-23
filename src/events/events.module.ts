@@ -5,6 +5,7 @@ import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { StorageModule } from '../storage/storage.module';
 import { EventRecurrenceScheduler } from './event-recurrence.scheduler';
+import { EventReminderScheduler } from './event-reminder.scheduler';
 import { EventStatusScheduler } from './event-status.scheduler';
 import { EventAttendee } from './entities/event-attendee.entity';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
@@ -40,7 +41,14 @@ import { EventsService } from './events.service';
     StorageModule,
   ],
   controllers: [EventsController],
-  providers: [EventsService, EventStatusScheduler, EventRecurrenceScheduler],
+  providers: [
+    EventsService,
+    EventStatusScheduler,
+    EventRecurrenceScheduler,
+    // Consumes event_notify_offsets — the reminder producer that never existed
+    // until T-0174.
+    EventReminderScheduler,
+  ],
   exports: [EventsService],
 })
 export class EventsModule {}

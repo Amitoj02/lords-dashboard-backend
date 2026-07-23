@@ -40,6 +40,40 @@ export class MemberMedalSummary {
 }
 
 /**
+ * Which admin actions the CALLER may perform on THIS member (T-0177), derived
+ * from the same predicate the endpoints enforce (see `member-hierarchy.ts`), so
+ * the client can grey out an action instead of discovering the 403 by trying
+ * it. A flag is true only when the role hierarchy allows the action AND the
+ * caller holds the capability the route requires — there is never a permitted
+ * flag where the endpoint would refuse, nor a refusal where the flag was true.
+ */
+export class PermittedActionsDto {
+  @ApiProperty({ description: 'Requires manage_roles' })
+  changeRole: boolean;
+
+  @ApiProperty({ description: 'Requires edit_ranks_medals' })
+  changeRank: boolean;
+
+  @ApiProperty({ description: 'Requires edit_ranks_medals' })
+  awardMedal: boolean;
+
+  @ApiProperty({ description: 'Requires edit_ranks_medals' })
+  removeMedal: boolean;
+
+  @ApiProperty({ description: 'Requires manage_roles' })
+  suspend: boolean;
+
+  @ApiProperty({ description: 'Requires manage_roles' })
+  unsuspend: boolean;
+
+  @ApiProperty({ description: 'Requires manage_roles' })
+  ban: boolean;
+
+  @ApiProperty({ description: 'Requires manage_roles' })
+  unban: boolean;
+}
+
+/**
  * Public roster projection of a {@link Member}. Never expose the raw entity:
  * secrets (Discord tokens live on the identity), internal flags and FK ids are
  * omitted. Rank/rank-image/attendance fields are derived server-side.
@@ -108,16 +142,25 @@ export class MemberDto {
   })
   medals: MemberMedalSummary[];
 
+  @ApiProperty({
+    type: PermittedActionsDto,
+    description: 'Admin actions the CALLER may perform on this member (T-0177)',
+  })
+  permittedActions: PermittedActionsDto;
+
   /**
    * Build the projection from a (rank-joined) member plus its computed metrics.
    * The caller is responsible for having joined `member.rank` and (optionally)
    * `member.discordIdentity` so the derived fields can be read. `medals` is
-   * passed in separately (the caller batches the member_medals lookup).
+   * passed in separately (the caller batches the member_medals lookup), and so
+   * is `permittedActions` — it depends on the CALLER, not on the member, and is
+   * resolved once per request rather than per row (T-0177).
    */
   static from(
     member: Member,
     metrics: MemberMetrics,
-    medals: MemberMedalSummary[] = [],
+    medals: MemberMedalSummary[],
+    permittedActions: PermittedActionsDto,
   ): MemberDto {
     const dto = new MemberDto();
     dto.id = member.id;
@@ -141,6 +184,7 @@ export class MemberDto {
     dto.suspendedUntil = member.suspendedUntil ? member.suspendedUntil.toISOString() : null;
     dto.bannedAt = member.bannedAt ? member.bannedAt.toISOString() : null;
     dto.medals = medals;
+    dto.permittedActions = permittedActions;
     return dto;
   }
 }

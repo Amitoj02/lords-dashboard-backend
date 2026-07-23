@@ -13,7 +13,9 @@ import {
 } from '@nestjs/common';
 import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiCreatedResponse,
   ApiNoContentResponse,
   ApiOkResponse,
@@ -33,6 +35,7 @@ import { CreateEventDto } from './dto/create-event.dto';
 import { EventDto } from './dto/event.dto';
 import { EventQueryDto } from './dto/event-query.dto';
 import { MarkAttendanceDto } from './dto/mark-attendance.dto';
+import { ReanchorEventDto } from './dto/reanchor-event.dto';
 import { RevealedPasswordDto } from './dto/revealed-password.dto';
 import { RsvpDto } from './dto/rsvp.dto';
 import { RsvpRosterEntryDto } from './dto/rsvp-roster-entry.dto';
@@ -154,6 +157,32 @@ export class EventsController {
     @Req() req: Request,
   ): Promise<EventDto> {
     return this.eventsService.complete(user, id, dto, req.ip ?? null);
+  }
+
+  @Post(':id/reanchor')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.ManageEvents)
+  @ApiOperation({
+    summary: 'Re-anchor an event stored with a pre-T-0156 instant to its own timezone',
+  })
+  @ApiOkResponse({ type: EventDto, description: 'The re-anchored event.' })
+  @ApiBadRequestResponse({
+    description:
+      '`expectStartsAtLocal` does not match the stored wall clock (the repair may already have ' +
+      'been applied), or the event timezone is UTC so there is nothing to shift.',
+  })
+  @ApiConflictResponse({
+    description:
+      'A target instant is already held by an existing occurrence — a cancelled one still ' +
+      'occupies its slot. Nothing was changed.',
+  })
+  reanchor(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id', ParseShortIdPipe) id: string,
+    @Body() dto: ReanchorEventDto,
+    @Req() req: Request,
+  ): Promise<EventDto> {
+    return this.eventsService.reanchor(user, id, dto, req.ip ?? null);
   }
 
   @Delete(':id')

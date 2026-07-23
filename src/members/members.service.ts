@@ -30,8 +30,14 @@ import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
-import { MemberDto, MemberMedalSummary } from './dto/member.dto';
+import { MemberDto, MemberMedalSummary, PermittedActionsDto } from './dto/member.dto';
 import { MemberQueryDto } from './dto/member-query.dto';
+import {
+  MEMBER_ADMIN_CAPABILITIES,
+  MemberAdminAction,
+  assertCanActOn,
+  permittedActions,
+} from './member-hierarchy';
 import {
   AwardMedalDto,
   BanMemberDto,
@@ -134,12 +140,17 @@ export class MembersService {
     const memberIds = rows.map((m) => m.id);
     const attendanceByMember = await this.attendanceCounts(memberIds);
     const medalsByMember = await this.medalsByMember(memberIds);
+    // Resolved ONCE for the page (owner pointer + capability lookups), then
+    // applied per row as a pure function — the flags must not cost a query per
+    // member (T-0177).
+    const permitted = await this.permittedActionsResolver(user);
 
     const data = rows.map((member) =>
       MemberDto.from(
         member,
         { eventsAttended: attendanceByMember.get(member.id) ?? 0 },
         medalsByMember.get(member.id) ?? [],
+        permitted(member),
       ),
     );
 
@@ -152,7 +163,7 @@ export class MembersService {
    */
   async findOne(id: string, user: AuthenticatedUser): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    return this.project(member);
+    return this.project(member, user);
   }
 
   /**
@@ -189,10 +200,15 @@ export class MembersService {
     const saved = await this.members.save(member);
     // No audit row: a self profile edit never touches role/status/rank, so there
     // is no security-relevant change to record.
-    return this.project(saved);
+    return this.project(saved, user);
   }
 
   // ── Admin actions (capability-gated in the controller; each is audited) ──────
+  //
+  // Every one of them opens with `assertMayModerate` (T-0176): the capability
+  // guard in the controller only asks "may this ROLE do this at all", it has no
+  // notion of the target, so the target-scoped rule — not self, not the owner,
+  // and strictly outranking — lives here, ahead of every write.
 
   /**
    * Change a member's rank. Records a service-record entry + audit row. The
@@ -206,6 +222,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
+    const ownerMemberId = await this.assertMayModerate(member, user, 'changeRank');
     const rank = await this.ranks.findOne({
       where: { id: dto.rankId, regimentId: user.regimentId },
     });
@@ -231,13 +248,14 @@ export class MembersService {
     });
 
     await this.syncMemberRoles(member);
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /**
    * Change a member's role. Ownership is protected: the regiment owner's role
-   * cannot be changed here, and this endpoint cannot grant the Owner role
-   * (ownership transfer is a separate, dedicated flow).
+   * cannot be changed here, and this endpoint cannot grant the Owner role at
+   * all — there is no API path that assigns it (the ownership-transfer endpoint
+   * was removed in T-0170), so the role is only ever set by provisioning.
    */
   async changeRole(
     id: string,
@@ -246,21 +264,18 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     if (dto.role === MemberRole.Owner) {
-      throw new ForbiddenException('Use ownership transfer to assign the Owner role');
+      throw new ForbiddenException('The Owner role cannot be assigned through the API');
     }
     const member = await this.loadMember(id, user.regimentId);
-    const regiment = await this.regiments.findOne({ where: { id: user.regimentId } });
-    if (regiment?.ownerMemberId === member.id) {
-      throw new ForbiddenException("Cannot change the regiment owner's role");
-    }
     // Rejected outright rather than allowed through as a same-role no-op below:
-    // self-targeting this endpoint always gets one predictable answer (T-0150).
-    this.assertNotSelf(member, user, 'change your own role');
+    // self-targeting this endpoint always gets one predictable answer (T-0150),
+    // and the same holds for the owner/hierarchy refusals (T-0176).
+    const ownerMemberId = await this.assertMayModerate(member, user, 'changeRole');
 
     // A no-op change (same role) records nothing — no service-record entry, no
     // audit row, no session invalidation or Discord role sync (T-0101).
     if (dto.role === member.role) {
-      return this.project(member);
+      return this.project(member, user, ownerMemberId);
     }
 
     const before = { role: member.role };
@@ -283,7 +298,7 @@ export class MembersService {
     this.sessionContext.invalidate(member.discordIdentityId);
 
     await this.syncMemberRoles(member);
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /** Award a medal to a member. Medals are repeatable — each award is a new row. */
@@ -294,6 +309,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
+    const ownerMemberId = await this.assertMayModerate(member, user, 'awardMedal');
     const medal = await this.medals.findOne({
       where: { id: dto.medalId, regimentId: user.regimentId },
     });
@@ -318,7 +334,7 @@ export class MembersService {
     });
 
     await this.syncMemberRoles(member);
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /**
@@ -332,6 +348,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
+    const ownerMemberId = await this.assertMayModerate(member, user, 'removeMedal');
     const award = await this.memberMedals.findOne({
       where: { memberId: member.id, medalId },
       order: { awardedAt: 'DESC' },
@@ -352,7 +369,7 @@ export class MembersService {
     });
 
     await this.syncMemberRoles(member);
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /** Suspend a member until a future timestamp. */
@@ -367,8 +384,7 @@ export class MembersService {
       throw new BadRequestException('Suspension end must be a future date');
     }
     const member = await this.loadMember(id, user.regimentId);
-    await this.assertNotOwner(member, user.regimentId);
-    this.assertNotSelf(member, user, 'suspend your own account');
+    const ownerMemberId = await this.assertMayModerate(member, user, 'suspend');
 
     const before = {
       suspendedUntil: member.suspendedUntil ? member.suspendedUntil.toISOString() : null,
@@ -395,7 +411,7 @@ export class MembersService {
     // Revoke the suspended member's outstanding sessions (T-0048).
     await this.sessionContext.invalidateSessions(member.discordIdentityId);
 
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /**
@@ -416,8 +432,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    await this.assertNotOwner(member, user.regimentId);
-    this.assertNotSelf(member, user, 'ban your own account');
+    const ownerMemberId = await this.assertMayModerate(member, user, 'ban');
     if (member.bannedAt) throw new ConflictException('Member is already banned');
 
     member.bannedAt = new Date();
@@ -444,7 +459,7 @@ export class MembersService {
       member.discordIdentity?.discordUserId ?? null,
       dto.reason ?? null,
     );
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /**
@@ -460,7 +475,7 @@ export class MembersService {
    */
   async unsuspend(id: string, user: AuthenticatedUser, ip: string | null): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    await this.assertNotOwner(member, user.regimentId);
+    const ownerMemberId = await this.assertMayModerate(member, user, 'unsuspend');
     if (!member.suspendedUntil || member.suspendedUntil.getTime() <= Date.now()) {
       throw new ConflictException('Member is not currently suspended');
     }
@@ -479,12 +494,13 @@ export class MembersService {
       after: { suspendedUntil: null },
     });
 
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /** Lift a ban: clear bannedAt + reactivate. */
   async unban(id: string, user: AuthenticatedUser, ip: string | null): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
+    const ownerMemberId = await this.assertMayModerate(member, user, 'unban');
     if (!member.bannedAt) throw new ConflictException('Member is not banned');
 
     member.bannedAt = null;
@@ -499,7 +515,7 @@ export class MembersService {
       target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
     });
 
-    return this.project(member);
+    return this.project(member, user, ownerMemberId);
   }
 
   /**
@@ -533,8 +549,22 @@ export class MembersService {
   }
 
   // ── GDPR (self-service, deferred/Discord-reauth-gated) ───────────────────────
+  //
+  // ⚠️ ACCOUNT DELETION IS SELF-ONLY, deliberately and permanently (owner
+  // decision, restated for T-0176). Every method below keys off `user.memberId`
+  // — the id resolved from the caller's own session, never a path/body
+  // parameter — so there is no admin-on-behalf-of path and no route that could
+  // become one. The role hierarchy T-0176 introduces does NOT open one: nobody,
+  // not even the Owner, may delete another member's account. Erasure is a
+  // personal right exercised by the data subject; letting an admin fire it at a
+  // member would turn a GDPR facility into a moderation weapon that destroys
+  // the target's Discord identity irreversibly. Admins remove people with
+  // ban/suspend, which are reversible and audited. A spec pins this.
 
-  /** Create a deferred account-deletion request for the caller's own member. */
+  /**
+   * Create a deferred account-deletion request for the caller's own member.
+   * Self-only: the target is `user.memberId`, never an argument.
+   */
   async requestSelfDeletion(
     user: AuthenticatedUser,
     dto: DeletionRequestDto,
@@ -585,7 +615,11 @@ export class MembersService {
     return { requestId: request.id, status: request.status, confirmToken: request.confirmToken };
   }
 
-  /** Confirm a pending deletion request (marks confirmed; execution is deferred). */
+  /**
+   * Confirm a pending deletion request (marks confirmed; execution is deferred).
+   * Self-only: the request is looked up by the CALLER's member id, so one
+   * member's token can never advance another member's request.
+   */
   async confirmSelfDeletion(
     user: AuthenticatedUser,
     dto: ConfirmDeletionDto,
@@ -615,6 +649,8 @@ export class MembersService {
    * The member + identity rows and the audit trail are retained (soft-delete),
    * only the personal data is scrubbed. Idempotent-safe: requires a Confirmed
    * request, so a re-invocation after execution 404s rather than double-running.
+   * Self-only: it deletes `user.memberId` and nothing else — there is no
+   * parameter by which an admin could aim it at another member.
    */
   async executeSelfDeletion(
     user: AuthenticatedUser,
@@ -677,6 +713,7 @@ export class MembersService {
    * Cancel a pending or confirmed deletion request before it is executed (T-0113).
    * A member who changes their mind can back out at either the pre-confirm or
    * post-confirm (pre-execute) stage; once Executed there is nothing to cancel.
+   * Self-only, like the rest of the flow.
    */
   async cancelSelfDeletion(
     user: AuthenticatedUser,
@@ -705,7 +742,7 @@ export class MembersService {
     return { status: request.status };
   }
 
-  /** Export the caller's own data (GDPR data download). */
+  /** Export the caller's own data (GDPR data download) — self-only, like deletion. */
   async exportSelfData(user: AuthenticatedUser): Promise<Record<string, unknown>> {
     if (!user.memberId) throw new ForbiddenException('Only enrolled members can export data');
     const member = await this.loadMember(user.memberId, user.regimentId);
@@ -714,7 +751,7 @@ export class MembersService {
 
     return {
       exportedAt: new Date().toISOString(),
-      profile: await this.project(member),
+      profile: await this.project(member, user),
       medals: medals.get(member.id) ?? [],
       serviceRecord,
       discordIdentity: member.discordIdentity
@@ -756,10 +793,49 @@ export class MembersService {
   }
 
   /** Project a single loaded member to a DTO, computing its metrics + medals. */
-  private async project(member: Member): Promise<MemberDto> {
+  private async project(
+    member: Member,
+    user: AuthenticatedUser,
+    ownerMemberId?: string | null,
+  ): Promise<MemberDto> {
     const eventsAttended = await this.attendees.count({ where: { memberId: member.id } });
     const medals = (await this.medalsByMember([member.id])).get(member.id) ?? [];
-    return MemberDto.from(member, { eventsAttended }, medals);
+    const permitted = await this.permittedActionsResolver(user, ownerMemberId);
+    return MemberDto.from(member, { eventsAttended }, medals, permitted(member));
+  }
+
+  /**
+   * Build the per-request `permittedActions` mapper (T-0177). Everything that
+   * costs I/O — the owner pointer and the caller's capabilities — is resolved
+   * HERE, once; the returned function is pure, so a roster page of any size
+   * keeps the endpoint's query count. The flags come from the very predicate
+   * {@link assertMayModerate} enforces, so the client can never be told an
+   * action is available that the endpoint would then refuse.
+   */
+  private async permittedActionsResolver(
+    user: AuthenticatedUser,
+    knownOwnerMemberId?: string | null,
+  ): Promise<(member: Member) => PermittedActionsDto> {
+    // `null` is a real answer (a regiment with no owner pointer), so only an
+    // absent argument triggers the read.
+    const ownerMemberId =
+      knownOwnerMemberId === undefined
+        ? await this.ownerMemberId(user.regimentId)
+        : knownOwnerMemberId;
+    const held = new Set<string>();
+    for (const capability of MEMBER_ADMIN_CAPABILITIES) {
+      if (await this.authz.can(user.regimentId, user.role, capability)) held.add(capability);
+    }
+    return (member) =>
+      permittedActions(
+        {
+          actorRole: user.role,
+          actorMemberId: user.memberId,
+          target: member,
+          ownerMemberId,
+        },
+        held,
+      );
   }
 
   // ── Per-member events + RSVPs (profile Event History / RSVPs tabs, T-0100) ────
@@ -814,28 +890,47 @@ export class MembersService {
     return next.precedence > previous.precedence ? 'demotion' : 'promotion';
   }
 
-  /** Guard: the regiment owner cannot be suspended/banned. */
-  private async assertNotOwner(member: Member, regimentId: string): Promise<void> {
+  /** The regiment's owner pointer (`regiments.owner_member_id`), or null. */
+  private async ownerMemberId(regimentId: string): Promise<string | null> {
     const regiment = await this.regiments.findOne({ where: { id: regimentId } });
-    if (regiment?.ownerMemberId === member.id) {
-      throw new ForbiddenException('Cannot suspend or ban the regiment owner');
-    }
+    return regiment?.ownerMemberId ?? null;
   }
 
   /**
-   * Guard: a moderator cannot moderate themselves (T-0150). {@link assertNotOwner}
-   * only protects the regiment owner; a non-owner Admin/Moderator holding
-   * manage_roles could otherwise demote or ban their own account and lock the
-   * regiment out of a seat only they occupy. Matched on member id — the Discord
-   * id and the display name are both re-assignable and would be the wrong key.
-   * Called before any write so a rejected self-action leaves no audit row.
+   * The one target-scoped authorization guard for every member admin action
+   * (T-0176). It folds together three refusals that used to be applied
+   * piecemeal — and, before this, not at all on changeRank/awardMedal/
+   * removeMedal/unban:
    *
-   * @param action completes the sentence "You cannot …".
+   *  - SELF: a moderator cannot moderate themselves (T-0150) — otherwise a
+   *    non-owner Admin holding manage_roles could demote or ban their own
+   *    account and lock the regiment out of a seat only they occupy. Matched on
+   *    member id; the Discord id and the display name are both re-assignable and
+   *    would be the wrong key.
+   *  - OWNER: the regiment owner pointer is untouchable. It stays the stricter,
+   *    authoritative check — it holds even if the owner's ROLE ever drifts from
+   *    the pointer, so it is not superseded by the role comparison.
+   *  - RANK: the actor must STRICTLY outrank the target, so an Admin cannot act
+   *    on a peer Admin (only the Owner can) and a Moderator cannot act on an
+   *    Admin. The capability guard in the controller cannot express this: it
+   *    only knows the caller's role, never the target.
+   *
+   * Called before any write, so a rejected action leaves no audit row, no
+   * service-record entry, no Discord sync job and no session invalidation.
    */
-  private assertNotSelf(member: Member, user: AuthenticatedUser, action: string): void {
-    if (user.memberId && user.memberId === member.id) {
-      throw new ForbiddenException(`You cannot ${action}`);
-    }
+  private async assertMayModerate(
+    member: Member,
+    user: AuthenticatedUser,
+    action: MemberAdminAction,
+  ): Promise<string | null> {
+    const ownerMemberId = await this.ownerMemberId(user.regimentId);
+    assertCanActOn(
+      { actorRole: user.role, actorMemberId: user.memberId, target: member, ownerMemberId },
+      action,
+    );
+    // Handed back so the projection that follows the write can reuse it: one
+    // owner-pointer read serves both the guard and the permitted-action flags.
+    return ownerMemberId;
   }
 
   /**

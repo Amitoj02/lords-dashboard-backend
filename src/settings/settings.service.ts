@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -8,7 +7,6 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
-import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
 import { RolePermission } from '../authz/entities/role-permission.entity';
@@ -28,7 +26,6 @@ import { PermissionsMatrixDto } from './dto/permissions-matrix.dto';
 import { PresentationDto, UpdatePresentationDto } from './dto/presentation.dto';
 import { AdminRegimentDocumentDto, UpdateRegimentDocumentDto } from './dto/regiment-document.dto';
 import { SettingsDto } from './dto/settings.dto';
-import { TransferDiscordDto, TransferOwnershipDto } from './dto/settings-actions.dto';
 import { UpdatePermissionsDto } from './dto/update-permissions.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 
@@ -92,11 +89,13 @@ const SETTINGS_KEYS = [
 
 /**
  * Regiment control panel: profile + settings read/patch, the authorization
- * matrix (capability × role) with a governance "floor guard", and the three
- * high-consequence lifecycle actions (ownership transfer, Discord rebind,
- * dissolution). Every read/write is scoped to the caller's regiment and every
- * mutation is audited. The permission matrix is the source of truth behind
- * CapabilitiesGuard, so any change invalidates the AuthzService cache.
+ * matrix (capability × role) with a governance "floor guard", and the one
+ * remaining high-consequence lifecycle action, dissolution. Ownership transfer
+ * and the Discord rebind both went in T-0170 — the guild binding now lives
+ * solely behind POST /api/discord/bind, which is a strict superset. Every
+ * read/write is scoped to the caller's regiment and every mutation is audited.
+ * The permission matrix is the source of truth behind CapabilitiesGuard, so any
+ * change invalidates the AuthzService cache.
  */
 @Injectable()
 export class SettingsService {
@@ -115,9 +114,6 @@ export class SettingsService {
     private readonly authz: AuthzService,
     private readonly audit: AuditService,
     private readonly dataSource: DataSource,
-    // Drops resolved caller contexts after an ownership transfer flips two
-    // members' roles, so both take effect on the next request (T-0046).
-    private readonly sessionContext: SessionContextService,
   ) {}
 
   /** The merged profile + settings panel. Materialises defaults when no row exists. */
@@ -372,10 +368,9 @@ export class SettingsService {
   /**
    * Batch-edit the authorization matrix. Each change is validated (known role +
    * capability), applied to an in-memory copy, then checked by the FLOOR GUARD —
-   * the regiment must remain governable: the Owner keeps ManageSettings,
-   * TransferOwnership and ManageRoles, and at least one role retains
-   * ManageSettings. Only then are the changed cells persisted, the authz cache
-   * invalidated, and the edit audited.
+   * the regiment must remain governable: the Owner keeps ManageSettings and
+   * ManageRoles, and at least one role retains ManageSettings. Only then are the
+   * changed cells persisted, the authz cache invalidated, and the edit audited.
    */
   async updatePermissions(
     user: AuthenticatedUser,
@@ -451,100 +446,6 @@ export class SettingsService {
   }
 
   /**
-   * Transfer ownership to another member. `confirm` must be true. The target must
-   * exist in the regiment (not soft-deleted) and not already be the owner. In one
-   * transaction the regiment's owner pointer is repointed, the target becomes
-   * Owner, and the previous owner is demoted to Admin. Audited.
-   */
-  async transferOwnership(
-    user: AuthenticatedUser,
-    dto: TransferOwnershipDto,
-    ip: string | null,
-  ): Promise<{ ownerMemberId: string }> {
-    if (dto.confirm !== true) {
-      throw new BadRequestException('Ownership transfer must be confirmed');
-    }
-
-    const regiment = await this.loadRegiment(user.regimentId);
-    const target = await this.members.findOne({
-      where: { id: dto.toMemberId, regimentId: user.regimentId },
-    });
-    if (!target) {
-      throw new NotFoundException('Target member not found');
-    }
-    if (regiment.ownerMemberId === target.id) {
-      throw new ConflictException('Member is already the regiment owner');
-    }
-
-    const previousOwnerId = regiment.ownerMemberId;
-
-    await this.dataSource.transaction(async (manager) => {
-      const regimentRepo = manager.getRepository(Regiment);
-      const memberRepo = manager.getRepository(Member);
-      await regimentRepo.update({ id: regiment.id }, { ownerMemberId: target.id });
-      await memberRepo.update(
-        { id: target.id, regimentId: user.regimentId },
-        { role: MemberRole.Owner },
-      );
-      if (previousOwnerId && previousOwnerId !== target.id) {
-        await memberRepo.update(
-          { id: previousOwnerId, regimentId: user.regimentId },
-          { role: MemberRole.Admin },
-        );
-      }
-    });
-
-    // Ownership transfer flips the target's and previous owner's roles. Clear
-    // the whole resolved-context cache (a rare governance action) so both — and
-    // any other cached callers — re-resolve their live role on the next request.
-    this.sessionContext.invalidate();
-
-    await this.audit.record({
-      regimentId: user.regimentId,
-      action: 'settings.transfer_ownership',
-      actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'member', id: target.id, memberId: target.id, label: target.inGameName },
-      before: { ownerMemberId: previousOwnerId },
-      after: { ownerMemberId: target.id },
-    });
-
-    return { ownerMemberId: target.id };
-  }
-
-  /** Rebind the regiment to a Discord guild. Audited. */
-  async transferDiscord(
-    user: AuthenticatedUser,
-    dto: TransferDiscordDto,
-    ip: string | null,
-  ): Promise<{ discordServerId: string | null; discordServerName: string | null }> {
-    const regiment = await this.loadRegiment(user.regimentId);
-    const before = {
-      discordServerId: regiment.discordServerId,
-      discordServerName: regiment.discordServerName,
-    };
-
-    regiment.discordServerId = dto.discordServerId;
-    if (dto.discordServerName !== undefined) {
-      regiment.discordServerName = dto.discordServerName;
-    }
-    const saved = await this.regiments.save(regiment);
-
-    await this.audit.record({
-      regimentId: user.regimentId,
-      action: 'settings.transfer_discord',
-      actor: AuditService.actorFromUser(user, ip),
-      target: { type: 'regiment', id: saved.id, label: saved.name },
-      before,
-      after: {
-        discordServerId: saved.discordServerId,
-        discordServerName: saved.discordServerName,
-      },
-    });
-
-    return { discordServerId: saved.discordServerId, discordServerName: saved.discordServerName };
-  }
-
-  /**
    * ⚠️ DESTRUCTIVE — dissolve (soft-delete) the regiment. The system is
    * single-tenant, so this tears down THE regiment: `confirmName` must exactly
    * equal the regiment name, and the row is soft-deleted (dissolvedAt set) rather
@@ -609,15 +510,15 @@ export class SettingsService {
 
   /**
    * Floor guard: reject any matrix that would leave the regiment ungovernable —
-   * the Owner must retain the core trio (ManageSettings, TransferOwnership,
-   * ManageRoles) and at least one role must keep ManageSettings.
+   * the Owner must retain the core pair (ManageSettings, ManageRoles) and at
+   * least one role must keep ManageSettings. It was a trio until T-0170 retired
+   * TransferOwnership; the floor shrank with the capability axis, not because
+   * the guard got weaker.
    */
   private assertGovernable(matrix: Record<string, Record<string, boolean>>): void {
     const owner = matrix[MemberRole.Owner] ?? {};
     const ownerRetainsCore =
-      owner[Capability.ManageSettings] === true &&
-      owner[Capability.TransferOwnership] === true &&
-      owner[Capability.ManageRoles] === true;
+      owner[Capability.ManageSettings] === true && owner[Capability.ManageRoles] === true;
     const someoneManagesSettings = Object.values(MemberRole).some(
       (role) => matrix[role]?.[Capability.ManageSettings] === true,
     );

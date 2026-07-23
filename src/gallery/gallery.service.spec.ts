@@ -151,7 +151,7 @@ describe('GalleryService', () => {
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
   let authz: { can: jest.Mock };
-  let discordSync: { enqueueApplicationDecision: jest.Mock };
+  let discordSync: { enqueueApplicationDecision: jest.Mock; enqueueGalleryDecision: jest.Mock };
   let storage: { resolveKeyToPublicUrl: jest.Mock; deleteObject: jest.Mock };
 
   // Per-test transaction manager repositories.
@@ -186,7 +186,10 @@ describe('GalleryService', () => {
     settings = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn() };
     audit = { record: jest.fn() };
     authz = { can: jest.fn().mockResolvedValue(true) };
-    discordSync = { enqueueApplicationDecision: jest.fn().mockResolvedValue(null) };
+    discordSync = {
+      enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
+      enqueueGalleryDecision: jest.fn().mockResolvedValue(null),
+    };
     storage = {
       resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
       deleteObject: jest.fn().mockResolvedValue(undefined),
@@ -679,11 +682,13 @@ describe('GalleryService', () => {
 
       await service.decline(ADMIN_USER, 'gallery-1', { reason: 'Off-topic' }, null);
 
-      expect(discordSync.enqueueApplicationDecision).toHaveBeenCalledTimes(1);
-      const [regimentId, payload] = discordSync.enqueueApplicationDecision.mock.calls[0];
+      // Composition moved behind DiscordSyncService (T-0173): the service passes
+      // the facts, not a rendered sentence.
+      expect(discordSync.enqueueGalleryDecision).toHaveBeenCalledTimes(1);
+      const [regimentId, payload] = discordSync.enqueueGalleryDecision.mock.calls[0];
       expect(regimentId).toBe(REGIMENT);
       expect(payload.discordUserId).toBe('discord-author');
-      expect(payload.content).toContain('Off-topic');
+      expect(payload.reason).toBe('Off-topic');
     });
 
     it('does not DM when the submitter has no linked Discord identity (T-0090)', async () => {
@@ -692,7 +697,7 @@ describe('GalleryService', () => {
 
       await service.decline(ADMIN_USER, 'gallery-1', { reason: 'x' }, null);
 
-      expect(discordSync.enqueueApplicationDecision).not.toHaveBeenCalled();
+      expect(discordSync.enqueueGalleryDecision).not.toHaveBeenCalled();
     });
 
     it('never fails the decline when the DM enqueue throws (T-0090)', async () => {
@@ -709,7 +714,7 @@ describe('GalleryService', () => {
     it('does NOT DM on approve (T-0090)', async () => {
       items.findOne!.mockResolvedValue(buildItem({ status: GalleryStatus.Pending }));
       await service.approve(ADMIN_USER, 'gallery-1', null);
-      expect(discordSync.enqueueApplicationDecision).not.toHaveBeenCalled();
+      expect(discordSync.enqueueGalleryDecision).not.toHaveBeenCalled();
     });
   });
 

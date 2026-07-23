@@ -6,6 +6,22 @@ import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
+import { Regiment } from '../regiments/entities/regiment.entity';
+import { RoleRelinkExpandPayload, RoleRelinkSubject } from './discord-job-payloads';
+import {
+  ApplicationDecisionOutcome,
+  AuditSummary,
+  EnlistmentSummary,
+  EventSummary,
+  RegimentBrand,
+  buildAuditEmbed,
+  buildDecisionEmbed,
+  buildEnlistmentEmbed,
+  buildEventEmbed,
+  buildGalleryDeclineEmbed,
+  buildWelcomeEmbed,
+  defaultDecisionMessage,
+} from './embeds/notification-embeds';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordSyncJob } from './entities/discord-sync-job.entity';
 
@@ -18,27 +34,24 @@ import { DiscordSyncJob } from './entities/discord-sync-job.entity';
  */
 const RELINK_PAGE_SIZE = 50;
 
-/** The reshaped enlistment fields rendered into the #new-enlistments post. */
-export interface EnlistmentSummary {
-  applicantName: string;
-  inGameName: string;
-  currentRegiment: string;
-  howFound: string;
-  preferredClasses: string;
-  skillsToImprove: string;
-  representativeNote: string | null;
-}
+// The notification INPUT shapes moved to `embeds/notification-embeds.ts` with
+// the composers that render them (T-0173..T-0175) — one module now owns both
+// "what a notification says" and "what it needs to say it". Re-exported here so
+// every existing `from '../discord/discord-sync.service'` import keeps working.
+export type {
+  ApplicationDecisionOutcome,
+  AuditSummary,
+  EnlistmentSummary,
+  EventSummary,
+  RegimentBrand,
+} from './embeds/notification-embeds';
 
-/** The audit fields rendered into the #audit-logs mirror. */
-export interface AuditSummary {
-  action: string;
-  actorLabel: string | null;
-  detail: string | null;
-  severity: string;
-}
+/** Default welcome text when the regiment has not configured one. */
+const DEFAULT_WELCOME = 'Welcome to the regiment!';
 
-/** Which catalogue row a bulk Discord-role re-link fans out from. */
-export type RoleRelinkSubject = 'rank' | 'medal';
+// The re-link payload shape lives with the other job payload types (T-0172).
+export type { RoleRelinkSubject } from './discord-job-payloads';
+export type { RoleRelinkExpandPayload as RoleRelinkPayload } from './discord-job-payloads';
 
 /** What the caller knows when a rank/medal's Discord role mapping changed. */
 export interface RoleRelinkInput {
@@ -51,22 +64,6 @@ export interface RoleRelinkInput {
   previousRoleId: string | null;
   /** The role it is mapped to now (null = unlinked). */
   nextRoleId: string | null;
-}
-
-/**
- * The persisted payload every job of a re-link batch carries. The cursor job
- * keeps the whole descriptor (it re-enqueues itself); the per-member jobs need
- * only `memberId`/`discordUserId`/`outgoingRoleId`.
- */
-export interface RoleRelinkPayload extends Record<string, unknown> {
-  subject: RoleRelinkSubject;
-  subjectId: string;
-  subjectLabel: string;
-  /** The previously-linked role to strip (T-0159). Null when there was none. */
-  outgoingRoleId: string | null;
-  incomingRoleId: string | null;
-  /** Last member id of the previous page; null on the first page. */
-  cursor: string | null;
 }
 
 /** What {@link DiscordSyncService.enqueueRoleRelink} hands back to its caller. */
@@ -95,6 +92,9 @@ export class DiscordSyncService {
     private readonly settings: Repository<DiscordBotSettings>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
+    // The regiment's name/crest/banner/accent tone brand every embed (T-0173).
+    @InjectRepository(Regiment)
+    private readonly regiments: Repository<Regiment>,
   ) {}
 
   /** Load (materialising defaults) the regiment's bot settings. */
@@ -102,6 +102,25 @@ export class DiscordSyncService {
     const existing = await this.settings.findOne({ where: { regimentId } });
     if (existing) return existing;
     return this.settings.save(this.settings.create({ regimentId }));
+  }
+
+  /**
+   * The regiment's identity as the composers need it. Every enqueue that
+   * produces an embed resolves this ONCE and hands it to a pure composer, which
+   * is what keeps the composers database-free and unit-testable.
+   *
+   * Degrades rather than throws: a missing regiment row yields a neutral brand,
+   * because a notification with a generic name is strictly better than a
+   * notification that never goes out.
+   */
+  private async resolveBrand(regimentId: string): Promise<RegimentBrand> {
+    const regiment = await this.regiments.findOne({ where: { id: regimentId } });
+    return {
+      name: regiment?.name ?? 'the regiment',
+      accentTone: regiment?.accentTone ?? null,
+      bannerUrl: regiment?.bannerUrl ?? null,
+      crestUrl: regiment?.crestUrl ?? null,
+    };
   }
 
   /** Enqueue a full role reconciliation for one member (rank/role/medal change). */
@@ -141,27 +160,56 @@ export class DiscordSyncService {
   }
 
   /**
-   * Enqueue an EVENT announcement/reminder (T-0044): routes to the dedicated
+   * Enqueue an EVENT announcement (T-0044/T-0174): routes to the dedicated
    * event-announcements channel. No-ops when that channel is unset (the general
    * ad-hoc announcement path + its fallback channel were retired in T-0103).
+   *
+   * ⚠️ The caller passes an {@link EventSummary}, which has NO field for the
+   * event's server password — so no code path can put one in a channel embed.
    */
-  async enqueueEventAnnounce(regimentId: string, content: string): Promise<DiscordSyncJob | null> {
+  async enqueueEventAnnounce(
+    regimentId: string,
+    event: EventSummary,
+  ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
       const target = s.eventAnnouncementChannelId;
       if (!target) return null;
-      // Cap at Discord's 2000-char limit so a long event description can't
-      // create a permanently-failing outbox job.
+      const brand = await this.resolveBrand(regimentId);
       return this.insertJob(regimentId, DiscordSyncJobType.Announce, {
         channelId: target,
-        content: content.slice(0, 2000),
+        content: '',
+        embed: buildEventEmbed(event, brand),
       });
     });
   }
 
   /**
-   * Enqueue an enlistment-application post to the enlistments channel (T-0042).
-   * No-ops when the bot is off or no enlistments channel is configured. The embed
-   * text is composed here from the reshaped application fields.
+   * Enqueue an event REMINDER (T-0174) — the same event, a distinct message.
+   * Fired by the reminder scheduler from an `event_notify_offsets` row rather
+   * than by an authoring action, which is why it is a separate producer and a
+   * separate job type.
+   */
+  async enqueueEventReminder(
+    regimentId: string,
+    event: EventSummary,
+    minutesBefore: number,
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      const target = s.eventAnnouncementChannelId;
+      if (!target) return null;
+      const brand = await this.resolveBrand(regimentId);
+      return this.insertJob(regimentId, DiscordSyncJobType.EventReminder, {
+        channelId: target,
+        content: '',
+        embed: buildEventEmbed(event, brand, { minutesBefore }),
+      });
+    });
+  }
+
+  /**
+   * Enqueue an enlistment-application post to the enlistments channel
+   * (T-0042/T-0173). No-ops when the bot is off or no enlistments channel is
+   * configured.
    */
   async enqueueApplicationSubmitted(
     regimentId: string,
@@ -169,18 +217,20 @@ export class DiscordSyncService {
   ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
       if (!s.enlistmentChannelId) return null;
+      const brand = await this.resolveBrand(regimentId);
       return this.insertJob(regimentId, DiscordSyncJobType.ApplicationSubmitted, {
         channelId: s.enlistmentChannelId,
-        content: this.buildEnlistmentMessage(summary),
+        content: '',
+        embed: buildEnlistmentEmbed(summary, brand),
       });
     });
   }
 
   /**
-   * Enqueue an audit-log entry mirror to the audit-log channel (T-0043). No-ops
-   * when the bot is off or no audit-log channel is configured. The source audit
-   * entry id is threaded through the payload so the worker can write the mirror
-   * outcome (synced/failed) back onto that row. Returns whether a job was
+   * Enqueue an audit-log entry mirror to the audit-log channel (T-0043/T-0175).
+   * No-ops when the bot is off or no audit-log channel is configured. The source
+   * audit entry id is threaded through the payload so the worker can write the
+   * mirror outcome (synced/failed) back onto that row. Returns whether a job was
    * inserted, so the caller can set the entry's initial sync status.
    */
   async enqueueAuditLog(
@@ -190,63 +240,95 @@ export class DiscordSyncService {
   ): Promise<boolean> {
     const job = await this.guarded(regimentId, async (s) => {
       if (!s.auditLogChannelId) return null;
+      // No brand lookup here on purpose: the audit mirror is the highest-volume
+      // producer in the app (one entry per audited mutation), and its embed is
+      // severity-coloured rather than regiment-coloured — so it would be a query
+      // per audit row for nothing.
       return this.insertJob(regimentId, DiscordSyncJobType.AuditLog, {
         channelId: s.auditLogChannelId,
-        content: this.buildAuditMessage(entry),
+        content: '',
+        embed: buildAuditEmbed(entry),
         auditEntryId: auditEntryId ?? null,
       });
     });
     return !!job;
   }
 
-  /** Compose the enlistment-application message (Discord markdown, capped 2000). */
-  private buildEnlistmentMessage(s: EnlistmentSummary): string {
-    const lines = [
-      '📋 **New enlistment application**',
-      `**Applicant:** ${s.applicantName}`,
-      `**In-game name:** ${s.inGameName}`,
-      `**Current regiment:** ${s.currentRegiment}`,
-      `**How they found us:** ${s.howFound}`,
-      `**Preferred classes:** ${s.preferredClasses}`,
-      `**Wants to improve:** ${s.skillsToImprove}`,
-    ];
-    if (s.representativeNote) lines.push(`**Representative note:** ${s.representativeNote}`);
-    return lines.join('\n').slice(0, 2000);
-  }
-
-  /** Compose the audit-entry mirror message (Discord markdown, capped 2000). */
-  private buildAuditMessage(e: AuditSummary): string {
-    const actor = e.actorLabel ?? 'system';
-    const detail = e.detail ? ` — ${e.detail}` : '';
-    return `📝 \`[${e.severity}]\` **${e.action}** by ${actor}${detail}`.slice(0, 2000);
-  }
-
-  /** Enqueue the welcome message for a newly-joined member. */
+  /** Enqueue the welcome message for a newly-joined member (T-0175). */
   async enqueueWelcome(regimentId: string, discordUserId: string): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
-      const content = s.welcomeMessage ?? 'Welcome to the regiment!';
+      const brand = await this.resolveBrand(regimentId);
+      const message = s.welcomeMessage ?? DEFAULT_WELCOME;
       return this.insertJob(regimentId, DiscordSyncJobType.Welcome, {
         discordUserId,
+        // Null keeps the DM fallback intact: the worker still routes to a DM
+        // whenever no welcome channel is configured.
         channelId: s.welcomeChannelId,
-        content,
+        content: '',
+        embed: buildWelcomeEmbed({ brand, message }),
       });
     });
   }
 
   /**
-   * Enqueue a decision DM (approve/decline/hold) to an applicant. Best-effort:
-   * no-ops when the bot is disabled. The content + target user id are resolved
-   * by the caller; the worker delivers it as a direct message.
+   * Enqueue a decision DM (approve/decline/hold) to an applicant (T-0173).
+   * Best-effort: no-ops when the bot is disabled.
+   *
+   * The MESSAGE is composed here now, not by the caller: `customMessage` is the
+   * officer's own words when they wrote any, and otherwise the per-outcome house
+   * default — which is exactly the behaviour ApplicationsService had, moved to
+   * where every other notification is written.
    */
   async enqueueApplicationDecision(
     regimentId: string,
-    payload: { discordUserId: string; content: string },
+    payload: {
+      discordUserId: string;
+      outcome: ApplicationDecisionOutcome;
+      /** The officer's custom DM text, when they wrote one. */
+      customMessage?: string | null;
+      /** The officer's rationale (decline reason / hold note), when recorded. */
+      reviewerNote?: string | null;
+    },
   ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async () => {
       if (!payload.discordUserId) return null;
+      const brand = await this.resolveBrand(regimentId);
+      const message =
+        payload.customMessage?.trim() || defaultDecisionMessage(payload.outcome, brand.name);
       return this.insertJob(regimentId, DiscordSyncJobType.ApplicationDecision, {
         discordUserId: payload.discordUserId,
-        content: payload.content.slice(0, 2000),
+        content: '',
+        embed: buildDecisionEmbed({
+          outcome: payload.outcome,
+          brand,
+          message,
+          reviewerNote: payload.reviewerNote ?? null,
+        }),
+      });
+    });
+  }
+
+  /**
+   * Enqueue the gallery moderation-outcome DM (T-0090/T-0173). Shares the
+   * `application.decision` job type with the enlistment DM — both are "a
+   * moderation outcome, delivered privately", and the worker's DM arm is
+   * identical — but composition is its own concern, so it gets its own producer.
+   */
+  async enqueueGalleryDecision(
+    regimentId: string,
+    payload: { discordUserId: string; title: string; reason?: string | null },
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async () => {
+      if (!payload.discordUserId) return null;
+      const brand = await this.resolveBrand(regimentId);
+      return this.insertJob(regimentId, DiscordSyncJobType.ApplicationDecision, {
+        discordUserId: payload.discordUserId,
+        content: '',
+        embed: buildGalleryDeclineEmbed({
+          brand,
+          title: payload.title,
+          reason: payload.reason ?? null,
+        }),
       });
     });
   }
@@ -287,7 +369,7 @@ export class DiscordSyncService {
       await this.supersedeRelinkBatches(input);
 
       const batchId = randomUUID();
-      const payload: RoleRelinkPayload = {
+      const payload: RoleRelinkExpandPayload = {
         subject: input.subject,
         subjectId: input.subjectId,
         subjectLabel: input.subjectLabel,
@@ -310,7 +392,7 @@ export class DiscordSyncService {
    * harmless — the per-member job is idempotent).
    */
   async expandRelinkPage(job: DiscordSyncJob): Promise<number> {
-    const p = job.payload as RoleRelinkPayload | null;
+    const p = job.payload as RoleRelinkExpandPayload | null;
     if (!p || !job.batchId) return 0;
 
     // ⚠️ The gates are re-checked HERE, not only at enqueue: a fan-out spans
@@ -352,7 +434,7 @@ export class DiscordSyncService {
     }
     // A short page is the last one; anything else means there may be more.
     if (page.length === RELINK_PAGE_SIZE) {
-      const next: RoleRelinkPayload = { ...p, cursor: page[page.length - 1].memberId };
+      const next: RoleRelinkExpandPayload = { ...p, cursor: page[page.length - 1].memberId };
       await this.insertJob(job.regimentId, DiscordSyncJobType.RoleRelinkExpand, next, job.batchId);
     }
     return page.length;
@@ -431,7 +513,7 @@ export class DiscordSyncService {
         },
         order: { createdAt: 'ASC' },
       });
-      const p = seed?.payload as RoleRelinkPayload | undefined;
+      const p = seed?.payload as RoleRelinkExpandPayload | undefined;
       if (p?.subject !== input.subject || p?.subjectId !== input.subjectId) continue;
       await this.jobs.update(
         { regimentId: input.regimentId, batchId, status: DiscordSyncJobStatus.Pending },

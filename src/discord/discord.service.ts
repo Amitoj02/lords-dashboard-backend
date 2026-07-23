@@ -22,7 +22,12 @@ import {
 } from './dto/discord-connection.dto';
 import { DiscordChannel, DiscordRole } from './gateway/discord-gateway';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
-import { BindGuildDto, DiscordOperationsQueryDto, SimulateJoinDto } from './dto/discord-inputs.dto';
+import {
+  BindGuildDto,
+  DiscordOperationsQueryDto,
+  SimulateJoinDto,
+  SimulateLeaveDto,
+} from './dto/discord-inputs.dto';
 import { RoleRelinkFailuresDto, RoleRelinkProgressDto } from './dto/role-relink.dto';
 import { RoleRelinkPayload } from './discord-sync.service';
 import { BotOperation } from './entities/bot-operation.entity';
@@ -170,6 +175,7 @@ export class DiscordService {
   ): Promise<DiscordBotSettingsDto> {
     const settings = await this.sync.getSettings(user.regimentId);
     const banGateWas = settings.applyBanRoleOnBan;
+    const guildGateWas = settings.guildGateEnabled;
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
@@ -192,6 +198,7 @@ export class DiscordService {
     if (dto.banRoleName !== undefined) settings.banRoleName = dto.banRoleName || null;
     if (dto.syncRolesOnChange !== undefined) settings.syncRolesOnChange = dto.syncRolesOnChange;
     if (dto.applyBanRoleOnBan !== undefined) settings.applyBanRoleOnBan = dto.applyBanRoleOnBan;
+    if (dto.guildGateEnabled !== undefined) settings.guildGateEnabled = dto.guildGateEnabled;
 
     // The Ban role is REQUIRED before the ban-on-ban behaviour can be enabled.
     if (settings.applyBanRoleOnBan && !settings.banRoleId) {
@@ -202,16 +209,28 @@ export class DiscordService {
 
     const saved = await this.settings.save(settings);
 
-    const banGateChanged =
-      dto.applyBanRoleOnBan !== undefined && dto.applyBanRoleOnBan !== banGateWas;
+    // Both of these change who/what the bot can act on, so a flip is named
+    // explicitly in the trail rather than hiding inside "settings updated".
+    const sensitive: string[] = [];
+    if (dto.applyBanRoleOnBan !== undefined && dto.applyBanRoleOnBan !== banGateWas) {
+      sensitive.push(
+        `applyBanRoleOnBan ${saved.applyBanRoleOnBan ? 'ENABLED' : 'disabled'} (sensitive)`,
+      );
+    }
+    if (dto.guildGateEnabled !== undefined && dto.guildGateEnabled !== guildGateWas) {
+      sensitive.push(
+        `guildGateEnabled ${saved.guildGateEnabled ? 'ENABLED' : 'disabled'} (sensitive)`,
+      );
+    }
     await this.audit.record({
       regimentId: user.regimentId,
       action: 'discord.connection.update',
       actor: AuditService.actorFromUser(user, ip),
       target: { type: 'discord', label: 'settings' },
-      detail: banGateChanged
-        ? `Bot settings updated — applyBanRoleOnBan ${saved.applyBanRoleOnBan ? 'ENABLED' : 'disabled'} (sensitive)`
-        : 'Bot settings updated',
+      detail:
+        sensitive.length > 0
+          ? `Bot settings updated — ${sensitive.join('; ')}`
+          : 'Bot settings updated',
     });
     return DiscordBotSettingsDto.from(saved);
   }
@@ -472,9 +491,31 @@ export class DiscordService {
     };
   }
 
-  /** Dev/testing: simulate a guild-member-add to exercise onboarding via the mock. */
+  /**
+   * Dev/testing: simulate a guild-member-add to exercise onboarding via the mock.
+   * Routed through the gateway's simulate hook when there is one, so EVERY
+   * GuildMemberAdd subscriber fires — onboarding and the membership verdict
+   * writer (T-0169) — rather than just onboarding. The real gateway has no such
+   * hook (it will not fabricate Discord events), so it falls back to driving
+   * onboarding directly, exactly as this route did before.
+   */
   async simulateMemberJoin(dto: SimulateJoinDto): Promise<{ ok: true }> {
-    await this.onboarding.onMemberJoin(dto.discordUserId);
+    if (this.gateway.simulateMemberJoin) {
+      await this.gateway.simulateMemberJoin(dto.discordUserId);
+    } else {
+      await this.onboarding.onMemberJoin(dto.discordUserId);
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Dev/testing counterpart: simulate a guild-member-remove (T-0169) so the
+   * departure path — verdict flipped to false, cached verdict replaced — is
+   * coverable with DISCORD_BOT_MOCK=true. A no-op against the real gateway,
+   * which has nothing to simulate.
+   */
+  async simulateMemberLeave(dto: SimulateLeaveDto): Promise<{ ok: true }> {
+    await this.gateway.simulateMemberLeave?.(dto.discordUserId);
     return { ok: true };
   }
 
