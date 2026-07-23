@@ -47,7 +47,7 @@ jobs:
       ENCRYPTION_KEY: '6465760000000000000000000000000000000000000000000000000000000000'
       DISCORD_MOCK: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -70,13 +70,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout backend
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: lords-dashboard-backend
       - name: Checkout frontend (sibling build context)
         id: fe
         continue-on-error: true
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Amitoj02/lords-regiment-dashboard
           path: lords-regiment-dashboard
