@@ -3,6 +3,18 @@ export interface DiscordRole {
   id: string;
   name: string;
   position: number;
+  /**
+   * The role's permission bitfield as a decimal string (exactly as Discord's API
+   * serialises it — the value can exceed Number.MAX_SAFE_INTEGER). Load-bearing
+   * for link validation (LDA-H1): a role carrying privileged bits must never be
+   * linkable to a rank/medal. Kept as a string so no discord.js type leaks here.
+   */
+  permissions: string;
+  /**
+   * True for integration/booster-managed roles, which a bot cannot assign. Also
+   * rejected at link time (LDA-H1).
+   */
+  managed: boolean;
 }
 
 /** A Discord text channel the bot can post to (surfaced to the channel picker). */

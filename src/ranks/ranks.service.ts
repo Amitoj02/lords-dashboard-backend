@@ -9,6 +9,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { StorageTarget } from '../common/enums';
+import { DiscordRolePolicyService } from '../discord/discord-role-policy.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { StorageService } from '../storage/storage.service';
@@ -48,6 +49,8 @@ export class RanksService {
     // Re-linking a rank's Discord role has to reach every holder; the fan-out is
     // enqueued through the outbox, never applied inline (T-0158).
     private readonly discordSync: DiscordSyncService,
+    // Validates that a target Discord role is safe to link (LDA-H1).
+    private readonly rolePolicy: DiscordRolePolicyService,
   ) {}
 
   /**
@@ -228,6 +231,12 @@ export class RanksService {
     const before = this.snapshot(rank);
     const previousRoleId = rank.discordRoleId;
 
+    // Reject roles the bot must never assign — above/equal the bot, integration-
+    // managed, privileged, or not in the guild (LDA-H1). No-op while the bot is
+    // mocked (validation defers until a real bot runs); the DTO still enforces the
+    // snowflake format.
+    await this.rolePolicy.assertRoleLinkable(dto.discordRoleId);
+
     rank.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) rank.discordRoleName = dto.discordRoleName;
     rank.linked = true;
@@ -303,6 +312,8 @@ export class RanksService {
       subjectLabel: rank.name,
       previousRoleId,
       nextRoleId: rank.discordRoleId,
+      // Exclude the actor so they cannot self-grant via this fan-out (LDA-H1).
+      excludeMemberId: user.memberId ?? null,
     });
     if (!batch) return null;
 

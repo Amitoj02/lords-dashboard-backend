@@ -214,7 +214,14 @@ export class RealDiscordGateway
 
   async listRoles(): Promise<DiscordRole[]> {
     const guild = await this.resolveGuild();
-    return guild.roles.cache.map((r) => ({ id: r.id, name: r.name, position: r.position }));
+    return guild.roles.cache.map((r) => ({
+      id: r.id,
+      name: r.name,
+      position: r.position,
+      // Decimal string of the 64-bit permission bitfield (LDA-H1 link validation).
+      permissions: r.permissions.bitfield.toString(),
+      managed: r.managed,
+    }));
   }
 
   async listChannels(): Promise<DiscordChannel[]> {
