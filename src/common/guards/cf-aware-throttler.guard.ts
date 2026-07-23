@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ExecutionContext, Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
 /** The subset of the request we need; avoids an `any`-typed parameter. */
@@ -38,6 +38,16 @@ interface ProxyAwareRequest {
 @Injectable()
 export class CfAwareThrottlerGuard extends ThrottlerGuard {
   private readonly trustCfHeader = process.env.TRUST_CF_CONNECTING_IP === 'true';
+
+  /**
+   * Disable rate limiting under NODE_ENV=test. The e2e suites drive many requests
+   * from a single client IP into one shared bucket, so per-route limits (added for
+   * LDA-H3) would produce flaky 429s that have nothing to do with what a suite is
+   * asserting. There are no throttle-specific e2e tests to preserve.
+   */
+  protected shouldSkip(_context: ExecutionContext): Promise<boolean> {
+    return Promise.resolve(process.env.NODE_ENV === 'test');
+  }
 
   protected getTracker(req: ProxyAwareRequest): Promise<string> {
     const cfIp = req.headers?.['cf-connecting-ip'];
