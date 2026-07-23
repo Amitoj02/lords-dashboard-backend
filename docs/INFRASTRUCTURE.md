@@ -295,19 +295,34 @@ rclone delete r2:lords-media       # only when intentionally resetting
 | Better Stack heartbeat + `/api/health/ready` monitor | not set up |
 | Legal pages (privacy policy, delete-my-account, retention job) | **required before public sign-in** — plan Phase 7 |
 | Discord bot rollout into the 576-member guild | plan Phase 6, seven-step ladder, not started |
-| `GuildMemberAdd` does not filter by guild | a bot in two guilds cross-fires onboarding |
-| Guild membership is recorded but never enforced | see below |
+| Guild-membership gate | **built, shipped OFF** — see below |
 
-### Guild membership is not enforced
+### Guild membership: enforced, behind a switch that is off
 
-`guildMember` is resolved at sign-in, stored on the identity, and shown in the
-admin member detail — but **no guard ever reads it**. A user who is not in the
-Discord server can sign in, apply, be approved and use the site fully; a member
-who leaves keeps access indefinitely, and the bot has no `GuildMemberRemove`
-handler at all. Access is governed by `member.role` → the capability matrix,
-plus ban/suspend (enforced at login *and* per request).
+Enforcement exists (T-0166–T-0169) but is gated on
+`discord_bot_settings.guild_gate_enabled`, **default false**, flippable from the
+Lord Adjutant panel in the admin settings. Until it is turned on, behaviour is
+exactly as it was: access is governed by `member.role` → the capability matrix,
+plus ban/suspend.
 
-If enforcement is ever added, note the trap: `resolveGuildMembership` falls back
-to `false` on a bot timeout, so a naive gate would lock out the whole regiment
-whenever the gateway hiccups. It must distinguish *"confirmed not a member"*
-from *"could not check"*.
+When it is on, a signed-in user who is not in the regiment guild is held on a
+`/guild-required` screen. `GET /api/auth/guild-status` re-checks through the bot
+behind a 15-minute TTL with in-flight collapse, and live `GuildMemberAdd` /
+`GuildMemberRemove` handlers flip the stored verdict immediately. The service is
+deliberately **not** wired into `JwtStrategy` or `SessionContextService`, so no
+ordinary authenticated request pays for a Discord call.
+
+**Do not turn it on until the bot is connected and verified against the real
+guild.** Three things make that survivable if you do it anyway:
+
+- `discord_identities.guild_checked_at IS NULL` means *never confirmed*, not
+  *confirmed absent*, and resolves **fail-open** (`guildMember: true`,
+  `degraded: true`). That is the state of every row in the live database today.
+  Only a completed lookup or a live join/leave event ever writes the verdict
+  pair, so a timeout can no longer masquerade as a negative — this is the trap
+  this section used to warn about, and it is now closed.
+- Anyone holding `manage_settings` is exempt **unconditionally**, so a bot or
+  invite misconfiguration cannot lock the regiment out of the panel that would
+  switch it back off.
+- A gated user can still reach their own profile, account deletion (Discord's
+  Developer ToS requires it), the legal pages and sign-out.

@@ -22,6 +22,18 @@ import { OWNER_DISCORD_USER_ID, REGIMENT_ID } from '../src/database/seeds/seed.u
  */
 const GUEST_DISCORD_ID = '901000000000000101';
 
+/**
+ * This suite tests the CONFIRMED-verdict paths, and a verdict can only be
+ * confirmed when a guild is bound: with no `DISCORD_GUILD_ID`, `probe()`
+ * deliberately returns null, writes nothing, and every identity stays
+ * "never confirmed" and fails open. That is correct behaviour, but it makes the
+ * suite's precondition ambient — it passed locally only because the developer's
+ * `.env` happens to set the variable, and failed in CI, which sets no `.env` at
+ * all. Pin it here, before ConfigModule reads the environment, so the suite is
+ * deterministic wherever it runs. The bot is mocked, so the value is arbitrary.
+ */
+process.env.DISCORD_GUILD_ID ||= '900000000000000900';
+
 let currentProfile: Record<string, unknown> = {};
 
 const fakeDiscord = {
