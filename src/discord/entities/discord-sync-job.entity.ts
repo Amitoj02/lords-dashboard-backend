@@ -19,6 +19,12 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
  */
 @Entity('discord_sync_jobs')
 @Index(['status', 'scheduledAt'])
+// Progress + cancel for a bulk re-link (T-0160) is derived by grouping this
+// table on batchId. That endpoint is POLLED by every open admin tab, so the
+// grouping columns are indexed together: without this, each poll would table-
+// scan an outbox that carries every Discord side effect the app has ever
+// enqueued.
+@Index(['regimentId', 'batchId', 'status'])
 export class DiscordSyncJob {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -33,6 +39,15 @@ export class DiscordSyncJob {
 
   @Column({ type: 'varchar', length: 40 })
   jobType: string;
+
+  /**
+   * Groups every job belonging to one bulk run (T-0158): the cursor job, each
+   * of its re-enqueued successors, and every per-member job it expands into.
+   * Null for ordinary one-off jobs. Progress and cancel are computed from these
+   * rows rather than from in-memory state, so both survive an API restart.
+   */
+  @Column({ type: 'char', length: 36, nullable: true })
+  batchId: string | null;
 
   @Column({ type: 'enum', enum: DiscordSyncJobStatus, default: DiscordSyncJobStatus.Pending })
   status: DiscordSyncJobStatus;

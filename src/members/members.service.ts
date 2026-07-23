@@ -194,7 +194,11 @@ export class MembersService {
 
   // ── Admin actions (capability-gated in the controller; each is audited) ──────
 
-  /** Change a member's rank. Records a service-record entry + audit row. */
+  /**
+   * Change a member's rank. Records a service-record entry + audit row. The
+   * entry is typed 'promotion' or 'demotion' by comparing rank precedence
+   * (T-0157) — see {@link rankChangeType}.
+   */
   async changeRank(
     id: string,
     dto: ChangeRankDto,
@@ -208,11 +212,14 @@ export class MembersService {
     if (!rank) throw new NotFoundException('Rank not found');
 
     const before = { rankId: member.rankId, rank: member.rank?.name ?? null };
+    // Resolved BEFORE the row is mutated — the old rank is what decides whether
+    // this move reads as a promotion or a demotion.
+    const type = this.rankChangeType(member.rank ?? null, rank);
     member.rankId = rank.id;
     member.rank = rank;
     await this.members.save(member);
 
-    await this.addServiceRecord(member, 'promotion', `Rank set to ${rank.name}`, dto.note ?? null);
+    await this.addServiceRecord(member, type, `Rank set to ${rank.name}`, dto.note ?? null);
     await this.audit.record({
       regimentId: user.regimentId,
       action: 'member.rank.change',
@@ -246,6 +253,9 @@ export class MembersService {
     if (regiment?.ownerMemberId === member.id) {
       throw new ForbiddenException("Cannot change the regiment owner's role");
     }
+    // Rejected outright rather than allowed through as a same-role no-op below:
+    // self-targeting this endpoint always gets one predictable answer (T-0150).
+    this.assertNotSelf(member, user, 'change your own role');
 
     // A no-op change (same role) records nothing — no service-record entry, no
     // audit row, no session invalidation or Discord role sync (T-0101).
@@ -358,6 +368,7 @@ export class MembersService {
     }
     const member = await this.loadMember(id, user.regimentId);
     await this.assertNotOwner(member, user.regimentId);
+    this.assertNotSelf(member, user, 'suspend your own account');
 
     const before = {
       suspendedUntil: member.suspendedUntil ? member.suspendedUntil.toISOString() : null,
@@ -406,6 +417,7 @@ export class MembersService {
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
     await this.assertNotOwner(member, user.regimentId);
+    this.assertNotSelf(member, user, 'ban your own account');
     if (member.bannedAt) throw new ConflictException('Member is already banned');
 
     member.bannedAt = new Date();
@@ -790,11 +802,39 @@ export class MembersService {
     );
   }
 
+  /**
+   * The service-record type for a rank move (T-0157). The ladder is ordered by
+   * precedence with 1 = highest (see ranks.seed), so a HIGHER precedence number
+   * is a step DOWN. A member with no previous rank has nothing to compare
+   * against and is recorded as a promotion. Forward-only: rows written before
+   * this existed keep their original 'promotion' type.
+   */
+  private rankChangeType(previous: Rank | null, next: Rank): string {
+    if (!previous) return 'promotion';
+    return next.precedence > previous.precedence ? 'demotion' : 'promotion';
+  }
+
   /** Guard: the regiment owner cannot be suspended/banned. */
   private async assertNotOwner(member: Member, regimentId: string): Promise<void> {
     const regiment = await this.regiments.findOne({ where: { id: regimentId } });
     if (regiment?.ownerMemberId === member.id) {
       throw new ForbiddenException('Cannot suspend or ban the regiment owner');
+    }
+  }
+
+  /**
+   * Guard: a moderator cannot moderate themselves (T-0150). {@link assertNotOwner}
+   * only protects the regiment owner; a non-owner Admin/Moderator holding
+   * manage_roles could otherwise demote or ban their own account and lock the
+   * regiment out of a seat only they occupy. Matched on member id — the Discord
+   * id and the display name are both re-assignable and would be the wrong key.
+   * Called before any write so a rejected self-action leaves no audit row.
+   *
+   * @param action completes the sentence "You cannot …".
+   */
+  private assertNotSelf(member: Member, user: AuthenticatedUser, action: string): void {
+    if (user.memberId && user.memberId === member.id) {
+      throw new ForbiddenException(`You cannot ${action}`);
     }
   }
 

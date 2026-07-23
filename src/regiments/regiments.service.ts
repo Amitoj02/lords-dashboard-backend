@@ -1,11 +1,13 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { EventStatus, MemberRole, MemberStatus } from '../common/enums';
+import { EventStatus, MemberRole, MemberStatus, RegimentDocumentSlug } from '../common/enums';
 import { RegimentEvent } from '../events/entities/event.entity';
 import { Member } from '../members/entities/member.entity';
+import { RegimentDocumentDto } from '../settings/dto/regiment-document.dto';
 import { RegimentProfileDto } from './dto/regiment-profile.dto';
 import { MembersByRole, RegimentStatsDto } from './dto/regiment-stats.dto';
+import { RegimentDocument } from './entities/regiment-document.entity';
 import { RegimentSettings } from './entities/regiment-settings.entity';
 import { Regiment } from './entities/regiment.entity';
 
@@ -35,6 +37,8 @@ export class RegimentsService {
     private readonly members: Repository<Member>,
     @InjectRepository(RegimentEvent)
     private readonly events: Repository<RegimentEvent>,
+    @InjectRepository(RegimentDocument)
+    private readonly documents: Repository<RegimentDocument>,
   ) {}
 
   /** Public profile of the single regiment, enriched with its member count. */
@@ -46,10 +50,28 @@ export class RegimentsService {
     ]);
     // The apply form is public, but GET /settings needs ManageSettings — so the
     // mercenary-track toggle rides on this profile, letting the form stop offering
-    // a track the service layer would refuse anyway (T-0137). A missing settings
-    // row defaults to true, matching the column default and the service guard.
-    const allowMercenaries = settings ? settings.allowMercenaries !== false : true;
-    return RegimentProfileDto.from(regiment, memberCount, allowMercenaries);
+    // a track the service layer would refuse anyway (T-0137). The landing and
+    // sign-in pages are anonymous too, so the presentation slice (T-0147) rides
+    // here for the same reason. A missing settings row degrades to the documented
+    // defaults inside the DTO rather than failing the page.
+    return RegimentProfileDto.from(regiment, memberCount, settings);
+  }
+
+  /**
+   * The public legal documents (T-0149), unauthenticated: `/terms`, `/privacy`
+   * and `/guidelines` are pages a visitor reaches before signing in, and the
+   * privacy policy is a Discord Developer ToS obligation.
+   *
+   * Always returns one entry per slug. A never-edited document comes back with
+   * `body: null`, which the SPA renders as its shipped fallback copy — so this
+   * endpoint can never be the reason a legal page renders blank.
+   */
+  async getDocuments(): Promise<RegimentDocumentDto[]> {
+    const regiment = await this.resolveRegiment();
+    const rows = await this.documents.find({ where: { regimentId: regiment.id } });
+    return Object.values(RegimentDocumentSlug).map((slug) =>
+      RegimentDocumentDto.from(slug, rows.find((row) => row.slug === slug) ?? null),
+    );
   }
 
   /**

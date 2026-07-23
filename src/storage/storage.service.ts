@@ -97,6 +97,28 @@ const TARGET_POLICY: Record<StorageTarget, TargetPolicy> = {
     maxImageMb: DEFAULT_MAX_IMAGE_MB,
     capability: Capability.SubmitToGallery,
   },
+  // Public-facing page backgrounds (T-0148). These are full-bleed photographs
+  // behind a scrim, so they get the generous banner cap rather than the icon
+  // cap — but the default raster set only (no SVG: an SVG background would be
+  // rendered as a CSS `url()`, not through the <img> secure-static-mode path
+  // that makes SVG safe for rank/medal icons).
+  [StorageTarget.RegimentHeroBanner]: {
+    kinds: ['image'],
+    maxImageMb: 12,
+    capability: Capability.ManageRegimentDetails,
+  },
+  [StorageTarget.RegimentLoginBanner]: {
+    kinds: ['image'],
+    maxImageMb: 12,
+    capability: Capability.ManageRegimentDetails,
+  },
+  // A single decoded video frame (T-0152) — same permission as the submission
+  // it belongs to, with a small cap because it is one still image.
+  [StorageTarget.GalleryPoster]: {
+    kinds: ['image'],
+    maxImageMb: 4,
+    capability: Capability.SubmitToGallery,
+  },
 };
 
 /**
@@ -485,6 +507,17 @@ export class StorageService {
         return `ranks/${reg}/`;
       case StorageTarget.Gallery:
         return `gallery/${reg}/${this.requireMember(user)}/`;
+      case StorageTarget.GalleryPoster:
+        // Deliberately a sub-path of the Gallery prefix. A Gallery key resolved
+        // as a poster fails the startsWith check; a poster key resolved as
+        // Gallery media leaves `posters/<uuid>.<ext>` as the remainder, which
+        // the `<uuid>.<ext>` shape check rejects. Neither can impersonate the
+        // other.
+        return `gallery/${reg}/${this.requireMember(user)}/posters/`;
+      case StorageTarget.RegimentHeroBanner:
+        return `regiments/${reg}/hero/`;
+      case StorageTarget.RegimentLoginBanner:
+        return `regiments/${reg}/login/`;
     }
   }
 

@@ -7,6 +7,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Public } from '../auth/decorators/public.decorator';
+import { RegimentDocumentDto } from '../settings/dto/regiment-document.dto';
 import { RegimentProfileDto } from './dto/regiment-profile.dto';
 import { RegimentStatsDto } from './dto/regiment-stats.dto';
 import { RegimentsService } from './regiments.service';
@@ -28,6 +29,20 @@ export class RegimentsController {
   @ApiNotFoundResponse({ description: 'No regiment has been provisioned' })
   getProfile(): Promise<RegimentProfileDto> {
     return this.regimentsService.getProfile();
+  }
+
+  @Public()
+  @Get('documents')
+  @ApiOperation({ summary: 'Get the public legal documents (terms, privacy, guidelines)' })
+  @ApiOkResponse({
+    description:
+      'One entry per slug. `body` is Markdown, or null when the document has never been ' +
+      'edited — in which case the client renders its shipped fallback copy.',
+    type: [RegimentDocumentDto],
+  })
+  @ApiNotFoundResponse({ description: 'No regiment has been provisioned' })
+  getDocuments(): Promise<RegimentDocumentDto[]> {
+    return this.regimentsService.getDocuments();
   }
 
   @Public()

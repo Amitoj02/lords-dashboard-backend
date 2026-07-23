@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { MemberRole, StorageTarget } from '../common/enums';
@@ -74,6 +75,7 @@ describe('MedalsService', () => {
     assertIconWithinDimensions: jest.fn().mockResolvedValue(undefined),
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
+  const discordSync = { enqueueRoleRelink: jest.fn().mockResolvedValue(null) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -106,6 +108,7 @@ describe('MedalsService', () => {
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: StorageService, useValue: storage },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
 
@@ -405,6 +408,43 @@ describe('MedalsService', () => {
         expect.objectContaining({ action: 'medal.update' }),
       );
     });
+
+    it('states WHY it fired, exactly like the rank ladder does (symmetric ledger)', async () => {
+      medalRepo.findOne.mockResolvedValue(buildMedal());
+
+      await service.linkDiscord(user(), 'medal-1', { discordRoleId: '123' }, null);
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'medal.update',
+          detail: 'Linked to Discord role 123.',
+        }),
+      );
+    });
+
+    it('fans out to holders of THIS medal only, carrying the replaced role', async () => {
+      medalRepo.findOne.mockResolvedValue(buildMedal({ discordRoleId: 'old-role', linked: true }));
+      discordSync.enqueueRoleRelink.mockResolvedValue({ batchId: 'batch-1', affected: 9 });
+
+      await service.linkDiscord(user(), 'medal-1', { discordRoleId: 'new-role' }, null);
+
+      expect(discordSync.enqueueRoleRelink).toHaveBeenCalledWith(
+        expect.objectContaining({
+          subject: 'medal',
+          subjectId: 'medal-1',
+          previousRoleId: 'old-role',
+          nextRoleId: 'new-role',
+        }),
+      );
+      const relinkRows = audit.record.mock.calls.filter(
+        (c) => (c[0] as { action: string }).action === 'discord.role.relink',
+      );
+      // ONE row for the whole action, never one per holder.
+      expect(relinkRows).toHaveLength(1);
+      expect(relinkRows[0][0]).toEqual(
+        expect.objectContaining({ detail: expect.stringContaining('9 member role updates') }),
+      );
+    });
   });
 
   describe('unlinkDiscord', () => {
@@ -422,6 +462,17 @@ describe('MedalsService', () => {
       expect(dto.linked).toBe(false);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'medal.update', detail: 'Unlinked from Discord role.' }),
+      );
+    });
+
+    it('fans out an unlink as a re-link to nothing, so holders LOSE the old role', async () => {
+      medalRepo.findOne.mockResolvedValue(buildMedal({ discordRoleId: 'old-role', linked: true }));
+      discordSync.enqueueRoleRelink.mockResolvedValue({ batchId: 'batch-1', affected: 3 });
+
+      await service.unlinkDiscord(user(), 'medal-1', null);
+
+      expect(discordSync.enqueueRoleRelink).toHaveBeenCalledWith(
+        expect.objectContaining({ previousRoleId: 'old-role', nextRoleId: null }),
       );
     });
   });

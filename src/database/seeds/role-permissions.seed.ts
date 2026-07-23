@@ -34,6 +34,10 @@ const MATRIX: Record<Capability, MemberRole[]> = {
   [Capability.RsvpToEvents]: ENROLLED,
   [Capability.ViewMembersDirectory]: ENROLLED,
   [Capability.ApplyToJoin]: [MemberRole.Applicant],
+  // Public presentation + legal copy (T-0145). Owner and Admin by default: it
+  // is a publishing right, not an ownership right, so it deliberately does NOT
+  // widen ManageSettings and can be granted onward from the admin matrix.
+  [Capability.ManageRegimentDetails]: ADMINS,
 };
 
 /**

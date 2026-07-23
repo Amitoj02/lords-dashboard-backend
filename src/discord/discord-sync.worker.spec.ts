@@ -7,6 +7,7 @@ import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
+import { DiscordSyncService } from './discord-sync.service';
 import { DiscordSyncWorker } from './discord-sync.worker';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
@@ -18,6 +19,7 @@ const job = (overrides: Partial<DiscordSyncJob> = {}): DiscordSyncJob => ({
   id: 'job-1',
   regimentId: 'regiment-1',
   jobType: DiscordSyncJobType.RoleAssign,
+  batchId: null,
   status: DiscordSyncJobStatus.Pending,
   payload: { discordUserId: 'u1', roleId: 'r1' },
   attempts: 0,
@@ -29,10 +31,30 @@ const job = (overrides: Partial<DiscordSyncJob> = {}): DiscordSyncJob => ({
   ...overrides,
 });
 
+/** The job types drain() caps per tick so a bulk fan-out cannot hog a tick. */
+const BULK = new Set<string>([
+  DiscordSyncJobType.RoleRelinkExpand,
+  DiscordSyncJobType.RoleRelinkApply,
+]);
+
 describe('DiscordSyncWorker', () => {
   let worker: DiscordSyncWorker;
 
   const jobsRepo = { find: jest.fn(), save: jest.fn((x) => Promise.resolve(x)) };
+
+  /**
+   * drain() asks for the bulk slice and the rest of the tick SEPARATELY, so the
+   * fake store answers by which side of the fairness split it is being asked
+   * for. Replaying one array for both queries would process every job twice.
+   */
+  const queue = (jobs: DiscordSyncJob[]): void => {
+    jobsRepo.find.mockImplementation((options?: { where?: { jobType?: { type?: string } } }) => {
+      const operator = options?.where?.jobType;
+      // `In([...])` is the bulk half; `Not(In([...]))` (or no filter) is the rest.
+      const wantsBulk = operator?.type === 'in';
+      return Promise.resolve(jobs.filter((j) => BULK.has(j.jobType) === wantsBulk));
+    });
+  };
   const connectionsRepo = {
     findOne: jest.fn().mockResolvedValue({ id: 'conn-1' }),
     create: jest.fn((x) => x),
@@ -54,6 +76,7 @@ describe('DiscordSyncWorker', () => {
     sendDirectMessage: jest.fn(),
   };
   const audit = { record: jest.fn() };
+  const sync = { expandRelinkPage: jest.fn().mockResolvedValue(0) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -72,6 +95,7 @@ describe('DiscordSyncWorker', () => {
         { provide: getRepositoryToken(AuditLogEntry), useValue: auditEntriesRepo },
         { provide: DiscordGateway, useValue: gateway },
         { provide: AuditService, useValue: audit },
+        { provide: DiscordSyncService, useValue: sync },
       ],
     }).compile();
     worker = module.get(DiscordSyncWorker);
@@ -79,7 +103,7 @@ describe('DiscordSyncWorker', () => {
 
   it('applies a due job through the gateway and records a successful operation', async () => {
     const j = job();
-    jobsRepo.find.mockResolvedValue([j]);
+    queue([j]);
     gateway.assignRole.mockResolvedValue(undefined);
 
     const processed = await worker.drain();
@@ -94,7 +118,7 @@ describe('DiscordSyncWorker', () => {
 
   it('reschedules a failed job with backoff while attempts remain', async () => {
     const j = job({ attempts: 0, maxAttempts: 5 });
-    jobsRepo.find.mockResolvedValue([j]);
+    queue([j]);
     gateway.assignRole.mockRejectedValue(new Error('rate limited'));
 
     await worker.drain();
@@ -107,7 +131,7 @@ describe('DiscordSyncWorker', () => {
 
   it('fails terminally after the last attempt: resolvable operation + audit row', async () => {
     const j = job({ attempts: 0, maxAttempts: 1 });
-    jobsRepo.find.mockResolvedValue([j]);
+    queue([j]);
     gateway.assignRole.mockRejectedValue(new Error('forbidden'));
 
     await worker.drain();
@@ -143,7 +167,7 @@ describe('DiscordSyncWorker', () => {
       [50028, 'Invalid Role — managed/booster role'],
     ])('fails terminally on the FIRST attempt for code %i', async (code, message) => {
       const j = job({ attempts: 0, maxAttempts: 5 });
-      jobsRepo.find.mockResolvedValue([j]);
+      queue([j]);
       gateway.assignRole.mockRejectedValue(discordError(code, message));
 
       await worker.drain();
@@ -160,7 +184,7 @@ describe('DiscordSyncWorker', () => {
 
     it('still retries a transient failure that carries no Discord error code', async () => {
       const j = job({ attempts: 0, maxAttempts: 5 });
-      jobsRepo.find.mockResolvedValue([j]);
+      queue([j]);
       gateway.assignRole.mockRejectedValue(new Error('socket hang up'));
 
       await worker.drain();
@@ -171,7 +195,7 @@ describe('DiscordSyncWorker', () => {
 
     it('still retries a rate limit (429) — that is exactly what backoff is for', async () => {
       const j = job({ attempts: 0, maxAttempts: 5 });
-      jobsRepo.find.mockResolvedValue([j]);
+      queue([j]);
       gateway.assignRole.mockRejectedValue(discordError(429, 'Too Many Requests'));
 
       await worker.drain();
@@ -190,7 +214,7 @@ describe('DiscordSyncWorker', () => {
 
     it('does NOT touch Discord when applyBanRoleOnBan was turned off after enqueue', async () => {
       const j = banJob();
-      jobsRepo.find.mockResolvedValue([j]);
+      queue([j]);
       settingsRepo.findOne.mockResolvedValue({
         botEnabled: true,
         applyBanRoleOnBan: false,
@@ -204,7 +228,7 @@ describe('DiscordSyncWorker', () => {
     });
 
     it('does NOT touch Discord when the bot was disabled after enqueue', async () => {
-      jobsRepo.find.mockResolvedValue([banJob()]);
+      queue([banJob()]);
       settingsRepo.findOne.mockResolvedValue({
         botEnabled: false,
         applyBanRoleOnBan: true,
@@ -217,7 +241,7 @@ describe('DiscordSyncWorker', () => {
     });
 
     it('does NOT touch Discord when the Ban role was cleared after enqueue', async () => {
-      jobsRepo.find.mockResolvedValue([banJob()]);
+      queue([banJob()]);
       settingsRepo.findOne.mockResolvedValue({
         botEnabled: true,
         applyBanRoleOnBan: true,
@@ -230,7 +254,7 @@ describe('DiscordSyncWorker', () => {
     });
 
     it('strips managed roles and applies the Ban role when all gates pass', async () => {
-      jobsRepo.find.mockResolvedValue([banJob()]);
+      queue([banJob()]);
       settingsRepo.findOne.mockResolvedValue({
         botEnabled: true,
         applyBanRoleOnBan: true,
@@ -261,7 +285,7 @@ describe('DiscordSyncWorker', () => {
 
   it('does not re-open a job (or re-run its side effect) when post-success bookkeeping fails', async () => {
     const j = job();
-    jobsRepo.find.mockResolvedValue([j]);
+    queue([j]);
     gateway.assignRole.mockResolvedValue(undefined);
     // The side effect succeeds, but recording the operation fails.
     operationsRepo.save.mockRejectedValueOnce(new Error('bookkeeping db error'));
@@ -281,7 +305,7 @@ describe('DiscordSyncWorker', () => {
       });
 
     it('assigns the rank role AND every held-medal role', async () => {
-      jobsRepo.find.mockResolvedValue([roleSyncJob()]);
+      queue([roleSyncJob()]);
       membersRepo.findOne.mockResolvedValue({
         id: 'm1',
         regimentId: 'regiment-1',
@@ -300,7 +324,7 @@ describe('DiscordSyncWorker', () => {
     });
 
     it('never re-grants roles to a BANNED member (would undo the ban strip)', async () => {
-      jobsRepo.find.mockResolvedValue([roleSyncJob()]);
+      queue([roleSyncJob()]);
       membersRepo.findOne.mockResolvedValue({
         id: 'm1',
         regimentId: 'regiment-1',
@@ -316,7 +340,7 @@ describe('DiscordSyncWorker', () => {
     });
 
     it('does NOT strip the assign-only join/Guest role during reconcile', async () => {
-      jobsRepo.find.mockResolvedValue([roleSyncJob()]);
+      queue([roleSyncJob()]);
       membersRepo.findOne.mockResolvedValue({
         id: 'm1',
         regimentId: 'regiment-1',
@@ -333,6 +357,214 @@ describe('DiscordSyncWorker', () => {
       await worker.drain();
 
       expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'join-1');
+    });
+
+    it('strips a superseded RANK role even when the gateway cannot list current roles', async () => {
+      // Without this the fallback only swept medal roles, so every promotion
+      // left the old rank role in place whenever fetchMember returned null.
+      queue([roleSyncJob()]);
+      membersRepo.findOne.mockResolvedValue({
+        id: 'm1',
+        regimentId: 'regiment-1',
+        rankId: 'rank-2',
+        bannedAt: null,
+      });
+      ranksRepo.findOne.mockResolvedValue({ id: 'rank-2', discordRoleId: 'rank-role-2' });
+      ranksRepo.find.mockResolvedValue([
+        { discordRoleId: 'rank-role-1' },
+        { discordRoleId: 'rank-role-2' },
+      ]);
+      memberMedalsRepo.find.mockResolvedValue([]);
+      settingsRepo.findOne.mockResolvedValue({ joinRoleId: 'join-1' });
+      gateway.fetchMember.mockResolvedValue(null);
+
+      await worker.drain();
+
+      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-2');
+      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+      expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'rank-role-2');
+    });
+  });
+
+  describe('bulk role re-link (RoleRelinkApply)', () => {
+    const applyJob = (overrides: Record<string, unknown> = {}) =>
+      job({
+        jobType: DiscordSyncJobType.RoleRelinkApply,
+        batchId: 'batch-1',
+        payload: {
+          memberId: 'm1',
+          discordUserId: 'u1',
+          outgoingRoleId: 'old-role',
+          ...overrides,
+        },
+      });
+
+    const holder = (roles: string[] | null) => {
+      membersRepo.findOne.mockResolvedValue({
+        id: 'm1',
+        regimentId: 'regiment-1',
+        rankId: 'rank-1',
+        bannedAt: null,
+      });
+      ranksRepo.findOne.mockResolvedValue({ id: 'rank-1', discordRoleId: 'new-role' });
+      ranksRepo.find.mockResolvedValue([{ discordRoleId: 'new-role' }]);
+      memberMedalsRepo.find.mockResolvedValue([]);
+      settingsRepo.findOne.mockResolvedValue({
+        botEnabled: true,
+        syncRolesOnChange: true,
+        joinRoleId: 'join-1',
+      });
+      gateway.fetchMember.mockResolvedValue(roles === null ? null : { roles });
+      // clearAllMocks() keeps implementations, so a rejection set by a previous
+      // case would leak into this one.
+      gateway.assignRole.mockResolvedValue(undefined);
+      gateway.removeRole.mockResolvedValue(undefined);
+    };
+
+    it('leaves the member WITH the new role and WITHOUT the previous one', async () => {
+      queue([applyJob()]);
+      holder(['old-role']);
+
+      await worker.drain();
+
+      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'new-role');
+      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'old-role');
+    });
+
+    it('strips ONLY the outgoing role — unrelated manual roles survive', async () => {
+      // The previous role is no longer in the rank/medal mapping, so it is not
+      // in the managed set; carrying it on the payload is what makes it
+      // strippable, and it must not widen the strip to anything else.
+      queue([applyJob()]);
+      holder(['old-role', 'some-manual-role', 'join-1']);
+
+      await worker.drain();
+
+      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'old-role');
+      expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'some-manual-role');
+      expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'join-1');
+    });
+
+    it('is idempotent: an already-correct member produces ZERO Discord calls', async () => {
+      queue([applyJob()]);
+      holder(['new-role']);
+
+      await worker.drain();
+
+      expect(gateway.assignRole).not.toHaveBeenCalled();
+      expect(gateway.removeRole).not.toHaveBeenCalled();
+    });
+
+    it('skips a BANNED member entirely (the ban strip owns their roles)', async () => {
+      queue([applyJob()]);
+      holder(['old-role']);
+      membersRepo.findOne.mockResolvedValue({
+        id: 'm1',
+        regimentId: 'regiment-1',
+        rankId: 'rank-1',
+        bannedAt: new Date(),
+      });
+
+      await worker.drain();
+
+      expect(gateway.assignRole).not.toHaveBeenCalled();
+      expect(gateway.removeRole).not.toHaveBeenCalled();
+    });
+
+    it('does NOT touch Discord when role syncing was turned off after enqueue', async () => {
+      // The gates are re-checked at DRAIN time, not only at enqueue: a fan-out
+      // spans minutes and the operator must be able to stop it by switching off.
+      queue([applyJob()]);
+      holder(['old-role']);
+      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, syncRolesOnChange: false });
+
+      await worker.drain();
+
+      expect(gateway.assignRole).not.toHaveBeenCalled();
+      expect(gateway.removeRole).not.toHaveBeenCalled();
+    });
+
+    it('strips the outgoing role WITHOUT a blind sweep when the gateway cannot list roles', async () => {
+      queue([applyJob()]);
+      holder(null);
+
+      await worker.drain();
+
+      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'old-role');
+      expect(gateway.removeRole).toHaveBeenCalledTimes(1);
+    });
+
+    it('treats Unknown Role (10011) on the strip as permanent — no retries', async () => {
+      const j = applyJob();
+      queue([j]);
+      holder(['old-role']);
+      gateway.removeRole.mockRejectedValue(
+        Object.assign(new Error('Unknown Role'), { code: 10011 }),
+      );
+
+      await worker.drain();
+
+      expect(j.status).toBe(DiscordSyncJobStatus.Failed);
+      expect(j.attempts).toBe(1);
+    });
+
+    it('keeps the per-member flood out of the operations ledger and the audit trail', async () => {
+      // 600 members would otherwise mean 600 ledger rows (burying the bot-status
+      // screen) and, on a role-hierarchy failure, 600 mirrored channel messages.
+      queue([applyJob()]);
+      holder(['old-role']);
+
+      await worker.drain();
+
+      expect(operationsRepo.create).not.toHaveBeenCalled();
+
+      jest.clearAllMocks();
+      const failing = applyJob();
+      failing.maxAttempts = 1;
+      queue([failing]);
+      holder(['old-role']);
+      gateway.assignRole.mockRejectedValue(new Error('boom'));
+
+      await worker.drain();
+
+      // A failure still needs an admin, so it stays in the resolvable ledger —
+      // only the per-member audit row (and its Discord mirror) is suppressed.
+      expect(operationsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ success: false, resolvable: true }),
+      );
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('shared-queue fairness', () => {
+    it('never lets a bulk fan-out consume the whole tick', async () => {
+      // A 600-job re-link sits at the head of a createdAt-ordered queue for
+      // minutes; announcements, decision DMs and welcomes behind it must not.
+      const bulk = Array.from({ length: 40 }, (_, i) =>
+        job({
+          id: `bulk-${i}`,
+          jobType: DiscordSyncJobType.RoleRelinkApply,
+          batchId: 'batch-1',
+          createdAt: new Date(Date.now() - 60_000),
+          payload: { memberId: 'm1', discordUserId: 'u1', outgoingRoleId: null },
+        }),
+      );
+      const announce = job({
+        id: 'announce-1',
+        jobType: DiscordSyncJobType.Announce,
+        createdAt: new Date(),
+        payload: { channelId: 'c1', content: 'hello' },
+      });
+      queue([...bulk, announce]);
+      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, syncRolesOnChange: true });
+      membersRepo.findOne.mockResolvedValue(null);
+      gateway.sendChannelMessage.mockResolvedValue(undefined);
+
+      await worker.drain();
+
+      // The announcement queued LAST still went out in this very tick.
+      expect(gateway.sendChannelMessage).toHaveBeenCalledWith('c1', 'hello');
+      expect(announce.status).toBe(DiscordSyncJobStatus.Succeeded);
     });
   });
 
@@ -353,7 +585,7 @@ describe('DiscordSyncWorker', () => {
         status: DiscordSyncJobStatus.Processing,
         jobType: DiscordSyncJobType.Announce,
       });
-      jobsRepo.find.mockResolvedValue([roleSync, announce]);
+      queue([roleSync, announce]);
 
       await reap();
 

@@ -297,6 +297,172 @@ describe('EventsService', () => {
     });
   });
 
+  describe('timestamp resolution (T-0156)', () => {
+    /** A wall-clock payload exactly as the authoring form posts it (no offset). */
+    const naiveDto = (): CreateEventDto => ({ title: 'Muster', startsAt: '2026-07-20T21:57:00' });
+
+    /** The `startsAt` handed to the repository on create. */
+    const createdStart = (): string =>
+      (eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>).startsAt!.toISOString();
+
+    it('anchors a naive start to the event timezone, not the process timezone', async () => {
+      await service.create(user(), { ...naiveDto(), timezone: 'America/New_York' }, null);
+
+      // 21:57 in New York, not 21:57 in whatever zone the container happens to run.
+      expect(createdStart()).toBe('2026-07-21T01:57:00.000Z');
+    });
+
+    it('resolves the zone offset per date, so EST and EDT differ by an hour', async () => {
+      await service.create(
+        user(),
+        { title: 'Muster', startsAt: '2026-01-20T21:57:00', timezone: 'America/New_York' },
+        null,
+      );
+
+      // A hard-coded -04:00 would store 01:57Z here too.
+      expect(createdStart()).toBe('2026-01-21T02:57:00.000Z');
+    });
+
+    it('anchors to the regiment default timezone when the payload omits one', async () => {
+      settings.findOne.mockResolvedValue({
+        regimentId: REGIMENT,
+        eventDefaultTimezone: 'America/New_York',
+        eventDefaultNotifyBefore: null,
+      });
+
+      await service.create(user(), naiveDto(), null);
+
+      expect(createdStart()).toBe('2026-07-21T01:57:00.000Z');
+    });
+
+    it('keeps an offset-qualified start verbatim, ignoring the timezone field', async () => {
+      await service.create(
+        user(),
+        { ...naiveDto(), startsAt: '2026-07-20T21:57:00Z', timezone: 'America/New_York' },
+        null,
+      );
+
+      // API clients must still be able to post a true instant.
+      expect(createdStart()).toBe('2026-07-20T21:57:00.000Z');
+    });
+
+    it('stores the same instant whichever timezone the container runs in', async () => {
+      const original = process.env.TZ;
+      const stored: string[] = [];
+      try {
+        for (const tz of ['UTC', 'Europe/Berlin']) {
+          jest.clearAllMocks();
+          process.env.TZ = tz;
+          await service.create(user(), { ...naiveDto(), timezone: 'America/New_York' }, null);
+          stored.push(createdStart());
+        }
+      } finally {
+        process.env.TZ = original;
+      }
+
+      expect(stored).toEqual(['2026-07-21T01:57:00.000Z', '2026-07-21T01:57:00.000Z']);
+    });
+
+    it('re-resolves a PATCH of only endsAt against the event’s STORED timezone', async () => {
+      events.findOne.mockResolvedValue(buildEvent({ timezone: 'America/New_York' }));
+
+      const result = await service.update(
+        user(),
+        'event-1',
+        { endsAt: '2026-07-20T23:00:00' },
+        null,
+      );
+
+      expect(result.endsAt).toBe('2026-07-21T03:00:00.000Z');
+      // The untouched start keeps its stored instant.
+      expect(result.startsAt).toBe('2026-08-01T18:00:00.000Z');
+    });
+
+    it('resolves against the timezone sent in the SAME PATCH, not the stored one', async () => {
+      events.findOne.mockResolvedValue(buildEvent({ timezone: 'America/New_York' }));
+
+      const result = await service.update(
+        user(),
+        'event-1',
+        { startsAt: '2026-07-20T21:57:00', timezone: 'Europe/Berlin' },
+        null,
+      );
+
+      expect(result.startsAt).toBe('2026-07-20T19:57:00.000Z');
+      expect(result.timezone).toBe('Europe/Berlin');
+    });
+
+    it('does not move an already-stored instant when only the timezone changes', async () => {
+      events.findOne.mockResolvedValue(buildEvent({ timezone: 'UTC' }));
+
+      const result = await service.update(
+        user(),
+        'event-1',
+        { timezone: 'America/New_York' },
+        null,
+      );
+
+      // Re-labelling the zone is not a reschedule — the stored instant stands.
+      expect(result.startsAt).toBe('2026-08-01T18:00:00.000Z');
+      expect(result.timezone).toBe('America/New_York');
+    });
+  });
+
+  describe('server binding (T-0151)', () => {
+    it('collapses empty server fields to null on create', async () => {
+      const result = await service.create(
+        user(),
+        {
+          title: 'Muster',
+          startsAt: '2026-08-01T18:00:00.000Z',
+          serverName: '',
+          serverRegion: '',
+          serverPassword: '',
+        },
+        null,
+      );
+
+      const created = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
+      expect(created.serverName).toBeNull();
+      expect(created.serverRegion).toBeNull();
+      expect(created.serverPassword).toBeNull();
+      // The encryption transformer only nulls '' on the way to the DB, so without
+      // the collapse the just-saved entity would report a password it doesn't have.
+      expect(result.hasServerPassword).toBe(false);
+      expect(result.hasServerName).toBe(false);
+      expect(result.serverName).toBeNull();
+    });
+
+    it('clears a stored binding when a PATCH sends empty strings', async () => {
+      events.findOne.mockResolvedValue(buildEvent());
+
+      const result = await service.update(
+        user(),
+        'event-1',
+        { serverName: '', serverPassword: '' },
+        null,
+      );
+
+      const saved = eventTxRepo.save.mock.calls[0][0] as RegimentEvent;
+      expect(saved.serverName).toBeNull();
+      expect(saved.serverPassword).toBeNull();
+      expect(result.hasServerPassword).toBe(false);
+      // Region was not in the payload — clearing one field never clears another.
+      expect(saved.serverRegion).toBe('EU');
+    });
+
+    it('leaves the binding untouched when the PATCH omits it', async () => {
+      events.findOne.mockResolvedValue(buildEvent());
+
+      const result = await service.update(user(), 'event-1', { title: 'Renamed' }, null);
+
+      const saved = eventTxRepo.save.mock.calls[0][0] as RegimentEvent;
+      expect(saved.serverName).toBe('LORDS-1');
+      expect(saved.serverPassword).toBe('hunter2');
+      expect(result.hasServerPassword).toBe(true);
+    });
+  });
+
   describe('listPublic', () => {
     it('throws Forbidden when publicEvents is disabled', async () => {
       settings.find.mockResolvedValue([{ regimentId: REGIMENT, publicEvents: false }]);
@@ -333,6 +499,37 @@ describe('EventsService', () => {
         declined: 0,
         neutral: 0,
       });
+    });
+
+    it('still exposes the server presence flags publicly (T-0151)', async () => {
+      eventsQb.getManyAndCount.mockResolvedValue([
+        [buildEvent(), buildEvent({ id: 'event-2', serverName: null, serverPassword: null })],
+        2,
+      ]);
+
+      const result = await service.listPublic({ page: 1, limit: 20, skip: 0 });
+
+      // Without these the public calendar cannot distinguish a password-protected
+      // event from a plain one — the values themselves stay redacted.
+      expect(result.data[0].hasServerName).toBe(true);
+      expect(result.data[0].hasServerPassword).toBe(true);
+      expect(result.data[1].hasServerName).toBe(false);
+      expect(result.data[1].hasServerPassword).toBe(false);
+      expect(result.data[0].serverName).toBeUndefined();
+    });
+
+    it('treats an empty stored server binding as unset, not as a bound server', async () => {
+      // Rows written before the write-side collapse can hold ''; a truthy flag
+      // would make the SPA render a "server details" badge for nothing.
+      eventsQb.getManyAndCount.mockResolvedValue([
+        [buildEvent({ serverName: '', serverPassword: '' })],
+        1,
+      ]);
+
+      const result = await service.listPublic({ page: 1, limit: 20, skip: 0 });
+
+      expect(result.data[0].hasServerName).toBe(false);
+      expect(result.data[0].hasServerPassword).toBe(false);
     });
   });
 
@@ -372,6 +569,16 @@ describe('EventsService', () => {
       expect(result.data[0]).not.toHaveProperty('serverPassword');
     });
 
+    it('projects an empty stored server name as null, never as an empty string (T-0151)', async () => {
+      eventsQb.getManyAndCount.mockResolvedValue([[buildEvent({ serverName: '' })], 1]);
+
+      const result = await service.listForMember(user(), { page: 1, limit: 20, skip: 0 });
+
+      // One null check is the whole contract the SPA gets to rely on.
+      expect(result.data[0].serverName).toBeNull();
+      expect(result.data[0].hasServerName).toBe(false);
+    });
+
     it('redacts the server binding for a non-enrolled caller (no memberId)', async () => {
       eventsQb.getManyAndCount.mockResolvedValue([[buildEvent()], 1]);
 
@@ -385,8 +592,10 @@ describe('EventsService', () => {
       expect(result.data[0].serverRegion).toBeUndefined();
       expect(result.data[0].myRsvp).toBeUndefined();
       expect(result.data[0]).not.toHaveProperty('serverPassword');
-      // The presence flag is a member-only field — absent from the redacted view.
-      expect(result.data[0].hasServerPassword).toBeUndefined();
+      // The presence flags survive redaction (T-0151) — they carry no secret and
+      // the SPA branches on them.
+      expect(result.data[0].hasServerName).toBe(true);
+      expect(result.data[0].hasServerPassword).toBe(true);
     });
 
     it('applies the isArchived=false filter for a normal caller (T-0098)', async () => {

@@ -3,9 +3,11 @@ import { ApplicantType, ApplicationStatus } from '../../common/enums';
 import { Application } from '../entities/application.entity';
 
 /**
- * Client-facing projection of a recruitment application (T-0039 enlistment
- * fields). Deliberately omits internal/PII columns (discordIdentityId,
- * discordDmMessage) — never expose the raw entity.
+ * STAFF-facing projection of a recruitment application (T-0039 enlistment
+ * fields). Deliberately omits internal/PII columns (discordIdentityId) — never
+ * expose the raw entity. Carries the review-only fields (moderatorNote,
+ * declineReason, decider attribution); what the APPLICANT may see is the
+ * separate {@link ApplicantApplicationDto} (T-0154).
  */
 export class ApplicationDto {
   @ApiProperty({ format: 'uuid' })
@@ -56,6 +58,14 @@ export class ApplicationDto {
   @ApiProperty({ nullable: true })
   declineReason: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    description:
+      'The message the deciding officer wrote to the applicant (also DM’d on Discord). ' +
+      'Null when the decision used the default template or no decision has been taken.',
+  })
+  userMessage: string | null;
+
   @ApiProperty({ nullable: true, description: 'Member id created on approval' })
   promotedMemberId: string | null;
 
@@ -77,6 +87,19 @@ export class ApplicationDto {
 
   @ApiProperty({ nullable: true, description: 'Member id of the staffer who decided' })
   decidedByMemberId: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      'In-game name of the staffer who decided; null while pending and when their member row is gone.',
+  })
+  decidedByName: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Avatar URL of the staffer who decided (null when unknown or unset).',
+  })
+  decidedByAvatarUrl: string | null;
 
   @ApiProperty({ example: '2026-06-22T18:30:00.000Z', description: 'ISO submit timestamp' })
   submittedAt: string;
@@ -106,10 +129,16 @@ export class ApplicationDto {
    * needs the `promotedMember` relation loaded; the queue/detail queries eager-
    * load it. Callers that don't load it (self-service views) get the Discord
    * fallback (or null), which is fine — those views don't surface live identity.
+   *
+   * `decidedByName`/`decidedByAvatarUrl` need the `decidedByMember` relation
+   * loaded (T-0155). The FK is ON DELETE SET NULL and a decider can also be
+   * deleted from the roster, so a missing relation degrades to null attribution
+   * rather than failing the read.
    */
   static from(application: Application, blocked?: boolean): ApplicationDto {
     const member = application.promotedMember;
     const identity = application.discordIdentity;
+    const decidedBy = application.decidedByMember;
     return {
       id: application.id,
       applicantName: application.applicantName,
@@ -127,10 +156,13 @@ export class ApplicationDto {
       mutualEventsCount: application.mutualEventsCount,
       moderatorNote: application.moderatorNote,
       declineReason: application.declineReason,
+      userMessage: application.discordDmMessage,
       promotedMemberId: application.promotedMemberId,
       currentDisplayName: member?.inGameName ?? identity?.globalName ?? null,
       currentAvatarUrl: member?.avatarUrl ?? identity?.avatarUrl ?? null,
       decidedByMemberId: application.decidedByMemberId,
+      decidedByName: decidedBy?.inGameName ?? null,
+      decidedByAvatarUrl: decidedBy?.avatarUrl ?? null,
       submittedAt: application.submittedAt.toISOString(),
       decidedAt: application.decidedAt ? application.decidedAt.toISOString() : null,
       createdAt: application.createdAt.toISOString(),

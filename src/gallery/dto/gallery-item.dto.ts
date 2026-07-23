@@ -99,7 +99,10 @@ export class GalleryItemDto {
   @ApiProperty({ nullable: true, description: 'External link (for link-type items)' })
   linkUrl: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({
+    nullable: true,
+    description: 'Poster frame of a video submission (a stored asset URL), or null',
+  })
   thumbnailUrl: string | null;
 
   @ApiProperty({ enum: GalleryStatus })

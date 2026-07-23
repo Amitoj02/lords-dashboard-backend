@@ -80,6 +80,10 @@ export class GalleryFileInputDto {
  * Body for POST /api/gallery. The author + regiment are taken from the JWT, not
  * the body. New submissions land in the moderation queue (status Pending) unless
  * the regiment auto-approves trusted staff — that decision is made server-side.
+ * Every stored asset (files and the video poster frame) is referenced by its
+ * upload KEY, never by a URL: the server re-validates the key's namespace before
+ * persisting the resolved URL, so a caller cannot point a submission at bytes it
+ * does not own.
  */
 export class CreateGalleryItemDto {
   @ApiProperty({ minLength: 1, maxLength: 160, example: 'The charge at dawn' })
@@ -104,11 +108,15 @@ export class CreateGalleryItemDto {
   @MaxLength(512)
   linkUrl?: string;
 
-  @ApiPropertyOptional({ maxLength: 512 })
+  @ApiPropertyOptional({
+    maxLength: 512,
+    description:
+      'Storage key of the client-captured poster frame for a video (from POST /storage/uploads with target `gallery-poster`). A raw URL is not accepted — see CreateGalleryItemDto.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(512)
-  thumbnailUrl?: string;
+  posterKey?: string;
 
   @ApiPropertyOptional({ type: [GalleryFileInputDto] })
   @IsOptional()

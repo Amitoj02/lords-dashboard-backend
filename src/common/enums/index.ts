@@ -125,6 +125,13 @@ export enum DiscordSyncJobStatus {
   Processing = 'processing',
   Succeeded = 'succeeded',
   Failed = 'failed',
+  /**
+   * Terminal, operator-initiated stop (T-0160). Distinct from Failed so a
+   * cancelled bulk run is not reported as an error and does not burn retries.
+   * Work already applied before the cancel is NOT rolled back — the run is
+   * reported as partial.
+   */
+  Cancelled = 'cancelled',
 }
 
 /** The kind of work a Discord sync job performs when the worker drains it. */
@@ -142,6 +149,39 @@ export enum DiscordSyncJobType {
   AuditLog = 'audit.log',
   /** DM an applicant the outcome of a decision (approve/decline/hold). */
   ApplicationDecision = 'application.decision',
+  /**
+   * Cursor job for a rank/medal Discord-role re-link (T-0158). One row is
+   * enqueued per re-link; each drain expands a bounded PAGE of affected members
+   * into {@link RoleRelinkApply} jobs and then RE-ENQUEUES ITSELF with the next
+   * cursor. That keeps memory flat, makes the expansion resumable after a
+   * restart, and gives the operator a cancel point between pages — none of
+   * which a single up-front 600-row insert would offer.
+   */
+  RoleRelinkExpand = 'role.relink_expand',
+  /**
+   * Apply one member's share of a re-link (T-0158/T-0159). Deliberately NOT a
+   * plain RoleSync job: `reconcileRoles` recomputes the desired role set from
+   * the CURRENT rank/medal rows, so by the time it runs the outgoing role is
+   * already gone from the mapping and is structurally unknowable. This job type
+   * carries `outgoingRoleId` in its payload so the previously-linked role can be
+   * stripped as well as the new one applied.
+   */
+  RoleRelinkApply = 'role.relink_apply',
+}
+
+/**
+ * Terminal/at-rest state of a bulk Discord role re-link run (T-0160), derived
+ * from its job rows rather than held in memory, so it survives an API restart.
+ */
+export enum RoleRelinkBatchState {
+  /** Still expanding pages and/or applying per-member jobs. */
+  Running = 'running',
+  /** Fully drained. `failed` may still be non-zero - the counts tell the story. */
+  Completed = 'completed',
+  /** Cancelled after some members were already updated; those stay correct. */
+  Partial = 'partial',
+  /** Cancelled before any member was updated. */
+  Cancelled = 'cancelled',
 }
 
 export enum NotificationTone {
@@ -168,6 +208,30 @@ export enum StorageTarget {
   MedalImage = 'medal-image',
   RankImage = 'rank-image',
   Gallery = 'gallery',
+  /** Landing-page hero background (T-0148). */
+  RegimentHeroBanner = 'regiment-hero-banner',
+  /** Sign-in page background (T-0148). */
+  RegimentLoginBanner = 'regiment-login-banner',
+  /**
+   * A still frame captured from a directly-uploaded gallery video, used as the
+   * grid thumbnail (T-0152). Namespaced UNDER the submitter's gallery prefix but
+   * in a distinct `posters/` sub-path, so a poster key and a media key can never
+   * be swapped for one another (the key-shape check in
+   * {@link StorageService.resolveKeyToPublicUrl} rejects the crossover in both
+   * directions).
+   */
+  GalleryPoster = 'gallery-poster',
+}
+
+/**
+ * The admin-editable legal documents published on the public site (T-0149). The
+ * slug is the stable key AND the public route segment (`/terms`, `/privacy`,
+ * `/guidelines`), so it must never be renamed once shipped.
+ */
+export enum RegimentDocumentSlug {
+  Terms = 'terms',
+  Privacy = 'privacy',
+  Guidelines = 'guidelines',
 }
 
 /** Capability keys for the role/permission matrix (role_permissions.capability). */
@@ -186,4 +250,12 @@ export enum Capability {
   RsvpToEvents = 'rsvp_to_events',
   ViewMembersDirectory = 'view_members_directory',
   ApplyToJoin = 'apply_to_join',
+  /**
+   * Edit the regiment's public presentation (landing/login banners, quotes,
+   * overlay density) and the legal documents (T-0145). Deliberately separate
+   * from ManageSettings: this is the copy the whole internet sees, so it can be
+   * delegated to whoever writes it without also handing over ownership
+   * transfer, the permission matrix, or the Discord bot configuration.
+   */
+  ManageRegimentDetails = 'manage_regiment_details',
 }

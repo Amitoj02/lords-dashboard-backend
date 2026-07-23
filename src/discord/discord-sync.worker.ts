@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThanOrEqual, Repository } from 'typeorm';
+import { In, LessThanOrEqual, Not, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuditLogEntry } from '../audit/entities/audit-log-entry.entity';
 import {
@@ -14,6 +14,7 @@ import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
+import { DiscordSyncService } from './discord-sync.service';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
@@ -27,10 +28,26 @@ const IDEMPOTENT_JOB_TYPES = new Set<string>([
   DiscordSyncJobType.RoleSync,
   // Strip-roles + apply-Ban-role converges to the same end state on re-run.
   DiscordSyncJobType.MemberBanRole,
+  // Re-expanding a page re-inserts jobs that converge to the same end state,
+  // and applying a member's share of a re-link is a reconcile.
+  DiscordSyncJobType.RoleRelinkExpand,
+  DiscordSyncJobType.RoleRelinkApply,
 ]);
+
+/** The bulk fan-out job types (a rank/medal re-link, T-0158). */
+const BULK_JOB_TYPES = [DiscordSyncJobType.RoleRelinkExpand, DiscordSyncJobType.RoleRelinkApply];
 
 /** How many jobs to drain per tick (keeps well under Discord's rate limits). */
 const BATCH_SIZE = 20;
+/**
+ * Ceiling on how much of one tick a bulk fan-out may claim. The queue is drained
+ * in `createdAt` order, so without a reserve a 600-member re-link would sit at
+ * the head of it for minutes and every announcement, enlistment post, decision
+ * DM and welcome queued behind it would wait that long. Those are time-sensitive
+ * and a re-link is not, so the remaining slots are held for them (T-0158's own
+ * regression risk).
+ */
+const BULK_SLOTS_PER_TICK = 12;
 const TICK_MS = 3_000;
 /** Retry backoff by attempt number (ms): ~5s, 30s, 2m, 10m, 30m. */
 const BACKOFF_MS = [5_000, 30_000, 120_000, 600_000, 1_800_000];
@@ -111,6 +128,9 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     private readonly auditEntries: Repository<AuditLogEntry>,
     private readonly gateway: DiscordGateway,
     private readonly audit: AuditService,
+    // The enqueue side owns the re-link paging query; the cursor job's whole
+    // side effect is "expand one page", so the worker delegates it there.
+    private readonly sync: DiscordSyncService,
   ) {}
 
   onModuleInit(): void {
@@ -131,11 +151,29 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     if (this.draining) return 0;
     this.draining = true;
     try {
-      const due = await this.jobs.find({
-        where: { status: DiscordSyncJobStatus.Pending, scheduledAt: LessThanOrEqual(new Date()) },
+      const now = new Date();
+      // Fairness: the bulk fan-out is capped first, then the rest of the tick is
+      // filled with everything else and drained FIRST, so a 600-job re-link can
+      // never starve an announcement or a decision DM.
+      const bulk = await this.jobs.find({
+        where: {
+          status: DiscordSyncJobStatus.Pending,
+          scheduledAt: LessThanOrEqual(now),
+          jobType: In(BULK_JOB_TYPES),
+        },
         order: { createdAt: 'ASC' },
-        take: BATCH_SIZE,
+        take: BULK_SLOTS_PER_TICK,
       });
+      const interactive = await this.jobs.find({
+        where: {
+          status: DiscordSyncJobStatus.Pending,
+          scheduledAt: LessThanOrEqual(now),
+          jobType: Not(In(BULK_JOB_TYPES)),
+        },
+        order: { createdAt: 'ASC' },
+        take: BATCH_SIZE - bulk.length,
+      });
+      const due = [...interactive, ...bulk];
       let processed = 0;
       for (const job of due) {
         await this.processJob(job);
@@ -193,6 +231,30 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       case DiscordSyncJobType.RoleSync:
         await this.reconcileRoles(job.regimentId, String(p.memberId), String(p.discordUserId));
         return;
+      case DiscordSyncJobType.RoleRelinkExpand:
+        // Expands ONE page and re-enqueues itself; the gate re-check and the
+        // cancel check live with the paging query (DiscordSyncService).
+        await this.sync.expandRelinkPage(job);
+        return;
+      case DiscordSyncJobType.RoleRelinkApply: {
+        // ⚠️ Re-check the gate at EXECUTION time, exactly like the ban-role job:
+        // a fan-out spans minutes, and a re-link job that drains after the bot
+        // (or role syncing) was switched off must not touch Discord.
+        const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
+        if (!settings?.botEnabled || !settings?.syncRolesOnChange) {
+          this.logger.warn(
+            `Skipping queued re-link for ${String(p.discordUserId)}: botEnabled/syncRolesOnChange disabled since enqueue`,
+          );
+          return;
+        }
+        await this.reconcileRoles(
+          job.regimentId,
+          String(p.memberId),
+          String(p.discordUserId),
+          p.outgoingRoleId ?? null,
+        );
+        return;
+      }
       case DiscordSyncJobType.MemberBanRole: {
         // ⚠️ SENSITIVE: re-check the gate at EXECUTION time. A ban-role job can
         // sit in the queue (or in retry backoff) after being enqueued; if the
@@ -259,11 +321,18 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
    * role they hold that is no longer desired (e.g. the role of a revoked medal),
    * only ever touching roles in {@link managedRoleIds} — unmanaged roles are
    * never added or removed. Best-effort.
+   *
+   * `outgoingRoleId` is the extra role a bulk re-link must strip (T-0159). It
+   * cannot be derived: once the rank/medal points at its new role the previous
+   * one is no longer in the managed set, so the diff below would leave it on
+   * every holder forever. Only that one id is added to the strippable set —
+   * unrelated manual roles stay untouched.
    */
   private async reconcileRoles(
     regimentId: string,
     memberId: string,
     discordUserId: string,
+    outgoingRoleId: string | null = null,
   ): Promise<void> {
     const member = await this.members.findOne({
       where: { id: memberId, regimentId },
@@ -292,6 +361,8 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     const managed = await this.managedRoleIds(regimentId);
+    const strippable = new Set(managed);
+    if (outgoingRoleId) strippable.add(outgoingRoleId);
     // The join/Guest role is assign-only (owned by the guild-join flow); a role
     // reconcile must never strip it even though managedRoleIds lists it (that set
     // is also used by the ban strip, which SHOULD remove it). Only rank/medal
@@ -313,22 +384,40 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     if (current) {
-      // Remove any MANAGED role the member holds that is no longer desired,
+      // Remove any STRIPPABLE role the member holds that is no longer desired,
       // except the assign-only join/Guest role.
       for (const roleId of current) {
-        if (managed.has(roleId) && roleId !== joinRoleId && !desired.has(roleId)) {
+        if (strippable.has(roleId) && roleId !== joinRoleId && !desired.has(roleId)) {
           await this.gateway.removeRole(discordUserId, roleId);
         }
       }
-    } else {
-      // The gateway can't list current roles: explicitly strip the linked role of
-      // every medal the member does NOT currently hold, so a revoked medal's role
-      // is still removed (removeRole is idempotent for a role they never had).
-      const medals = await this.medals.find({ where: { regimentId } });
-      for (const medal of medals) {
-        if (medal.discordRoleId && !desired.has(medal.discordRoleId)) {
-          await this.gateway.removeRole(discordUserId, medal.discordRoleId);
-        }
+      return;
+    }
+
+    // The gateway can't list current roles, so nothing can be diffed and every
+    // strip has to be issued blind (removeRole is idempotent for a role the
+    // member never had).
+    if (outgoingRoleId) {
+      // A re-link knows EXACTLY which role left the mapping, so the blind sweep
+      // below is unnecessary — one targeted strip is both correct and ~25x
+      // cheaper against the rate budget on a 600-member fan-out.
+      if (outgoingRoleId !== joinRoleId && !desired.has(outgoingRoleId)) {
+        await this.gateway.removeRole(discordUserId, outgoingRoleId);
+      }
+      return;
+    }
+
+    // A plain reconcile has no such hint: strip the linked role of every rank
+    // and medal the member does NOT currently hold, so a revoked medal's role —
+    // and, since T-0159, a superseded RANK role — is still removed. Without the
+    // rank half, a promotion left the old rank role on the member every time
+    // fetchMember failed.
+    const ranks = await this.ranks.find({ where: { regimentId } });
+    const medals = await this.medals.find({ where: { regimentId } });
+    for (const linked of [...ranks, ...medals]) {
+      const roleId = linked.discordRoleId;
+      if (roleId && roleId !== joinRoleId && !desired.has(roleId)) {
+        await this.gateway.removeRole(discordUserId, roleId);
       }
     }
   }
@@ -417,15 +506,22 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         await this.markAuditSync(String(p.auditEntryId), DiscordSyncStatus.Failed);
       }
     }
-    await this.audit.record({
-      regimentId: job.regimentId,
-      action: 'discord.sync.failed',
-      actor: { type: AuditActorType.Bot, memberId: null, label: 'Lord Adjutant bot' },
-      detail: `${job.jobType} failed after ${job.attempts} attempts: ${error.message}`.slice(
-        0,
-        500,
-      ),
-    });
+    // One audit row per failed member would be 600 rows AND 600 mirrored channel
+    // messages for a single mispositioned bot role — the exact invalid-request
+    // storm PERMANENT_DISCORD_ERROR_CODES exists to avoid. A bulk failure is
+    // reported by the batch progress endpoint (with its error class) and stays
+    // resolvable in the operations ledger; only the log line is per-member.
+    if (!BULK_JOB_TYPES.includes(job.jobType as DiscordSyncJobType)) {
+      await this.audit.record({
+        regimentId: job.regimentId,
+        action: 'discord.sync.failed',
+        actor: { type: AuditActorType.Bot, memberId: null, label: 'Lord Adjutant bot' },
+        detail: `${job.jobType} failed after ${job.attempts} attempts: ${error.message}`.slice(
+          0,
+          500,
+        ),
+      });
+    }
     this.logger.error(`Job ${job.id} failed terminally: ${error.message}`);
   }
 
@@ -476,6 +572,16 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     resolvable: boolean,
   ): Promise<void> {
     const connection = await this.ensureConnection(job.regimentId);
+    // A 600-member fan-out would push ~600 success rows through the ledger the
+    // bot-status screen reads at ?limit=100, burying every other operation for
+    // days. Successful bulk jobs are counted by the batch progress endpoint
+    // (T-0160) instead; FAILURES still land here, because those are the rows an
+    // admin has to resolve.
+    if (success && BULK_JOB_TYPES.includes(job.jobType as DiscordSyncJobType)) {
+      connection.lastHeartbeatAt = new Date();
+      await this.connections.save(connection);
+      return;
+    }
     await this.operations.save(
       this.operations.create({
         discordConnectionId: connection.id,

@@ -13,6 +13,7 @@ import {
   GalleryStatus,
   GalleryType,
   MemberRole,
+  StorageTarget,
 } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
@@ -96,6 +97,15 @@ const buildSettings = (overrides: Partial<RegimentSettings> = {}): RegimentSetti
   eventDefaultStartTime: null,
   eventDefaultNotifyBefore: null,
   auditRetentionMonths: 12,
+  // Presentation (T-0146): unset means "render the shipped copy".
+  heroBannerUrl: null,
+  loginBannerUrl: null,
+  charterQuote: null,
+  charterQuoteAttribution: null,
+  loginQuote: null,
+  loginQuoteAttribution: null,
+  heroOverlayDensity: null,
+  loginOverlayDensity: null,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   updatedAt: new Date('2026-01-01T00:00:00.000Z'),
   ...overrides,
@@ -382,6 +392,78 @@ describe('GalleryService', () => {
       await service.submit(MEMBER_USER, { title: 't', type: GalleryType.Image }, null);
 
       expect(txTags.insert).not.toHaveBeenCalled();
+    });
+
+    it('stores a video poster frame resolved through the gallery-poster namespace (T-0152)', async () => {
+      const posterKey = `gallery/${REGIMENT}/member-1/posters/frame.png`;
+      const posterUrl = `https://cdn.example/${posterKey}`;
+      settings.findOne!.mockResolvedValue(buildSettings());
+      items.findOne!.mockResolvedValue(
+        buildItem({
+          status: GalleryStatus.Pending,
+          type: GalleryType.Video,
+          thumbnailUrl: posterUrl,
+        }),
+      );
+
+      const result = await service.submit(
+        MEMBER_USER,
+        { title: 't', type: GalleryType.Video, posterKey },
+        null,
+      );
+
+      expect(storage.resolveKeyToPublicUrl).toHaveBeenCalledWith(
+        MEMBER_USER,
+        posterKey,
+        StorageTarget.GalleryPoster,
+      );
+      const created = txItems.create!.mock.calls[0][0] as Partial<GalleryItem>;
+      expect(created.thumbnailUrl).toBe(posterUrl);
+      expect(result.thumbnailUrl).toBe(posterUrl);
+    });
+
+    it('a video submitted with no poster still succeeds and stores no thumbnail (T-0152)', async () => {
+      settings.findOne!.mockResolvedValue(buildSettings());
+      items.findOne!.mockResolvedValue(
+        buildItem({ status: GalleryStatus.Pending, type: GalleryType.Video }),
+      );
+
+      const result = await service.submit(
+        MEMBER_USER,
+        { title: 't', type: GalleryType.Video },
+        null,
+      );
+
+      const created = txItems.create!.mock.calls[0][0] as Partial<GalleryItem>;
+      expect(created.thumbnailUrl).toBeNull();
+      expect(result.thumbnailUrl).toBeNull();
+      expect(storage.resolveKeyToPublicUrl).not.toHaveBeenCalled();
+    });
+
+    it('an item thumbnail can only ever come from a poster-namespace key — a sibling media key is rejected (T-0152)', async () => {
+      settings.findOne!.mockResolvedValue(buildSettings());
+      // Mirrors StorageService: a key outside the target's prefix is a 400.
+      storage.resolveKeyToPublicUrl.mockImplementation((_u: unknown, key: string) => {
+        if (!key.startsWith(`gallery/${REGIMENT}/member-1/posters/`)) {
+          throw new BadRequestException('Uploaded key is outside the expected namespace');
+        }
+        return `https://cdn.example/${key}`;
+      });
+
+      await expect(
+        service.submit(
+          MEMBER_USER,
+          {
+            title: 't',
+            type: GalleryType.Video,
+            // A plain gallery media key: same member, sibling namespace.
+            posterKey: `gallery/${REGIMENT}/member-1/clip.mp4`,
+          },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      // The rejection lands before any row is written.
+      expect(dataSource.transaction).not.toHaveBeenCalled();
     });
   });
 
@@ -795,6 +877,21 @@ describe('GalleryService', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'gallery.delete' }),
       );
+    });
+
+    it('purges the poster frame too, so it cannot outlive the item (T-0152)', async () => {
+      const posterUrl = `https://cdn.example/gallery/${REGIMENT}/member-1/posters/frame.png`;
+      items.findOne!.mockResolvedValue(
+        buildItem({ type: GalleryType.Video, thumbnailUrl: posterUrl }),
+      );
+      files.find!.mockResolvedValue([
+        { url: `https://cdn.example/gallery/${REGIMENT}/member-1/clip.mp4` },
+      ]);
+
+      await service.remove(ADMIN_USER, 'gallery-1', null);
+
+      expect(storage.deleteObject).toHaveBeenCalledWith(posterUrl);
+      expect(storage.deleteObject).toHaveBeenCalledTimes(2);
     });
 
     it('author (non-moderator) can delete their own post (T-0121)', async () => {

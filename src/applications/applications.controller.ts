@@ -24,6 +24,7 @@ import { RequireCapability } from '../authz/decorators/require-capability.decora
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { Capability } from '../common/enums';
 import { ApplicationsService } from './applications.service';
+import { ApplicantApplicationDto } from './dto/applicant-application.dto';
 import { ApplicationDto } from './dto/application.dto';
 import { ApplicationQueryDto } from './dto/application-query.dto';
 import { ApproveApplicationDto } from './dto/approve-application.dto';
@@ -40,14 +41,17 @@ import { UpdateMyApplicationDto } from './dto/update-my-application.dto';
 export class ApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
 
+  // The three applicant-facing routes (submit, GET /mine, PATCH /mine) answer with
+  // the applicant projection: the staff ApplicationDto carries review-only fields
+  // (moderator note, decline reason, decider) that must never reach them (T-0154).
   @Post()
   @RequireCapability(Capability.ApplyToJoin)
   @ApiOperation({ summary: 'Submit a recruitment application (Applicant role only)' })
-  @ApiCreatedResponse({ type: ApplicationDto, description: 'The created application.' })
+  @ApiCreatedResponse({ type: ApplicantApplicationDto, description: 'The created application.' })
   submit(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: CreateApplicationDto,
-  ): Promise<ApplicationDto> {
+  ): Promise<ApplicantApplicationDto> {
     return this.applicationsService.submit(user, dto);
   }
 
@@ -64,11 +68,11 @@ export class ApplicationsController {
   @Patch('mine')
   @RequireCapability(Capability.ApplyToJoin)
   @ApiOperation({ summary: "Edit the caller's own PENDING application (applicant)" })
-  @ApiOkResponse({ type: ApplicationDto, description: 'The updated application.' })
+  @ApiOkResponse({ type: ApplicantApplicationDto, description: 'The updated application.' })
   updateMine(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: UpdateMyApplicationDto,
-  ): Promise<ApplicationDto> {
+  ): Promise<ApplicantApplicationDto> {
     return this.applicationsService.updateMine(user, dto);
   }
 

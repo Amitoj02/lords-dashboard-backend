@@ -147,10 +147,52 @@ Relationships: 1—1 `regiment_settings`, 1—1 `discord_connections`; 1—* eve
 | `event_default_start_time` | varchar(5) NULL | `HH:mm` |
 | `event_default_notify_before` | json | minutes array, e.g. `[60,15]` |
 | `audit_retention_months` | int DEFAULT 12 | drives anonymisation job |
+| `hero_banner_url` | varchar(512) NULL | landing hero background (T-0146) |
+| `login_banner_url` | varchar(512) NULL | sign-in page background |
+| `charter_quote` / `charter_quote_attribution` | varchar(500) / varchar(120) NULL | landing pull-quote |
+| `login_quote` / `login_quote_attribution` | varchar(500) / varchar(120) NULL | sign-in pull-quote |
+| `hero_overlay_density` / `login_overlay_density` | tinyint unsigned NULL | scrim opacity, 0—100 |
 | `created_at` / `updated_at` | timestamp | |
+
+> **The presentation columns are nullable with NO default on purpose.** NULL means "unset — render
+> the shipped copy", and the SPA owns those defaults. That is what keeps a never-configured install,
+> and an install whose API call fails, from rendering a blank hero. They are written only through
+> `PATCH /api/settings/presentation`, which is gated on `manage_regiment_details` rather than
+> `manage_settings`. Banner columns hold the RESOLVED public URL; the request DTO carries a storage
+> `…Key` that `StorageService.resolveKeyToPublicUrl` validates against its namespace first.
 
 > Conflicts noted across UI passes (gallery limits 50MB/20 vs 12MB/80MB/10) are resolved to the
 > design-reference values above and are runtime-configurable, so either can be set without a migration.
+
+#### `regiment_documents`
+The admin-authored legal documents published on the public site (T-0149): terms of service, privacy
+policy, community guidelines.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `regiment_id` | char(12) PK | FK → `regiments.id` ON DELETE CASCADE |
+| `slug` | varchar(32) PK | `terms` \| `privacy` \| `guidelines` — also the public route segment |
+| `body` | mediumtext NULL | **Markdown**, never HTML. NULL ⇒ never edited |
+| `updated_by_member_id` | char(12) NULL | FK → `members.id` ON DELETE **SET NULL** |
+| `updated_at` | datetime(6) | |
+
+> Deliberately its own table rather than three columns on `regiment_settings`: these are long TEXT
+> bodies and `regiment_settings` is the single row every settings read joins. It also gives each
+> document its own edit attribution, which a shared row could not.
+>
+> **A missing row is normal, not an error** — it means "never edited", and the SPA renders its shipped
+> fallback copy. Production is legally required to serve a privacy policy, so an absent or blank
+> document must still render a real page. There is deliberately **no seeder**: a tier-2 seeder would
+> never run against the already-provisioned production database, and a tier-1 one would fight the
+> fallback contract.
+>
+> `body` is Markdown rendered client-side through a strict, escape-first renderer, so an admin account
+> cannot inject executable markup into an unauthenticated page. Reads are anonymous
+> (`GET /api/regiment/documents`); writes need `manage_regiment_details` and are audited — the audit
+> row records the slug and the body *length*, not the bodies, so the ledger is not flooded.
+>
+> The `ON DELETE SET NULL` on the author is intentional: a departed author must not take the
+> regiment's privacy policy with them.
 
 #### `accent_tones` (lookup)
 | Column | Type | Notes |
@@ -307,10 +349,19 @@ Capabilities & **default grants** (Owner column is locked = always granted):
 | RSVP to events | ✔ | ✔ | ✔ | ✔ | ✔ | |
 | View members directory | ✔ | ✔ | ✔ | ✔ | ✔ | |
 | Apply to join | | | | | | ✔ |
+| Manage regiment details | ✔ | ✔ | | | | |
 
 > ⚠️ Stricter than the coarse `isAdmin` tier: **View audit log** and **Edit ranks & medals** are
 > Owner+Admin **only** (Moderator excluded); **Manage settings** is Owner only. Enforce from this table,
 > not from `role ∈ {Owner,Admin,Moderator}`.
+
+> **Manage regiment details** (`manage_regiment_details`, T-0145) is a *publishing* right, not an
+> ownership right: it governs the landing/sign-in presentation and the three legal documents — the copy
+> the whole internet sees — and deliberately grants nothing else. It is separate from **Manage settings**
+> so the person who writes the copy does not also receive ownership transfer, the permission matrix or
+> the Discord binding. Adding a capability needs no migration: `capability` is `varchar(60)`, and
+> `seedRolePermissions` is tier 1 but insert-only per row, so the new default grants back-fill onto a
+> live database while every admin edit survives untouched.
 
 #### `service_record_entries`
 Member promotion/award/service timeline (hardcoded in profile today).
@@ -632,6 +683,31 @@ Persist/serve the bot's reported status shape only. The single mutation is "reso
 | `success` | boolean NOT NULL | |
 | `resolvable` | boolean NOT NULL DEFAULT false | `needsResolve`; resolve flips it |
 
+#### `discord_sync_jobs` (transactional outbox)
+App mutations enqueue a job instead of calling Discord inline, so the API never blocks on — or is
+broken by — the gateway. Key columns beyond the obvious:
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `job_type` | varchar(40) | a `DiscordSyncJobType`; varchar, so a new type needs no migration |
+| `status` | enum | `pending` \| `processing` \| `succeeded` \| `failed` \| `cancelled` |
+| `batch_id` | char(36) NULL | groups every job of ONE bulk run (T-0158) |
+
+> **`batch_id`** ties together a bulk Discord role re-link: the cursor job, each of its re-enqueued
+> successors, and every per-member job it expands into. Progress and cancel (T-0160) are computed by
+> grouping on it rather than from in-memory state, so both survive an API restart. Index
+> `(regiment_id, batch_id, status)` exists specifically for that endpoint, which every open admin tab
+> polls — without it each poll would scan the whole outbox.
+>
+> **`cancelled` is distinct from `failed` on purpose:** an operator-stopped run is not an error and
+> must not burn retries or be reported as a failure. Work already applied before the cancel is NOT
+> rolled back; the run is reported as *partial*.
+>
+> A re-link expands in bounded, resumable pages rather than one large insert, so memory stays flat,
+> a killed process resumes from its cursor, and there is a cancel point between pages. The drain loop
+> reserves part of each tick for non-bulk job types so a 600-member fan-out cannot starve
+> time-sensitive work (welcome DMs, decision DMs, announcements) queued behind it.
+
 ---
 
 ## 4. Entity-relationship summary
@@ -639,6 +715,7 @@ Persist/serve the bot's reported status shape only. The single mutation is "reso
 ```
 regiments ─1:1─ regiment_settings
 regiments ─1:1─ discord_connections ─1:*─ bot_operations
+regiments ─1:*─ regiment_documents        (PK (regiment_id, slug); author SET NULL)
 regiments ─1:*─ {members, ranks, medals, events, gallery_items, applications,
                  audit_log_entries, notifications, service_record_entries, role_permissions}
 accent_tones ─1:*─ regiments (by key)

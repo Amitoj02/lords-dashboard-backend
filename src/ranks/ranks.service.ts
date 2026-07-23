@@ -9,6 +9,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { StorageTarget } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { StorageService } from '../storage/storage.service';
 import { CreateRankDto } from './dto/create-rank.dto';
@@ -44,6 +45,9 @@ export class RanksService {
     // AuditService is global; used by every mutation below.
     private readonly audit: AuditService,
     private readonly storage: StorageService,
+    // Re-linking a rank's Discord role has to reach every holder; the fan-out is
+    // enqueued through the outbox, never applied inline (T-0158).
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   /**
@@ -211,7 +215,8 @@ export class RanksService {
 
   /**
    * Bind a rank to a Discord role: set its snowflake id (and optionally a fresh
-   * display name) and mark it linked. Audited as a rank.update.
+   * display name) and mark it linked. Audited as a rank.update, and — when the
+   * role actually changed — followed by a bulk re-link of every holder.
    */
   async linkDiscord(
     user: AuthenticatedUser,
@@ -221,6 +226,7 @@ export class RanksService {
   ): Promise<RankDto> {
     const rank = await this.loadRank(id, user.regimentId);
     const before = this.snapshot(rank);
+    const previousRoleId = rank.discordRoleId;
 
     rank.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) rank.discordRoleName = dto.discordRoleName;
@@ -237,9 +243,10 @@ export class RanksService {
       after: this.snapshot(saved),
       detail: `Linked to Discord role ${saved.discordRoleId}.`,
     });
+    const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
     const holders = await this.holderCountFor(saved.id);
-    return RankDto.from(saved, holders);
+    return RankDto.from(saved, holders, relinkBatchId);
   }
 
   /**
@@ -250,6 +257,7 @@ export class RanksService {
   async unlinkDiscord(user: AuthenticatedUser, id: string, ip: string | null): Promise<RankDto> {
     const rank = await this.loadRank(id, user.regimentId);
     const before = this.snapshot(rank);
+    const previousRoleId = rank.discordRoleId;
 
     rank.discordRoleId = null;
     rank.discordRoleName = null;
@@ -266,9 +274,51 @@ export class RanksService {
       after: this.snapshot(saved),
       detail: 'Unlinked from Discord role.',
     });
+    // An unlink is a re-link to nothing: holders must LOSE the old role.
+    const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
     const holders = await this.holderCountFor(saved.id);
-    return RankDto.from(saved, holders);
+    return RankDto.from(saved, holders, relinkBatchId);
+  }
+
+  /**
+   * Queue the bulk re-link for a rank whose Discord role mapping just changed
+   * and record the ONE audit row that stands for the whole action — who did it,
+   * which role left, which arrived, and how many members are affected. A row per
+   * member would bury the ladder's history under a single admin click.
+   *
+   * No-ops silently when nothing was queued (bot disabled, role syncing off, the
+   * role did not actually change, or the rank has no linked holders).
+   */
+  private async fanOutRelink(
+    user: AuthenticatedUser,
+    rank: Rank,
+    previousRoleId: string | null,
+    ip: string | null,
+  ): Promise<string | null> {
+    const batch = await this.discordSync.enqueueRoleRelink({
+      regimentId: user.regimentId,
+      subject: 'rank',
+      subjectId: rank.id,
+      subjectLabel: rank.name,
+      previousRoleId,
+      nextRoleId: rank.discordRoleId,
+    });
+    if (!batch) return null;
+
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'discord.role.relink',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'rank', id: rank.id, label: rank.name },
+      before: { discordRoleId: previousRoleId },
+      after: { discordRoleId: rank.discordRoleId },
+      detail:
+        `Re-linked from Discord role ${previousRoleId ?? '(none)'} to ` +
+        `${rank.discordRoleId ?? '(none)'}; queued ${batch.affected} member role updates ` +
+        `(batch ${batch.batchId}).`,
+    });
+    return batch.batchId;
   }
 
   /** Load a regiment-scoped rank or throw 404. */

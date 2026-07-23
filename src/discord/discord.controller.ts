@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -29,6 +30,7 @@ import {
 } from './dto/discord-connection.dto';
 import { DiscordBotSettingsDto, UpdateDiscordSettingsDto } from './dto/discord-settings.dto';
 import { BindGuildDto, DiscordOperationsQueryDto, SimulateJoinDto } from './dto/discord-inputs.dto';
+import { RoleRelinkProgressDto } from './dto/role-relink.dto';
 
 /**
  * Discord bot control API. Everything requires ManageSettings. The bot has no
@@ -115,6 +117,35 @@ export class DiscordController {
     @Req() req: Request,
   ): Promise<{ enqueued: number }> {
     return this.discordService.resync(user, req.ip ?? null);
+  }
+
+  @Get('relink/:batchId')
+  // Gated on EditRanksMedals, not ManageSettings: this reports on an action the
+  // rank/medal editor just took, and they must be able to watch it finish
+  // without also holding the bot-configuration capability.
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({ summary: 'Progress (or the terminal summary) of a bulk Discord role re-link' })
+  @ApiOkResponse({ type: RoleRelinkProgressDto })
+  getRelinkProgress(
+    @Param('batchId', ParseUUIDPipe) batchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<RoleRelinkProgressDto> {
+    return this.discordService.getRelinkProgress(user, batchId);
+  }
+
+  @Post('relink/:batchId/cancel')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({
+    summary: 'Stop a bulk re-link; members already updated stay updated (reported as partial)',
+  })
+  @ApiOkResponse({ type: RoleRelinkProgressDto })
+  cancelRelink(
+    @Param('batchId', ParseUUIDPipe) batchId: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ): Promise<RoleRelinkProgressDto> {
+    return this.discordService.cancelRelink(user, batchId, req.ip ?? null);
   }
 
   @Get('operations')
