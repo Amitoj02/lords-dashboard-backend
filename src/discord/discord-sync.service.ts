@@ -64,6 +64,11 @@ export interface RoleRelinkInput {
   previousRoleId: string | null;
   /** The role it is mapped to now (null = unlinked). */
   nextRoleId: string | null;
+  /**
+   * The acting member, excluded from the fan-out so linking a rank/medal can never
+   * grant the actor a role (LDA-H1). Null when the actor is not a roster member.
+   */
+  excludeMemberId?: string | null;
 }
 
 /** What {@link DiscordSyncService.enqueueRoleRelink} hands back to its caller. */
@@ -386,6 +391,7 @@ export class DiscordSyncService {
         outgoingRoleId: input.previousRoleId,
         incomingRoleId: input.nextRoleId,
         cursor: null,
+        excludeMemberId: input.excludeMemberId ?? null,
       };
       await this.insertJob(input.regimentId, DiscordSyncJobType.RoleRelinkExpand, payload, batchId);
       return { batchId, affected };
@@ -460,11 +466,17 @@ export class DiscordSyncService {
     regimentId: string;
     subject: RoleRelinkSubject;
     subjectId: string;
+    excludeMemberId?: string | null;
   }): SelectQueryBuilder<Member> {
     const qb = this.members
       .createQueryBuilder('member')
       .innerJoin(DiscordIdentity, 'identity', 'identity.id = member.discordIdentityId')
       .where('member.regimentId = :regimentId', { regimentId: input.regimentId });
+    // Never fan out to the actor themselves (LDA-H1): a rank/medal editor must not
+    // be able to grant themselves a role by linking a rank/medal they hold.
+    if (input.excludeMemberId) {
+      qb.andWhere('member.id != :excludeMemberId', { excludeMemberId: input.excludeMemberId });
+    }
     if (input.subject === 'rank') {
       qb.andWhere('member.rankId = :subjectId', { subjectId: input.subjectId });
     } else {
@@ -483,7 +495,7 @@ export class DiscordSyncService {
 
   /** One keyset page of affected holders, ordered by member id (the cursor). */
   private relinkHolderPage(
-    input: { subject: RoleRelinkSubject; subjectId: string },
+    input: { subject: RoleRelinkSubject; subjectId: string; excludeMemberId?: string | null },
     regimentId: string,
     cursor: string | null,
   ): Promise<{ memberId: string; discordUserId: string }[]> {

@@ -392,6 +392,26 @@ describe('SettingsService', () => {
       expect(audit.record).not.toHaveBeenCalled();
     });
 
+    it('REJECTS granting a privileged capability to the Applicant role (LDA-M17)', async () => {
+      permissionRepo.find.mockResolvedValue(ownerCoreRows());
+
+      await expect(
+        service.updatePermissions(
+          user(),
+          {
+            changes: [
+              { role: MemberRole.Applicant, capability: Capability.ManageSettings, granted: true },
+            ],
+          },
+          null,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(permissionRepo.save).not.toHaveBeenCalled();
+      expect(authz.invalidate).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
     it('ALLOWS a benign grant (ModerateGallery → Member): persists, invalidates, audits', async () => {
       permissionRepo.find.mockResolvedValue(ownerCoreRows());
       // The write runs inside a transaction; wire the manager repo so we can

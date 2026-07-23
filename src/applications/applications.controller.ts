@@ -10,6 +10,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiBearerAuth,
   ApiCreatedResponse,
@@ -45,6 +46,9 @@ export class ApplicationsController {
   // the applicant projection: the staff ApplicationDto carries review-only fields
   // (moderator note, decline reason, decider) that must never reach them (T-0154).
   @Post()
+  // A submission spawns Discord announce jobs + a DB row; throttle it hard so a
+  // single applicant identity cannot flood the enlistment channel (LDA-H3).
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @RequireCapability(Capability.ApplyToJoin)
   @ApiOperation({ summary: 'Submit a recruitment application (Applicant role only)' })
   @ApiCreatedResponse({ type: ApplicantApplicationDto, description: 'The created application.' })

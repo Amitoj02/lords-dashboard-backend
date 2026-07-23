@@ -31,6 +31,11 @@ on:
         required: true
         default: latest
 
+# Least privilege (LDA-M15): this workflow reaches production over SSH and never
+# needs to write back to the repo via GITHUB_TOKEN.
+permissions:
+  contents: read
+
 concurrency:
   # A second deploy must never start while one is mid-roll. lords-deploy also
   # holds an flock on the box, so this is belt and braces — but failing fast in
@@ -44,13 +49,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 15
+    # Bind the workflow_dispatch inputs to env vars rather than interpolating
+    # ${{ inputs.* }} directly into `run:` shell bodies (LDA-L4). They are already
+    # regex-validated and only dispatchable by write-access users, but passing them
+    # through the environment removes the shell-injection surface entirely.
+    env:
+      API_TAG: ${{ inputs.api_tag }}
+      WEB_TAG: ${{ inputs.web_tag }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
 
     steps:
       - name: Validate tags
         # The box re-validates these — it must, since it cannot trust its caller —
         # but rejecting a typo here costs two seconds instead of a failed deploy.
         run: |
-          for tag in "${{ inputs.api_tag }}" "${{ inputs.web_tag }}"; do
+          for tag in "$API_TAG" "$WEB_TAG"; do
             if ! [[ "$tag" =~ ^([0-9a-f]{7,40}|latest)$ ]]; then
               echo "::error::'$tag' is not a commit sha or 'latest'"
               exit 1
@@ -73,14 +86,14 @@ jobs:
         # runner can roll images and nothing else.
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 \
-            deploy@${{ secrets.DEPLOY_HOST }} \
-            "deploy both ${{ inputs.api_tag }} ${{ inputs.web_tag }}"
+            "deploy@$DEPLOY_HOST" \
+            "deploy both $API_TAG $WEB_TAG"
 
       - name: Report state
         if: always()
         run: |
           ssh -o BatchMode=yes -o ConnectTimeout=20 \
-            deploy@${{ secrets.DEPLOY_HOST }} status || true
+            "deploy@$DEPLOY_HOST" status || true
 
       - name: Summary
         if: always()
@@ -90,8 +103,8 @@ jobs:
             echo ''
             echo "| image | tag |"
             echo "|---|---|"
-            echo "| lords-api | \`${{ inputs.api_tag }}\` |"
-            echo "| lords-web | \`${{ inputs.web_tag }}\` |"
+            echo "| lords-api | \`$API_TAG\` |"
+            echo "| lords-web | \`$WEB_TAG\` |"
             echo ''
             echo 'Rollback: re-run this workflow with the previous pair of tags.'
           } >> "$GITHUB_STEP_SUMMARY"

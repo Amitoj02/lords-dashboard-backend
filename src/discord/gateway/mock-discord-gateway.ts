@@ -26,14 +26,22 @@ export interface RecordedMessage {
   messageId: string;
 }
 
-/** A canned role set so listRoles()/status look realistic in the wizard. */
+/** A canned role set so listRoles()/status look realistic in the wizard. All are
+ * non-privileged and below the bot (position 20), so they model roles that WOULD
+ * pass link validation (LDA-H1) once a real bot runs. */
 const MOCK_ROLES: DiscordRole[] = [
-  { id: '900000000000000001', name: 'Guest', position: 1 },
-  { id: '900000000000000002', name: 'Member', position: 2 },
-  { id: '900000000000000003', name: 'Sergeant', position: 5 },
-  { id: '900000000000000004', name: 'Officer', position: 8 },
-  { id: '900000000000000006', name: 'Banned', position: 3 },
-  { id: '900000000000000005', name: 'Lord Adjutant (bot)', position: 20 },
+  { id: '900000000000000001', name: 'Guest', position: 1, permissions: '0', managed: false },
+  { id: '900000000000000002', name: 'Member', position: 2, permissions: '0', managed: false },
+  { id: '900000000000000003', name: 'Sergeant', position: 5, permissions: '0', managed: false },
+  { id: '900000000000000004', name: 'Officer', position: 8, permissions: '0', managed: false },
+  { id: '900000000000000006', name: 'Banned', position: 3, permissions: '0', managed: false },
+  {
+    id: '900000000000000005',
+    name: 'Lord Adjutant (bot)',
+    position: 20,
+    permissions: '0',
+    managed: false,
+  },
 ];
 
 /** A canned text-channel set so the channel picker looks realistic in the wizard. */

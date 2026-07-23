@@ -34,6 +34,17 @@ const YOUTUBE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — title/duration are stable
 const FETCH_TIMEOUT_MS = 5000;
 /** Cap the proxied thumbnail size so a large/hostile og:image can't exhaust memory. */
 const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024;
+/**
+ * The ONLY Content-Types this public proxy will serve back on the app origin
+ * (LDA-M18): safe raster formats. Notably excludes image/svg+xml, which is
+ * scriptable, and anything non-image.
+ */
+const SAFE_THUMBNAIL_CONTENT_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+]);
 /** Bound the in-memory thumbnail cache so it can't grow without limit (LRU-ish). */
 const MAX_THUMBNAIL_CACHE = 256;
 
@@ -192,10 +203,15 @@ export class MediaEmbedService {
         this.logger.warn(`Rejected redirected Medal thumbnail host for ${clipId}: ${res.url}`);
         return null;
       }
-      const contentType = res.headers.get('content-type') ?? 'image/jpeg';
-      if (!contentType.startsWith('image/')) {
+      // Pin the served Content-Type to a safe RASTER allowlist rather than
+      // reflecting whatever the upstream declared (LDA-M18). A bare
+      // startsWith('image/') would pass image/svg+xml, which the proxy would then
+      // serve from the app origin as scriptable content.
+      const upstream = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+      if (!SAFE_THUMBNAIL_CONTENT_TYPES.has(upstream)) {
         return null;
       }
+      const contentType = upstream;
       // Reject oversized images up front (Content-Length) and while reading (bounded).
       const declared = Number(res.headers.get('content-length') ?? '0');
       if (declared > MAX_THUMBNAIL_BYTES) {

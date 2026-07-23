@@ -12,6 +12,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS deps
 WORKDIR /app
+# Disable @scarf/scarf install-time telemetry (LDA-L2): a prod dependency whose
+# postinstall otherwise phones home on every image build.
+ENV SCARF_ANALYTICS=false
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -33,6 +36,7 @@ RUN npm run build
 # ── Production dependencies only ─────────────────────────────────────────────
 FROM node:22-alpine AS prod-deps
 WORKDIR /app
+ENV SCARF_ANALYTICS=false
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 

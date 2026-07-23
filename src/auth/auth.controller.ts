@@ -1,10 +1,12 @@
 import { randomBytes } from 'crypto';
 import { Controller, Get, HttpCode, HttpStatus, Post, Query, Req, Res } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CookieOptions, Request, Response } from 'express';
 import { AppConfig } from '../config/configuration';
 import { AuthService } from './auth.service';
+import { AllowWhenGated } from './decorators/allow-when-gated.decorator';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { Public } from './decorators/public.decorator';
 import { CurrentUserDto } from './dto/current-user.dto';
@@ -25,6 +27,9 @@ export class AuthController {
   ) {}
 
   @Public()
+  // Stricter than the global 120/min: the sign-in surface is a favourite target
+  // for credential/OAuth abuse and warrants its own tighter bucket (LDA-H3).
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get('discord')
   @ApiOperation({
     summary: 'Begin Discord OAuth2 sign-in (302 redirect to Discord)',
@@ -34,12 +39,18 @@ export class AuthController {
       'Ignored by the real Discord flow.',
   })
   discordLogin(@Query('as') persona: string | undefined, @Res() res: Response): void {
+    // The `?as=` persona selector is ONLY meaningful when the Discord mock is
+    // active. Ignore it entirely otherwise (LDA-C1) so it can never influence the
+    // real OAuth flow — belt-and-suspenders on top of the real service ignoring it.
+    const mockActive = this.config.get('discord', { infer: true }).mock;
+    const requestedPersona = mockActive ? persona : undefined;
     const state = randomBytes(16).toString('hex');
     res.cookie(STATE_COOKIE, state, this.cookieOptions(10 * 60 * 1000));
-    res.redirect(this.authService.getLoginUrl(state, persona));
+    res.redirect(this.authService.getLoginUrl(state, requestedPersona));
   }
 
   @Public()
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get('discord/callback')
   @ApiOperation({
     summary: 'Discord OAuth2 callback — upserts the identity + member and issues a JWT',
@@ -65,8 +76,15 @@ export class AuthController {
       const result = await this.authService.signInWithDiscord(code, req.ip ?? null);
       res.cookie(TOKEN_COOKIE, result.token, this.cookieOptions(7 * 24 * 60 * 60 * 1000));
       const url = new URL(frontend.authSuccessRedirect);
-      url.searchParams.set('token', result.token);
-      url.searchParams.set('isMember', String(result.isMember));
+      // Deliver the JWT in the URL FRAGMENT, never the query string (LDA-H4). A
+      // fragment is not transmitted to any server, so the token never lands in the
+      // nginx/Caddy/Cloudflare access logs or in the `Referer` header on the first
+      // same-origin navigation. The SPA reads it from location.hash and scrubs it
+      // immediately with history.replaceState. The httpOnly cookie set above is the
+      // primary, JS-inaccessible handoff. JWT chars (base64url + '.') are all
+      // fragment-safe, so no percent-encoding is needed.
+      url.hash = `token=${result.token}&isMember=${String(result.isMember)}`;
+      res.setHeader('Referrer-Policy', 'no-referrer');
       res.redirect(url.toString());
     } catch {
       res.redirect(`${frontend.authFailureRedirect}?error=auth_failed`);
@@ -74,6 +92,8 @@ export class AuthController {
   }
 
   @Get('me')
+  // Reachable even when gated (LDA-M5): the SPA needs it to render the gate screen.
+  @AllowWhenGated()
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'The current authenticated user (CurrentUser projection)' })
   @ApiOkResponse({ type: CurrentUserDto })
@@ -82,6 +102,8 @@ export class AuthController {
   }
 
   @Get('guild-status')
+  // Reachable even when gated (LDA-M5): the caller uses it to re-check membership.
+  @AllowWhenGated()
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Re-check whether the caller is still in the regiment Discord guild',
@@ -97,6 +119,8 @@ export class AuthController {
   }
 
   @Post('logout')
+  // Reachable even when gated (LDA-M5): a gated user must still be able to sign out.
+  @AllowWhenGated()
   @HttpCode(HttpStatus.OK)
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Clear the session cookie and invalidate outstanding tokens' })

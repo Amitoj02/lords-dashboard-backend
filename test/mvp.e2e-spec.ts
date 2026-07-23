@@ -102,9 +102,11 @@ describe('MVP core loop (e2e)', () => {
     const state = new URL(start.headers.location).searchParams.get('state');
     const cb = await agent.get(`/api/auth/discord/callback?code=c&state=${state}`).expect(302);
     const redirect = new URL(cb.headers.location);
+    // Token + isMember are in the URL fragment now (LDA-H4), not the query string.
+    const frag = new URLSearchParams(redirect.hash.replace(/^#/, ''));
     return {
-      token: redirect.searchParams.get('token') as string,
-      isMember: redirect.searchParams.get('isMember') === 'true',
+      token: frag.get('token') as string,
+      isMember: frag.get('isMember') === 'true',
     };
   }
 

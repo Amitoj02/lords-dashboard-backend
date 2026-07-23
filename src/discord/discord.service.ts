@@ -12,6 +12,7 @@ import {
 } from '../common/enums';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordOnboardingService } from './discord-onboarding.service';
+import { DiscordRolePolicyService } from './discord-role-policy.service';
 import { DiscordSyncService } from './discord-sync.service';
 import {
   BotOperationDto,
@@ -72,6 +73,7 @@ export class DiscordService {
     private readonly gateway: DiscordGateway,
     private readonly sync: DiscordSyncService,
     private readonly onboarding: DiscordOnboardingService,
+    private readonly rolePolicy: DiscordRolePolicyService,
     private readonly audit: AuditService,
   ) {}
 
@@ -176,6 +178,13 @@ export class DiscordService {
     const settings = await this.sync.getSettings(user.regimentId);
     const banGateWas = settings.applyBanRoleOnBan;
     const guildGateWas = settings.guildGateEnabled;
+
+    // The join/ban roles are assigned by the bot, so they are subject to the same
+    // link validation as rank/medal roles (LDA-H1): a manage_settings holder must
+    // not be able to point joinRoleId/banRoleId at a privileged or above-bot role.
+    // Only non-empty values are checked (empty clears the mapping).
+    if (dto.joinRoleId) await this.rolePolicy.assertRoleLinkable(dto.joinRoleId);
+    if (dto.banRoleId) await this.rolePolicy.assertRoleLinkable(dto.banRoleId);
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;

@@ -11,6 +11,7 @@ import {
 } from '../common/enums';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordOnboardingService } from './discord-onboarding.service';
+import { DiscordRolePolicyService } from './discord-role-policy.service';
 import { DiscordService } from './discord.service';
 import { DiscordSyncService } from './discord-sync.service';
 import { BotOperation } from './entities/bot-operation.entity';
@@ -66,6 +67,8 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
   const gateway = { getStatus: jest.fn(), listRoles: jest.fn(), listChannels: jest.fn() };
   const sync = { getSettings: jest.fn() };
   const onboarding = { onMemberJoin: jest.fn() };
+  // LDA-H1: role-link validation. Default "linkable" so existing settings paths pass.
+  const rolePolicy = { assertRoleLinkable: jest.fn().mockResolvedValue(undefined) };
   const audit = { record: jest.fn() };
 
   /** Point the grouped progress query at a fixed set of buckets. */
@@ -112,6 +115,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
         { provide: DiscordGateway, useValue: gateway },
         { provide: DiscordSyncService, useValue: sync },
         { provide: DiscordOnboardingService, useValue: onboarding },
+        { provide: DiscordRolePolicyService, useValue: rolePolicy },
         { provide: AuditService, useValue: audit },
       ],
     }).compile();

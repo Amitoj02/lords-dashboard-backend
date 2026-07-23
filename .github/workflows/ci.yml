@@ -13,6 +13,13 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege (LDA-M15): CI only needs to read the repo. Once the repo is
+# public, push/pull_request become runnable by outside contributors, so the
+# GITHUB_TOKEN must not inherit the repo-default write scopes. No secret is
+# referenced by the backend job, and secrets are not passed to fork PRs.
+permissions:
+  contents: read
+
 jobs:
   # ── Lint + unit + e2e + build the API against a real MySQL 8 ───────────────
   backend:

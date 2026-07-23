@@ -154,6 +154,22 @@ export class GuildMembershipService implements OnModuleInit {
   }
 
   /**
+   * Server-side enforcement of the guild gate (LDA-M5). Returns true when this
+   * caller must be denied: the gate is on, they do not hold the exempting
+   * capability, and their STORED verdict is a confirmed non-member. Reads only the
+   * persisted verdict (never probes the bot), so it is safe on the request path —
+   * the same fail-open rule as /auth/me applies: an unconfirmed/degraded verdict is
+   * treated as a member, so a bot outage never locks anyone out.
+   */
+  async isGatedOut(user: AuthenticatedUser): Promise<boolean> {
+    if (!(await this.isGateEnabled(user.regimentId))) return false;
+    if (await this.authz.can(user.regimentId, user.role, Capability.ManageSettings)) return false;
+    const identity = await this.identities.findOne({ where: { id: user.identityId } });
+    const verdict = GuildMembershipService.verdictOf(identity);
+    return !verdict.guildMember && !verdict.degraded;
+  }
+
+  /**
    * Whether the gate is on for this regiment, and whether this caller bypasses
    * it. Exemption is unconditional for manage_settings holders: they are the
    * only people who can fix a bad invite, an unbound guild or a disconnected

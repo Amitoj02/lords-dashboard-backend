@@ -29,6 +29,30 @@ import { SettingsDto } from './dto/settings.dto';
 import { UpdatePermissionsDto } from './dto/update-permissions.dto';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 
+/**
+ * Capabilities too sensitive to ever grant to the Applicant role (LDA-M17):
+ * management, moderation, and secret-reveal powers. Applicant is the implicit
+ * role of every authenticated identity-only session, so granting one of these to
+ * it would hand the power to every signed-in Discord user.
+ *
+ * Deliberately EXCLUDED: the participation / read capabilities (apply, RSVP,
+ * submit/view gallery, view directory) AND `manage_regiment_details` — the last
+ * one is public-copy/legal-document authoring that T-0145 split out of
+ * `manage_settings` precisely so it can be delegated (e.g. to a copy writer)
+ * without handing over the control panel. Delegating any of these to Applicant is
+ * a policy choice, not a privilege escalation.
+ */
+const PRIVILEGED_CAPABILITIES: ReadonlySet<Capability> = new Set([
+  Capability.ManageSettings,
+  Capability.ManageRoles,
+  Capability.ViewAuditLog,
+  Capability.EditRanksMedals,
+  Capability.ManageApplications,
+  Capability.ManageEvents,
+  Capability.ModerateGallery,
+  Capability.RevealEventPasswords,
+]);
+
 /** Editable keys that live on the regiment row (identity/branding/Discord invite). */
 const REGIMENT_KEYS = [
   'name',
@@ -385,6 +409,18 @@ export class SettingsService {
       }
       if (!capabilityValues.includes(change.capability)) {
         throw new BadRequestException(`Unknown capability: ${change.capability}`);
+      }
+      // Applicant is the implicit fallback role for EVERY authenticated
+      // identity-only session, so granting it a privileged capability would widen
+      // that capability to all signed-in Discord users (LDA-M17). Forbid it.
+      if (
+        change.granted &&
+        change.role === MemberRole.Applicant &&
+        PRIVILEGED_CAPABILITIES.has(change.capability as Capability)
+      ) {
+        throw new BadRequestException(
+          `The '${change.capability}' capability cannot be granted to the Applicant role`,
+        );
       }
     }
 

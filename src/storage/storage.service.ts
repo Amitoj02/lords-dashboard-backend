@@ -29,19 +29,19 @@ const IMAGE_TYPES: Record<string, string> = {
   'image/webp': 'webp',
 };
 /**
- * Rank/medal icon targets accept PNG + SVG + WebP (T-0124; WebP added T-0130) —
- * not the JPEG of the default raster set. WebP is a compact raster icon format,
- * capped to the same 250px-per-side dimension as PNG (see
- * {@link StorageService.assertIconWithinDimensions}). SVGs are served safely
- * because the frontend renders every icon through an <img> tag, where the browser
- * processes SVG in "secure static mode": no script execution, no external
- * fetches. Objects are also served from a SEPARATE storage origin that holds no
- * app session, so even a directly-navigated malicious SVG cannot touch the app's
- * tokens.
+ * Rank/medal icon targets accept raster icons only: PNG + WebP (T-0124; WebP added
+ * T-0130) — not the JPEG of the default raster set. WebP is a compact raster icon
+ * format, capped to the same 250px-per-side dimension as PNG (see
+ * {@link StorageService.assertIconWithinDimensions}).
+ *
+ * SVG was REMOVED (LDA-M3): an <img>-rendered SVG is inert, but a member with
+ * EditRanksMedals could still host a scripted SVG that executes when the object is
+ * directly navigated on the brand CDN subdomain. Dropping it here means such a
+ * body can never be uploaded to an icon target in the first place. (The server
+ * never re-reads uploaded bytes, so type enforcement has to live at the presign.)
  */
 const ICON_IMAGE_TYPES: Record<string, string> = {
   'image/png': 'png',
-  'image/svg+xml': 'svg',
   'image/webp': 'webp',
 };
 const VIDEO_TYPES: Record<string, string> = {
@@ -422,8 +422,9 @@ export class StorageService {
     const dims = parsePngDimensions(header) ?? parseWebpDimensions(header);
     if (!dims) {
       // Not a PNG/WebP we can parse — the MIME allow-list already restricts icons
-      // to PNG/SVG/WebP, so this is an unreadable/corrupt object; leave it to fail
-      // on use.
+      // to PNG/WebP (SVG dropped, LDA-M3), so this is an unreadable/corrupt object;
+      // leave it to fail on use. (The .svg short-circuit above still covers any
+      // legacy SVG icon uploaded before M3.)
       return;
     }
     if (dims.width > maxPx || dims.height > maxPx) {

@@ -192,26 +192,22 @@ describe('StorageService', () => {
       expect(ticket.requiredContentType).toBe('image/png');
     });
 
-    it('accepts an svg for a medal image and stores it with a .svg key', async () => {
-      const ticket = await service.createUploadTicket(user(), {
-        target: StorageTarget.MedalImage,
-        contentType: 'image/svg+xml',
-        sizeBytes: 1024,
-      });
-      expect(ticket.key).toMatch(new RegExp(`^medals/${REGIMENT}/[0-9a-f-]+\\.svg$`));
-      expect(ticket.requiredContentType).toBe('image/svg+xml');
+    it('rejects an svg for a medal image (LDA-M3: no scripted SVG on the brand CDN)', async () => {
+      await expect(
+        service.createUploadTicket(user(), {
+          target: StorageTarget.MedalImage,
+          contentType: 'image/svg+xml',
+          sizeBytes: 1024,
+        }),
+      ).rejects.toThrow();
     });
 
-    it('reports PNG+SVG+WebP accepted types for the icon targets in getPolicy (T-0130)', () => {
+    it('reports PNG+WebP accepted types for the icon targets in getPolicy (T-0130; SVG dropped M3)', () => {
       const byTarget = Object.fromEntries(service.getPolicy().targets.map((t) => [t.target, t]));
 
       for (const target of [StorageTarget.RankImage, StorageTarget.MedalImage]) {
-        expect(byTarget[target].acceptedMimeTypes).toEqual([
-          'image/png',
-          'image/svg+xml',
-          'image/webp',
-        ]);
-        expect(byTarget[target].acceptedExtensions).toEqual(['png', 'svg', 'webp']);
+        expect(byTarget[target].acceptedMimeTypes).toEqual(['image/png', 'image/webp']);
+        expect(byTarget[target].acceptedExtensions).toEqual(['png', 'webp']);
       }
 
       // Other image targets still report the default raster set.

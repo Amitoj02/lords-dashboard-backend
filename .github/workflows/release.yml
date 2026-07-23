@@ -22,6 +22,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Top-level least-privilege default (LDA-M15); the build job re-grants the narrow
+# packages:write it needs to publish to GHCR.
+permissions:
+  contents: read
+
 concurrency:
   # Never let two releases race to publish `latest`.
   group: release-${{ github.ref }}

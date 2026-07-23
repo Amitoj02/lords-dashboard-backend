@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { DiscordRolePolicyService } from '../discord/discord-role-policy.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -75,6 +76,8 @@ describe('RanksService', () => {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
   const discordSync = { enqueueRoleRelink: jest.fn().mockResolvedValue(null) };
+  // LDA-H1: link validation. Default to "linkable" so the existing happy paths pass.
+  const rolePolicy = { assertRoleLinkable: jest.fn().mockResolvedValue(undefined) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -113,6 +116,7 @@ describe('RanksService', () => {
         { provide: AuditService, useValue: audit },
         { provide: StorageService, useValue: storage },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: DiscordRolePolicyService, useValue: rolePolicy },
       ],
     }).compile();
 

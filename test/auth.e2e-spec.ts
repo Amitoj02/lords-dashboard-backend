@@ -67,9 +67,12 @@ describe('Auth (e2e)', () => {
       .get(`/api/auth/discord/callback?code=fake-code&state=${state}`)
       .expect(302);
     const redirect = new URL(cb.headers.location);
+    // The JWT + isMember are handed off in the URL FRAGMENT now, not the query
+    // string (LDA-H4) — a fragment never reaches server logs or the Referer header.
+    const frag = new URLSearchParams(redirect.hash.replace(/^#/, ''));
     return {
-      token: redirect.searchParams.get('token') as string,
-      isMember: redirect.searchParams.get('isMember') === 'true',
+      token: frag.get('token') as string,
+      isMember: frag.get('isMember') === 'true',
     };
   }
 

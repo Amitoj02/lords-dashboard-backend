@@ -123,9 +123,11 @@ describe('Post-MVP feature modules (e2e)', () => {
     const state = new URL(start.headers.location).searchParams.get('state');
     const cb = await agent.get(`/api/auth/discord/callback?code=c&state=${state}`).expect(302);
     const redirect = new URL(cb.headers.location);
+    // Token + isMember are in the URL fragment now (LDA-H4), not the query string.
+    const frag = new URLSearchParams(redirect.hash.replace(/^#/, ''));
     return {
-      token: redirect.searchParams.get('token') as string,
-      isMember: redirect.searchParams.get('isMember') === 'true',
+      token: frag.get('token') as string,
+      isMember: frag.get('isMember') === 'true',
     };
   }
 
@@ -506,14 +508,12 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(byTarget['member-banner'].maxImageMb).toBe(12);
       expect(byTarget['event-banner'].maxImageMb).toBe(12);
       expect(byTarget['gallery'].maxVideoMb).toBe(80);
-      // Icon targets accept PNG + SVG (T-0124) and WebP (T-0130); jpeg stays excluded.
-      expect(byTarget['rank-image'].acceptedExtensions).toEqual(['png', 'svg', 'webp']);
-      expect(byTarget['medal-image'].acceptedMimeTypes).toEqual([
-        'image/png',
-        'image/svg+xml',
-        'image/webp',
-      ]);
+      // Icon targets accept PNG (T-0124) + WebP (T-0130); jpeg excluded, and SVG
+      // was dropped for security (LDA-M3).
+      expect(byTarget['rank-image'].acceptedExtensions).toEqual(['png', 'webp']);
+      expect(byTarget['medal-image'].acceptedMimeTypes).toEqual(['image/png', 'image/webp']);
       expect(byTarget['rank-image'].acceptedMimeTypes).not.toContain('image/jpeg');
+      expect(byTarget['rank-image'].acceptedMimeTypes).not.toContain('image/svg+xml');
       // Non-icon image targets keep the raster set.
       expect(byTarget['member-avatar'].acceptedExtensions).toEqual(['png', 'jpg', 'webp']);
     });

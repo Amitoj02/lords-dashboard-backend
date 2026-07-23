@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ExecutionContext, Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 
 /** The subset of the request we need; avoids an `any`-typed parameter. */
@@ -22,16 +22,39 @@ interface ProxyAwareRequest {
  * logging, banning and rate limiting, while a hardcoded hop count silently breaks
  * the moment a proxy is added or removed.
  *
- * `CF-Connecting-IP` is set by Cloudflare and, because the origin only accepts
- * traffic through Cloudflare (Authenticated Origin Pulls), cannot be spoofed by a
- * client. When absent — local dev, direct origin access — this falls back to
- * `req.ip`, so behaviour outside production is unchanged.
+ * ⚠️ `CF-Connecting-IP` is a CLIENT-SUPPLIABLE header. Trusting it is only safe
+ * when the origin provably cannot be reached except through Cloudflare — i.e.
+ * Authenticated Origin Pulls (mTLS) or a firewall pinning :443 to Cloudflare's IP
+ * ranges (LDA-H2). Without that, an attacker who reaches the origin directly
+ * (LDA-H3) sets a fresh CF-Connecting-IP per request and gets unlimited
+ * independent rate-limit buckets — and, because the in-memory store keys on that
+ * value, also grows throttler memory without bound.
+ *
+ * So the header is trusted ONLY when TRUST_CF_CONNECTING_IP=true, which the
+ * operator sets exactly once the Cloudflare-only-ingress control is enforced.
+ * Otherwise (default, and everywhere that control is not in place) the key is the
+ * socket peer `req.ip`, which cannot be forged.
  */
 @Injectable()
 export class CfAwareThrottlerGuard extends ThrottlerGuard {
+  private readonly trustCfHeader = process.env.TRUST_CF_CONNECTING_IP === 'true';
+
+  /**
+   * Disable rate limiting under NODE_ENV=test. The e2e suites drive many requests
+   * from a single client IP into one shared bucket, so per-route limits (added for
+   * LDA-H3) would produce flaky 429s that have nothing to do with what a suite is
+   * asserting. There are no throttle-specific e2e tests to preserve.
+   */
+  protected shouldSkip(_context: ExecutionContext): Promise<boolean> {
+    return Promise.resolve(process.env.NODE_ENV === 'test');
+  }
+
   protected getTracker(req: ProxyAwareRequest): Promise<string> {
     const cfIp = req.headers?.['cf-connecting-ip'];
-    const tracker = typeof cfIp === 'string' && cfIp.length > 0 ? cfIp : (req.ip ?? 'unknown');
+    const tracker =
+      this.trustCfHeader && typeof cfIp === 'string' && cfIp.length > 0
+        ? cfIp
+        : (req.ip ?? 'unknown');
     return Promise.resolve(tracker);
   }
 }

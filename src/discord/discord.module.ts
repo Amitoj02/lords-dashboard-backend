@@ -10,6 +10,7 @@ import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordController } from './discord.controller';
 import { DiscordOnboardingService } from './discord-onboarding.service';
+import { DiscordRolePolicyService } from './discord-role-policy.service';
 import { DiscordService } from './discord.service';
 import { DiscordSyncService } from './discord-sync.service';
 import { DiscordSyncWorker } from './discord-sync.worker';
@@ -55,6 +56,7 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
     DiscordSyncService,
     DiscordSyncWorker,
     DiscordOnboardingService,
+    DiscordRolePolicyService,
     {
       // Swap the real discord.js gateway for the in-process mock when botMock is
       // set. Consumers depend on the DiscordGateway abstract class token, so
@@ -67,6 +69,6 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
       inject: [ConfigService],
     },
   ],
-  exports: [DiscordSyncService, DiscordGateway],
+  exports: [DiscordSyncService, DiscordGateway, DiscordRolePolicyService],
 })
 export class DiscordModule {}

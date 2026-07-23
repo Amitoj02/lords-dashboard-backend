@@ -87,6 +87,12 @@ export interface RoleRelinkExpandPayload extends Record<string, unknown> {
   incomingRoleId: string | null;
   /** Last member id of the previous page; null on the first page. */
   cursor: string | null;
+  /**
+   * The member who triggered the re-link, excluded from the fan-out so an actor
+   * can never self-grant a role by editing a rank/medal they hold (LDA-H1).
+   * Optional/nullable for backward compatibility with jobs enqueued before this.
+   */
+  excludeMemberId?: string | null;
 }
 
 /**

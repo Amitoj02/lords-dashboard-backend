@@ -1,7 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { DiscordBotSettings } from '../entities/discord-bot-settings.entity';
 import { WELCOME_TOKENS } from '../embeds/notification-embeds';
+
+/**
+ * A Discord snowflake (17–20 digits) OR an empty string. Empty is allowed because
+ * these settings fields are cleared by PATCHing '' (which the service normalises
+ * to null); a non-empty value must still be a well-formed snowflake (LDA-H1).
+ */
+const DISCORD_SNOWFLAKE_OR_EMPTY = /^(\d{17,20})?$/;
 
 /**
  * The welcome-message placeholder contract, rendered for Swagger from the SAME
@@ -104,12 +111,22 @@ export class UpdateDiscordSettingsDto {
   @IsString()
   @MaxLength(120)
   eventAnnouncementChannelName?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(20) joinRoleId?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(DISCORD_SNOWFLAKE_OR_EMPTY, {
+    message: 'joinRoleId must be a Discord snowflake (17–20 digits)',
+  })
+  joinRoleId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) joinRoleName?: string;
   @ApiPropertyOptional({ description: 'Role snowflake applied on an app-side ban.' })
   @IsOptional()
   @IsString()
   @MaxLength(20)
+  @Matches(DISCORD_SNOWFLAKE_OR_EMPTY, {
+    message: 'banRoleId must be a Discord snowflake (17–20 digits)',
+  })
   banRoleId?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) banRoleName?: string;
   @ApiPropertyOptional() @IsOptional() @IsBoolean() syncRolesOnChange?: boolean;

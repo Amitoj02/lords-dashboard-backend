@@ -9,6 +9,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { StorageTarget } from '../common/enums';
+import { DiscordRolePolicyService } from '../discord/discord-role-policy.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { CreateMedalDto } from './dto/create-medal.dto';
@@ -56,6 +57,8 @@ export class MedalsService {
     // Re-linking a medal's Discord role has to reach everyone holding it; the
     // fan-out is enqueued through the outbox, never applied inline (T-0158).
     private readonly discordSync: DiscordSyncService,
+    // Validates that a target Discord role is safe to link (LDA-H1).
+    private readonly rolePolicy: DiscordRolePolicyService,
   ) {}
 
   /**
@@ -235,6 +238,10 @@ export class MedalsService {
     const before = this.snapshot(medal);
     const previousRoleId = medal.discordRoleId;
 
+    // Reject roles the bot must never assign (LDA-H1). No-op while the bot is
+    // mocked; the DTO still enforces the snowflake format.
+    await this.rolePolicy.assertRoleLinkable(dto.discordRoleId);
+
     medal.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) medal.discordRoleName = dto.discordRoleName ?? null;
     medal.linked = true;
@@ -310,6 +317,8 @@ export class MedalsService {
       subjectLabel: medal.title,
       previousRoleId,
       nextRoleId: medal.discordRoleId,
+      // Exclude the actor so they cannot self-grant via this fan-out (LDA-H1).
+      excludeMemberId: user.memberId ?? null,
     });
     if (!batch) return null;
 
