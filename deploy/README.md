@@ -4,8 +4,16 @@ Operating the Lords Regiment Dashboard on the OVH VPS. Companion to
 [`project-plan/PRODUCTION_OVH_R2_PLAN.md`](../project-plan/PRODUCTION_OVH_R2_PLAN.md),
 which explains *why* the architecture is what it is; this file is *how to run it*.
 
-**Host:** `144.217.85.166` · Debian 13 · 2 vCore / 4 GB / 40 GB
+**Host:** OVH VPS-1 · Debian 13 · 2 vCore / 4 GB / 40 GB
 **Access:** `ssh ovh-lords` (user `deploy`; root login and passwords are disabled)
+
+The origin's IP is deliberately not written down in this repository. It lives in
+the operator's `~/.ssh/config` under the `ovh-lords` host, and in the
+`DEPLOY_HOST` secret of the `production` environment. This is hygiene, not
+secrecy — anyone sweeping IPv4 can match the origin's TLS certificate back to
+the domain — but there is no reason to publish it beside the account name and
+the directory layout. Direct access is refused at the TLS layer anyway; see
+[Authenticated Origin Pulls](#authenticated-origin-pulls-lda-h3).
 
 ---
 
@@ -76,7 +84,7 @@ And in Cloudflare DNS:
 
 | Type | Name | Content | Proxy |
 |---|---|---|---|
-| A | `@` | `144.217.85.166` | 🟠 Proxied |
+| A | `@` | the origin IPv4 (`DEPLOY_HOST`) | 🟠 Proxied |
 | CNAME | `www` | `lordsofholdfast.com` | 🟠 Proxied |
 
 Re-run `./deploy/bootstrap.sh` any time — it is idempotent and will tell you what
