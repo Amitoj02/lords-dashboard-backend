@@ -158,6 +158,13 @@ services:
       DISCORD_CALLBACK_URL: ${WEB_ORIGIN}/api/auth/discord/callback
       FRONTEND_AUTH_SUCCESS_REDIRECT: ${WEB_ORIGIN}/auth/callback
       FRONTEND_AUTH_FAILURE_REDIRECT: ${WEB_ORIGIN}/login
+      # LDA-H3 — let the rate limiter key on Cf-Connecting-Ip. Guard (env.validation
+      # + cf-aware-throttler) reads this, but compose has to actually PASS it in;
+      # without this line, setting it in .env alone is silently a no-op. Keep it
+      # `false` until Cloudflare-only ingress is enforced (Authenticated Origin
+      # Pulls — deploy/README.md), or an attacker hitting the origin directly can
+      # forge the client IP.
+      TRUST_CF_CONNECTING_IP: ${TRUST_CF_CONNECTING_IP:-false}
       # ── Cloudflare R2 ──────────────────────────────────────────────────────
       # Two DIFFERENT hosts, and they are not interchangeable:
       #   S3_ENDPOINT        signs presigned PUTs. Presigned URLs work ONLY
