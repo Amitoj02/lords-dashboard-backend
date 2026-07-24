@@ -1,21 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Dependabot for the Lords Dashboard API.
+#
+# `target-branch: dev` on every ecosystem is deliberate. The branch model is
+# main <- dev <- topic branches, and main only ever moves by merging dev; a bump
+# landing straight on main would put an unrehearsed version one deploy away from
+# production. Queuing bumps behind the same gate as everything else costs a merge
+# and buys the whole integration suite.
+#
+# NOTE: GitHub reads THIS FILE FROM THE DEFAULT BRANCH (main). The redirect only
+# takes effect once this change has travelled dev -> main.
+# ─────────────────────────────────────────────────────────────────────────────
 version: 2
 updates:
   # Backend npm dependencies
   - package-ecosystem: npm
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
     open-pull-requests-limit: 10
     groups:
-      # Batch the noisy dev/test tooling into one PR so the queue stays readable.
+      # The NestJS packages are version-locked to each other — @nestjs/core and
+      # @nestjs/common disagreeing is a peer-dependency failure, not a bump.
+      nestjs:
+        patterns:
+          - '@nestjs/*'
+      # TypeScript and the toolchain that plugs into it move together: ts-jest,
+      # ts-node and typescript-eslint all carry a peer range on the compiler, so
+      # a lone `typescript` major cannot resolve.
+      typescript:
+        patterns:
+          - 'typescript'
+          - 'typescript-eslint'
+          - 'ts-jest'
+          - 'ts-node'
+          - '@types/node'
+      # Batch the remaining noisy dev/test tooling into one PR so the queue stays
+      # readable, minus anything claimed by a more specific group above.
       dev-dependencies:
         dependency-type: development
+        exclude-patterns:
+          - '@nestjs/*'
+          - 'typescript'
+          - 'typescript-eslint'
+          - 'ts-jest'
+          - 'ts-node'
+          - '@types/node'
     labels:
       - dependencies
 
   # GitHub Actions used by the workflows
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
     labels:
@@ -25,6 +62,7 @@ updates:
   # The production Docker base image
   - package-ecosystem: docker
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
     labels:

@@ -1,6 +1,15 @@
 {
   "compilerOptions": {
     "module": "commonjs",
+    // Pinned explicitly because TypeScript 6 changed what `module: commonjs`
+    // implies. Under TS 5 it meant node10, which resolves a subpath straight to
+    // a file; TS 6 defaults to a mode that honours package "exports" maps, and
+    // typeorm does not export driver/mysql/MysqlConnectionOptions — so ts-node
+    // stopped being able to load data-source.ts, taking every migration and
+    // seed script with it. node10 is exactly the old default, so this restores
+    // previous behaviour rather than choosing new behaviour. TypeScript 7
+    // removes node10 and this will have to be revisited then.
+    "moduleResolution": "node10",
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
@@ -10,15 +19,36 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    // TypeScript 6 deprecates baseUrl (it stops working in 7). It cannot simply be
+    // dropped here: `tsconfig-paths/register` backs db:create, seed and every
+    // migration script, and it resolves `paths` against baseUrl. Silencing the
+    // deprecation keeps those scripts working; retiring baseUrl is a separate
+    // change that has to replace tsconfig-paths at the same time.
+    "ignoreDeprecations": "6.0",
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,
+    // TypeScript 6 turns strictPropertyInitialization on behind strictNullChecks;
+    // under TS 5 it was off, and this project never opted into full `strict`.
+    // Leaving it on means 739 errors across every DTO and TypeORM entity, none of
+    // which is a real defect: entities are constructed by the ORM from row data
+    // and DTOs by class-transformer, so neither is ever populated by a
+    // constructor. Restoring the previous behaviour explicitly keeps the compiler
+    // upgrade a compiler upgrade instead of a 739-declaration rewrite.
+    "strictPropertyInitialization": false,
     "noImplicitAny": true,
     "strictBindCallApply": true,
     "forceConsistentCasingInFileNames": true,
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
+    // Ambient global type packages, declared explicitly. Under TypeScript 5 the
+    // compiler auto-included every @types/* package it found; TypeScript 6 no
+    // longer does, so `describe`/`it`/`expect`/`jest` silently stopped resolving
+    // and all 39 spec suites failed to compile. Only these two contribute
+    // globals — everything else under @types/ is reached through an import of
+    // the module it types, which is unaffected by this list.
+    "types": ["jest", "node"],
     "paths": {
       "src/*": ["src/*"]
     }
