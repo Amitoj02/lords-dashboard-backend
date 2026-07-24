@@ -42,8 +42,14 @@ round-trip, and backups/restore against real R2.
 | **GitHub Actions** | Builds images on merge; deploys on manual trigger | `DEPLOY_SSH_KEY`, `DEPLOY_HOST`, `DEPLOY_KNOWN_HOSTS` in the `production` environment | Free |
 | **Discord** | Identity provider (OAuth2) + the Quartermaster bot | `DISCORD_CLIENT_SECRET`, `DISCORD_BOT_TOKEN` in `~/lords/.env` | Free |
 
-**Host:** `144.217.85.166` · Debian 13 · 2 vCore / 4 GB / 40 GB NVMe
+**Host:** OVH VPS-1 · Debian 13 · 2 vCore / 4 GB / 40 GB NVMe
 **Access:** `ssh ovh-lords` (user `deploy`; root login and password auth disabled)
+
+The origin's IP is not recorded here, for the same reason no secret value is:
+this file says *where* to find things. It is in the operator's `~/.ssh/config`
+and in the `DEPLOY_HOST` secret of the `production` environment. See
+[`deploy/README.md`](../deploy/README.md) for why that is hygiene rather than a
+control — the origin refuses non-Cloudflare TLS handshakes regardless.
 
 ---
 

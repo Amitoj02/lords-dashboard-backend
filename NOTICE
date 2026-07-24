@@ -1,0 +1,31 @@
+NOTICE — third-party rights not covered by the MIT license
+==========================================================
+
+The MIT license in LICENSE covers the source code of this repository. It does
+NOT grant rights to the third-party material described below.
+
+
+TRADEMARKS, GAME ASSETS AND ARTWORK
+-----------------------------------
+
+No rights are granted to third-party trademarks, game assets, or artwork that
+may be referenced or bundled for illustrative purposes, including but not
+limited to imagery and names from "Holdfast: Nations at War" (a product of
+Anvil Game Studios) and any regiment branding (crests, wordmarks, favicons).
+Those remain the property of their respective owners and are not licensed for
+reuse here.
+
+This project is independent, unofficial community software. It is not
+affiliated with, endorsed by, or sponsored by Anvil Game Studios.
+
+
+BUNDLED THIRD-PARTY CONTENT
+---------------------------
+
+.claude/skills/jeffallan-claude-skills-nestjs-expert/
+    NestJS expert skill — a developer tooling aid, not part of the shipped
+    application. Licensed MIT by its author (https://github.com/Jeffallan),
+    as declared in the skill's own front matter.
+
+Runtime and build dependencies are declared in package.json and resolved from
+the npm registry under their own licenses; they are not vendored here.
