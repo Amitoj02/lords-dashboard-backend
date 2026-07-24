@@ -37,7 +37,7 @@ You do not need to know Holdfast, or NestJS, or anything about the Lords.
 |                            | Repo                                                                                        | Stack                                         |
 | -------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------- |
 | **Backend (you are here)** | [`Amitoj02/lords-dashboard-backend`](https://github.com/Amitoj02/lords-dashboard-backend)   | NestJS 11 · TypeORM · MySQL 8.4 · Discord bot |
-| **Frontend**               | [`Amitoj02/lords-regiment-dashboard`](https://github.com/Amitoj02/lords-regiment-dashboard) | Angular 19 · Bootstrap 5.3 · SCSS             |
+| **Frontend**               | [`Amitoj02/lords-regiment-dashboard`](https://github.com/Amitoj02/lords-regiment-dashboard) | Angular · Bootstrap 5.3 · SCSS                |
 
 The two repos are halves of one product and are deployed together. This repo's `docker-compose.yml` builds the `web` service from `context: ../lords-regiment-dashboard`, so they are expected **side by side on disk**:
 
@@ -55,7 +55,7 @@ If you are changing an API contract, read the SPA's `src/app/core/services/` and
 
 ```mermaid
 flowchart LR
-  B["Browser<br/>Angular 19 SPA"] -->|HTTPS| CF["Cloudflare<br/>DNS · TLS · WAF"]
+  B["Browser<br/>Angular SPA"] -->|HTTPS| CF["Cloudflare<br/>DNS · TLS · WAF"]
   CF --> CAD["Caddy 2.11.4<br/>(the only container publishing ports)"]
   CAD -->|"/api/*"| API["NestJS API<br/>node:26-alpine, non-root"]
   CAD -->|"everything else"| WEB["nginx<br/>SPA bundle"]
