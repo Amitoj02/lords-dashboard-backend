@@ -10,7 +10,7 @@
 # The `prod` image is reused by the one-shot migrate/seed init service, which
 # runs the compiled TypeORM CLI + seed against the db before the api starts.
 # ─────────────────────────────────────────────────────────────────────────────
-FROM node:22-alpine AS deps
+FROM node:26-alpine AS deps
 WORKDIR /app
 # Disable @scarf/scarf install-time telemetry (LDA-L2): a prod dependency whose
 # postinstall otherwise phones home on every image build.
@@ -19,7 +19,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # ── Development image: nest watch, source bind-mounted at runtime ────────────
-FROM node:22-alpine AS dev
+FROM node:26-alpine AS dev
 WORKDIR /app
 ENV NODE_ENV=development
 COPY --from=deps /app/node_modules ./node_modules
@@ -34,14 +34,14 @@ COPY . .
 RUN npm run build
 
 # ── Production dependencies only ─────────────────────────────────────────────
-FROM node:22-alpine AS prod-deps
+FROM node:26-alpine AS prod-deps
 WORKDIR /app
 ENV SCARF_ANALYTICS=false
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 # ── Production runtime: slim, compiled JS only ───────────────────────────────
-FROM node:22-alpine AS prod
+FROM node:26-alpine AS prod
 WORKDIR /app
 ENV NODE_ENV=production
 # wget (for the healthcheck) ships with alpine's busybox.
