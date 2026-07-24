@@ -588,6 +588,8 @@ Everyone taking part is expected to follow the [Code of Conduct](./CODE_OF_CONDU
 
 Fork it, run it for your own regiment, take the bits you like. If it saves your clan a weekend of building a roster page from scratch, that's the whole point — and an issue saying so would make somebody's week.
 
+The MIT grant covers the source code. Game assets, trademarks and regiment branding are not included — see [NOTICE](./NOTICE).
+
 ---
 
 _Holdfast: Nations At War is a trademark of [Anvil Game Studios](https://anvilgamestudios.com/). This project is an independent, unofficial community tool, not affiliated with or endorsed by Anvil Game Studios._
