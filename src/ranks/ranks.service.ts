@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -19,6 +20,7 @@ import { RankDto } from './dto/rank.dto';
 import { ReorderRanksDto } from './dto/reorder-ranks.dto';
 import { UpdateRankDto } from './dto/update-rank.dto';
 import { Rank } from './entities/rank.entity';
+import { isProtectedRankName } from './protected-ranks';
 
 /**
  * Temporary offset added to every rank's precedence during a reorder. Because
@@ -109,6 +111,9 @@ export class RanksService {
    * Update a regiment-scoped rank (404 otherwise). Re-checks name/precedence
    * uniqueness for changed fields (excluding the row itself) and records the
    * before/after snapshot on the audit row.
+   *
+   * A protected rank's NAME is frozen (T-0190); everything else about it —
+   * precedence, insignia, Discord role — stays as editable as any other rank.
    */
   async update(
     user: AuthenticatedUser,
@@ -120,6 +125,10 @@ export class RanksService {
     const before = this.snapshot(rank);
 
     if (dto.name !== undefined && dto.name !== rank.name) {
+      // Only a CHANGED name is refused: the admin console posts the whole rank
+      // body on every save, so rejecting the mere presence of `name` would block
+      // an icon or precedence edit on a protected rank.
+      this.assertNotProtected(rank, 'renamed');
       await this.assertNameFree(user.regimentId, dto.name, id);
       rank.name = dto.name;
     }
@@ -151,9 +160,14 @@ export class RanksService {
    * Delete a regiment-scoped rank. The member.rankId FK is RESTRICT, so a rank
    * still worn by anyone cannot be removed — guard it here (counting soft-deleted
    * members too, since their rows still hold the FK) and surface a friendly 409.
+   *
+   * A protected rank is refused outright, before the holder count: an empty
+   * Recruit ladder is exactly when the FK would NOT have stopped the delete
+   * (T-0190).
    */
   async remove(user: AuthenticatedUser, id: string, ip: string | null): Promise<void> {
     const rank = await this.loadRank(id, user.regimentId);
+    this.assertNotProtected(rank, 'deleted');
 
     const inUse = await this.members.count({ where: { rankId: id }, withDeleted: true });
     if (inUse > 0) {
@@ -340,6 +354,25 @@ export class RanksService {
         `(batch ${batch.batchId}).`,
     });
     return batch.batchId;
+  }
+
+  /**
+   * Refuse a rename or a delete on a rank the server resolves BY NAME (T-0190).
+   *
+   * 403 rather than 409: this is not a state the admin can clear by reassigning
+   * holders or picking another value — the rule holds for every caller, including
+   * the Owner, for as long as the code behind it does. Deliberately NOT gated on
+   * a capability, for the same reason `MemberRole.Owner` cannot be assigned
+   * through the API: no permission grants it.
+   */
+  private assertNotProtected(rank: Rank, verb: 'renamed' | 'deleted'): void {
+    if (!isProtectedRankName(rank.name)) return;
+    throw new ForbiddenException(
+      `"${rank.name}" is required by the dashboard and cannot be ${verb}. ` +
+        'New enlistments are placed on it by name, so renaming or removing it ' +
+        'would break application approvals. Its position, insignia and Discord ' +
+        'role can still be changed.',
+    );
   }
 
   /** Load a regiment-scoped rank or throw 404. */

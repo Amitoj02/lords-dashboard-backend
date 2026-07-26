@@ -99,7 +99,7 @@ Fourteen controllers, all under the global `api` prefix. The table below is one 
 | **Applications**       | `src/applications/`          | Recruitment intake: self-submit and edit; staff queue with approve → enlist, decline, hold, block                                                          |
 | **Events**             | `src/events/`                | Public + member calendars, create/edit, archive/complete/re-anchor, recurring series, RSVP, attendance, encrypted server-password reveal, three schedulers |
 | **Gallery**            | `src/gallery/`               | Public feed, member archive, submissions, moderation queue, likes, and YouTube / Medal.tv link resolution into embed metadata                              |
-| **Ranks** · **Medals** | `src/ranks/` · `src/medals/` | Admin-editable ladder and cabinet: CRUD, reorder by precedence, delete blocked while held/awarded, link and unlink to a Discord role                       |
+| **Ranks** · **Medals** | `src/ranks/` · `src/medals/` | Admin-editable ladder and cabinet: CRUD, reorder by precedence, delete blocked while held/awarded, `Recruit` frozen against rename/delete, link and unlink to a Discord role |
 | **Regiments**          | `src/regiments/`             | The three public, unauthenticated reads: regiment profile + presentation slice, legal documents, landing-page statistics                                   |
 | **Settings**           | `src/settings/`              | Control panel: regiment profile, first-run setup, the editable authorization matrix, public presentation, legal documents, Owner-only dissolve             |
 | **Discord**            | `src/discord/`               | The Lord Adjutant bot's control plane: connection status, guild role list, settings, full resync, bulk re-link progress, the bot-operations ledger         |
@@ -326,7 +326,9 @@ Approving enlists the applicant at the entry rank.
 | GET    | `/`                                                                                              | authenticated       |
 | POST   | `/` · PATCH `/:id` · DELETE `/:id` · POST `/reorder`, `/:id/link-discord`, `/:id/unlink-discord` | `edit_ranks_medals` |
 
-Delete is blocked while a rank is held or a medal has been awarded. Linking a rank or medal to a Discord role holding `ADMINISTRATOR` / `BAN_MEMBERS` / `MANAGE_ROLES` and friends is refused outright — otherwise an `edit_ranks_medals` holder could quietly self-grant real Discord authority.
+Delete is blocked while a rank is held or a medal has been awarded. Linking a rank or medal to a Discord role holding `ADMINISTRATOR` / `BAN_MEMBERS` / `MANAGE_ROLES` and friends succeeds but comes back with a `discordRoleWarning` for the admin to see, and raises the audit row to `warn` — an `edit_ranks_medals` holder can reach real Discord authority this way, so the ledger says who did it. A role the bot genuinely *cannot* assign (above or equal to its own highest role, integration-managed, or absent from the guild) is still refused.
+
+The **`Recruit` rank is protected**: `PATCH` refuses a rename and `DELETE` refuses outright, both 403, for every caller including the Owner. Approving an application resolves that rank *by name*, so removing or renaming it would break enlistment. Its precedence, insignia and Discord-role mapping stay editable, and `isProtected` on every rank projection tells the client which rows are frozen. The list lives in `src/ranks/protected-ranks.ts`, alongside the constant the enlistment path itself imports.
 
 | Method | Route                             | Auth                                                                                           |
 | ------ | --------------------------------- | ---------------------------------------------------------------------------------------------- |

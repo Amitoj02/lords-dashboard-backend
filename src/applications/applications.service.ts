@@ -18,6 +18,7 @@ import { ApplicantType, ApplicationStatus, MemberRole, MemberStatus } from '../c
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
+import { ENTRY_RANK_NAME } from '../ranks/protected-ranks';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { ApplicantApplicationDto } from './dto/applicant-application.dto';
 import { ApplicationDto } from './dto/application.dto';
@@ -32,11 +33,14 @@ import { UpdateMyApplicationDto } from './dto/update-my-application.dto';
 import { Application } from './entities/application.entity';
 
 /**
- * Every approved applicant enlists at the entry rank. The enrolled role is
- * selected from the application's applicantType (re-added in T-0095): a
- * Mercenary applicant enlists as a Mercenary, otherwise as a Member.
+ * Every approved applicant enlists at the entry rank, resolved by name below.
+ * `ENTRY_RANK_NAME` is imported rather than declared here so the ranks module can
+ * protect that exact row from being renamed or deleted (T-0190) — two copies of
+ * the string would let the protection and the lookup drift apart.
+ *
+ * The enrolled role is selected from the application's applicantType (re-added in
+ * T-0095): a Mercenary applicant enlists as a Mercenary, otherwise as a Member.
  */
-const ENTRY_RANK_NAME = 'Recruit';
 
 /** Map the chosen enlistment track to the enrolled member role. */
 function enrolledRoleFor(applicantType: ApplicantType): MemberRole {
@@ -423,11 +427,20 @@ export class ApplicationsService {
       const memberRepo = manager.getRepository(Member);
       const applicationRepo = manager.getRepository(Application);
 
-      const rankName = ENTRY_RANK_NAME;
       const role = enrolledRoleFor(application.applicantType);
-      const rank = await rankRepo.findOneOrFail({
-        where: { regimentId: user.regimentId, name: rankName },
+      const rank = await rankRepo.findOne({
+        where: { regimentId: user.regimentId, name: ENTRY_RANK_NAME },
       });
+      // The ladder is admin-editable, so say what is wrong rather than letting a
+      // bare EntityNotFoundError surface as a 500. Reachable on a database whose
+      // entry rank was already renamed or deleted before T-0190 froze it.
+      if (!rank) {
+        throw new ConflictException(
+          `The "${ENTRY_RANK_NAME}" rank is missing from the ladder, so this applicant cannot ` +
+            `be enlisted. Recreate a rank named "${ENTRY_RANK_NAME}" under Ranks & Medals, then ` +
+            'approve again.',
+        );
+      }
 
       const now = new Date();
       const created = memberRepo.create({
@@ -451,7 +464,7 @@ export class ApplicationsService {
           regimentId: user.regimentId,
           occurredAt: now,
           type: 'enlistment',
-          event: `Enlisted as ${role} at rank ${rankName}`,
+          event: `Enlisted as ${role} at rank ${rank.name}`,
           note: null,
         }),
       );

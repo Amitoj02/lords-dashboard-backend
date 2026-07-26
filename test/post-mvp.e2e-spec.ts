@@ -1163,4 +1163,124 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(mine.body.application.status).toBe('pending');
     });
   });
+
+  // ── Protected ranks (T-0190) ───────────────────────────────────────────────
+  /**
+   * The entry rank is resolved BY NAME during approval, so its name is a
+   * dependency, not a label. Mocked repositories cannot prove this: the rule has
+   * to hold against the real ladder, the real UNIQUE indexes and the real 403
+   * mapping, and the negative half — that every OTHER rank is still fully
+   * editable — is exactly what a blunter implementation breaks.
+   */
+  describe('protected ranks', () => {
+    type ApiRank = {
+      id: string;
+      name: string;
+      precedence: number;
+      discordRoleName: string | null;
+      isProtected: boolean;
+    };
+
+    const ladder = async (): Promise<ApiRank[]> => {
+      const res = await request(server()).get('/api/ranks').set(bearer(ownerToken)).expect(200);
+      return res.body as ApiRank[];
+    };
+    const recruit = async (): Promise<ApiRank> => {
+      const found = (await ladder()).find((r) => r.name === 'Recruit');
+      if (!found) throw new Error('the seeded ladder has no Recruit rank');
+      return found;
+    };
+
+    it('flags the entry rank as protected and every other rank as not', async () => {
+      const rows = await ladder();
+
+      expect(rows.find((r) => r.name === 'Recruit')?.isProtected).toBe(true);
+      expect(rows.filter((r) => r.name !== 'Recruit').map((r) => r.isProtected)).not.toContain(
+        true,
+      );
+    });
+
+    it('refuses a rename with 403 and leaves the row untouched', async () => {
+      const before = await recruit();
+
+      await request(server())
+        .patch(`/api/ranks/${before.id}`)
+        .set(bearer(ownerToken))
+        .send({ name: 'Rookie' })
+        .expect(403);
+
+      // Re-read rather than trusting the response: the point is that nothing was
+      // written, and only the ladder can say that.
+      const after = await recruit();
+      expect(after.name).toBe('Recruit');
+      expect((await ladder()).some((r) => r.name === 'Rookie')).toBe(false);
+    });
+
+    it('refuses a casing-only rename — the lookup would still find it, so it stays frozen', async () => {
+      const row = await recruit();
+
+      await request(server())
+        .patch(`/api/ranks/${row.id}`)
+        .set(bearer(ownerToken))
+        .send({ name: 'recruit' })
+        .expect(403);
+      expect((await recruit()).name).toBe('Recruit');
+    });
+
+    it('still accepts a Discord-role edit that posts the unchanged name', async () => {
+      const row = await recruit();
+      const original = row.discordRoleName;
+
+      // Exactly the body the admin console sends: the whole rank, name included.
+      const patched = await request(server())
+        .patch(`/api/ranks/${row.id}`)
+        .set(bearer(ownerToken))
+        .send({ name: 'Recruit', precedence: row.precedence, discordRoleName: '@E2ERecruitRole' })
+        .expect(200);
+      expect(patched.body).toMatchObject({
+        name: 'Recruit',
+        discordRoleName: '@E2ERecruitRole',
+        isProtected: true,
+      });
+
+      await request(server())
+        .patch(`/api/ranks/${row.id}`)
+        .set(bearer(ownerToken))
+        .send({ discordRoleName: original })
+        .expect(200);
+      expect((await recruit()).discordRoleName).toBe(original);
+    });
+
+    it('refuses a delete with 403, and the rank survives', async () => {
+      const row = await recruit();
+
+      await request(server()).delete(`/api/ranks/${row.id}`).set(bearer(ownerToken)).expect(403);
+
+      expect((await ladder()).some((r) => r.id === row.id)).toBe(true);
+    });
+
+    it('leaves an ordinary rank fully renameable and deletable', async () => {
+      // The control case. Without it, a guard that froze the whole ladder would
+      // pass every assertion above.
+      const created = await request(server())
+        .post('/api/ranks')
+        .set(bearer(ownerToken))
+        .send({ name: 'E2E Ensign' })
+        .expect(201);
+      expect(created.body.isProtected).toBe(false);
+
+      await request(server())
+        .patch(`/api/ranks/${created.body.id}`)
+        .set(bearer(ownerToken))
+        .send({ name: 'E2E Ensign Renamed' })
+        .expect(200);
+
+      await request(server())
+        .delete(`/api/ranks/${created.body.id}`)
+        .set(bearer(ownerToken))
+        .expect(204);
+
+      expect((await ladder()).some((r) => r.id === created.body.id)).toBe(false);
+    });
+  });
 });

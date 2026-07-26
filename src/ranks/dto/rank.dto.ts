@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Rank } from '../entities/rank.entity';
+import { isProtectedRankName } from '../protected-ranks';
 
 /**
  * Response projection of a {@link Rank}. Exposes the editable ladder fields plus
@@ -31,6 +32,16 @@ export class RankDto {
 
   @ApiProperty({ description: 'Number of members currently holding this rank' })
   holdersCount: number;
+
+  @ApiProperty({
+    description:
+      'True when the server itself resolves this rank by name (T-0190), which makes the name ' +
+      'load-bearing: PATCH refuses a rename and DELETE refuses outright, both with 403, for ' +
+      'every caller regardless of capability. Precedence, insignia and the Discord role mapping ' +
+      'stay editable. Present on every projection so the admin UI can lock those two controls ' +
+      'up front instead of discovering the rule from a failed request.',
+  })
+  isProtected: boolean;
 
   @ApiProperty({ description: 'ISO timestamp the rank was created' })
   createdAt: string;
@@ -87,6 +98,9 @@ export class RankDto {
     dto.discordRoleId = rank.discordRoleId;
     dto.linked = rank.linked;
     dto.holdersCount = holdersCount;
+    // Derived from the rank's own name, never stored: the protection exists
+    // because of a constant in the code, so the code is what answers for it.
+    dto.isProtected = isProtectedRankName(rank.name);
     dto.createdAt = rank.createdAt.toISOString();
     dto.updatedAt = rank.updatedAt.toISOString();
     return dto;

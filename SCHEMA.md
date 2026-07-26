@@ -295,7 +295,19 @@ one points back via `applications.promoted_member_id`.
 | `created_at` / `updated_at` | timestamp | |
 
 Indexes: `UNIQUE(regiment_id, name)`, `UNIQUE(regiment_id, precedence)`.
-Derived: `holders_count` ← `COUNT(members.rank_id)`.
+Derived: `holders_count` ← `COUNT(members.rank_id)`, `is_protected` ← the row's own `name`.
+
+**One row is load-bearing.** Approving an application resolves the entry rank
+(`Recruit`) *by name*, not by id, so that string is a dependency and not a label:
+the API refuses a rename or a delete on it with 403 for every caller, the Owner
+included. Everything else about the row — precedence, insignia, Discord role — stays
+editable, and every other rank stays fully renameable and deletable. The protection
+is derived in code (`src/ranks/protected-ranks.ts`) from the same constant the
+enlistment path imports rather than stored as a column, so the set of protected
+ranks cannot drift from the set of ranks the server actually depends on. Nothing
+reserves the *name*: a database that lost the row before this rule existed can
+recreate it, and an approval attempted meanwhile fails with a 409 naming the rank
+to restore.
 
 #### `medals` (catalog table, per regiment)
 | Column | Type | Notes |
