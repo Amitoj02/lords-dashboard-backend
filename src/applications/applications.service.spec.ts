@@ -143,7 +143,7 @@ describe('ApplicationsService', () => {
       enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
     };
 
-    txRanks = { findOneOrFail: jest.fn() };
+    txRanks = { findOne: jest.fn() };
     txMembers = {
       create: jest.fn((x: unknown) => x),
       save: jest.fn((x: Member) => Promise.resolve({ ...x, id: 'member-new' })),
@@ -766,11 +766,11 @@ describe('ApplicationsService', () => {
 
     it('creates a Member at the Recruit rank for an Applicant and audits the approval', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       const result = await service.approve(STAFF, 'app-1', {}, '9.9.9.9');
 
-      expect(txRanks.findOneOrFail).toHaveBeenCalledWith({
+      expect(txRanks.findOne).toHaveBeenCalledWith({
         where: { regimentId: 'regiment-1', name: 'Recruit' },
       });
       const createdMember = txMembers.create!.mock.calls[0][0] as Partial<Member>;
@@ -807,7 +807,7 @@ describe('ApplicationsService', () => {
 
     it('persists the promoted member on BOTH the FK and the relation', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -823,7 +823,7 @@ describe('ApplicationsService', () => {
       applications.findOne!.mockResolvedValue(
         baseApplication({ applicantType: ApplicantType.Mercenary }),
       );
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -852,7 +852,7 @@ describe('ApplicationsService', () => {
       // Regression guard: the new settings lookup must never reach Member approvals.
       applications.findOne!.mockResolvedValue(baseApplication());
       settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', allowMercenaries: false });
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       const result = await service.approve(STAFF, 'app-1', {}, null);
 
@@ -866,7 +866,7 @@ describe('ApplicationsService', () => {
         baseApplication({ applicantType: ApplicantType.Mercenary }),
       );
       settings.findOne!.mockResolvedValue(null);
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -880,7 +880,7 @@ describe('ApplicationsService', () => {
         baseApplication({ applicantType: ApplicantType.Mercenary }),
       );
       settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -889,10 +889,24 @@ describe('ApplicationsService', () => {
 
     it('approves an application that was on hold', async () => {
       applications.findOne!.mockResolvedValue(baseApplication({ status: ApplicationStatus.Held }));
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       const result = await service.approve(STAFF, 'app-1', {}, null);
       expect(result.status).toBe(ApplicationStatus.Approved);
+    });
+
+    it('names the missing entry rank instead of throwing a bare 500 (T-0190)', async () => {
+      // The ladder is admin-editable and this row is now frozen, but a database
+      // that lost it BEFORE the freeze still lands here — the officer needs to be
+      // told which rank to recreate, not handed an EntityNotFoundError.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      txRanks.findOne!.mockResolvedValue(null);
+
+      await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toThrow(/"Recruit"/);
+      await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(txMembers.save).not.toHaveBeenCalled();
     });
   });
 
@@ -981,7 +995,7 @@ describe('ApplicationsService', () => {
   describe('decision text persistence (T-0153)', () => {
     it('stores the trimmed officer-written message on approve, decline and hold', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOneOrFail!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
       const approved = await service.approve(
         STAFF,
         'app-1',
