@@ -7,7 +7,7 @@ import { DiscordRolePolicyService } from '../discord/discord-role-policy.service
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MemberRole, StorageTarget } from '../common/enums';
+import { AuditSeverity, MemberRole, StorageTarget } from '../common/enums';
 import { Medal } from './entities/medal.entity';
 import { MemberMedal } from './entities/member-medal.entity';
 import { MedalsService } from './medals.service';
@@ -77,11 +77,15 @@ describe('MedalsService', () => {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
   const discordSync = { enqueueRoleRelink: jest.fn().mockResolvedValue(null) };
-  // LDA-H1: link validation. Default to "linkable" so the existing happy paths pass.
-  const rolePolicy = { assertRoleLinkable: jest.fn().mockResolvedValue(undefined) };
+  // LDA-H1 link validation. Default to "clean" (no advisory) so the existing
+  // happy paths pass; T-0189 made the privileged verdict a returned warning.
+  const rolePolicy = { checkRoleLinkable: jest.fn().mockResolvedValue(null) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // clearAllMocks only clears CALLS, not implementations — a test that makes the
+    // policy warn or throw would otherwise poison every test after it.
+    rolePolicy.checkRoleLinkable.mockResolvedValue(null);
 
     medalQb = {
       select: jest.fn().mockReturnThis(),
@@ -448,6 +452,62 @@ describe('MedalsService', () => {
       expect(relinkRows[0][0]).toEqual(
         expect.objectContaining({ detail: expect.stringContaining('9 member role updates') }),
       );
+    });
+
+    // T-0189: a privileged role used to be a 400. It now links, and the warning
+    // is what the admin (and the ledger) get instead of the rejection.
+    describe('a privileged Discord role (T-0189)', () => {
+      const WARNING = 'Heads up: this Discord role grants privileged permissions (…).';
+
+      it('links anyway and returns the advisory on the response', async () => {
+        medalRepo.findOne.mockResolvedValue(buildMedal());
+        rolePolicy.checkRoleLinkable.mockResolvedValue(WARNING);
+
+        const dto = await service.linkDiscord(user(), 'medal-1', { discordRoleId: '123' }, null);
+
+        const saved = medalRepo.save.mock.calls[0][0] as Medal;
+        expect(saved.discordRoleId).toBe('123');
+        expect(saved.linked).toBe(true);
+        expect(dto.discordRoleWarning).toBe(WARNING);
+      });
+
+      it('raises the audit row to warn and states what was accepted', async () => {
+        medalRepo.findOne.mockResolvedValue(buildMedal());
+        rolePolicy.checkRoleLinkable.mockResolvedValue(WARNING);
+
+        await service.linkDiscord(user(), 'medal-1', { discordRoleId: '123' }, null);
+
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'medal.update',
+            severity: AuditSeverity.Warn,
+            detail: `Linked to Discord role 123. ${WARNING}`,
+          }),
+        );
+      });
+
+      it('leaves a clean link at its default severity, with no warning field', async () => {
+        medalRepo.findOne.mockResolvedValue(buildMedal());
+
+        const dto = await service.linkDiscord(user(), 'medal-1', { discordRoleId: '123' }, null);
+
+        expect(dto.discordRoleWarning).toBeUndefined();
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'medal.update', severity: undefined }),
+        );
+      });
+
+      it('still refuses a role the bot cannot assign at all (policy throws)', async () => {
+        medalRepo.findOne.mockResolvedValue(buildMedal());
+        rolePolicy.checkRoleLinkable.mockRejectedValue(
+          new BadRequestException('That role is managed by an integration'),
+        );
+
+        await expect(
+          service.linkDiscord(user(), 'medal-1', { discordRoleId: '123' }, null),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(medalRepo.save).not.toHaveBeenCalled();
+      });
     });
   });
 
