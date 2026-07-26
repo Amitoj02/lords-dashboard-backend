@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { StorageTarget } from '../common/enums';
+import { AuditSeverity, StorageTarget } from '../common/enums';
 import { DiscordRolePolicyService } from '../discord/discord-role-policy.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
@@ -220,6 +220,10 @@ export class RanksService {
    * Bind a rank to a Discord role: set its snowflake id (and optionally a fresh
    * display name) and mark it linked. Audited as a rank.update, and — when the
    * role actually changed — followed by a bulk re-link of every holder.
+   *
+   * A role carrying privileged Discord permissions no longer blocks the link
+   * (T-0189); it comes back as `discordRoleWarning` for the admin UI to surface
+   * and raises the audit row to `warn` so the ledger says what was accepted.
    */
   async linkDiscord(
     user: AuthenticatedUser,
@@ -231,11 +235,11 @@ export class RanksService {
     const before = this.snapshot(rank);
     const previousRoleId = rank.discordRoleId;
 
-    // Reject roles the bot must never assign — above/equal the bot, integration-
-    // managed, privileged, or not in the guild (LDA-H1). No-op while the bot is
-    // mocked (validation defers until a real bot runs); the DTO still enforces the
-    // snowflake format.
-    await this.rolePolicy.assertRoleLinkable(dto.discordRoleId);
+    // Reject roles the bot CANNOT assign — above/equal the bot, integration-
+    // managed, or not in the guild (LDA-H1). A privileged role is allowed through
+    // with an advisory instead (T-0189). No-op while the bot is mocked (validation
+    // defers until a real bot runs); the DTO still enforces the snowflake format.
+    const warning = await this.rolePolicy.checkRoleLinkable(dto.discordRoleId);
 
     rank.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) rank.discordRoleName = dto.discordRoleName;
@@ -250,12 +254,18 @@ export class RanksService {
       target: { type: 'rank', id: saved.id, label: saved.name },
       before,
       after: this.snapshot(saved),
-      detail: `Linked to Discord role ${saved.discordRoleId}.`,
+      // The warning is the whole reason this row matters after the fact: with the
+      // 400 gone, the ledger is where "someone linked a rank to an admin role"
+      // survives, so it says so in the detail AND wears the severity.
+      detail: warning
+        ? `Linked to Discord role ${saved.discordRoleId}. ${warning}`
+        : `Linked to Discord role ${saved.discordRoleId}.`,
+      severity: warning ? AuditSeverity.Warn : undefined,
     });
     const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
     const holders = await this.holderCountFor(saved.id);
-    return RankDto.from(saved, holders, relinkBatchId);
+    return RankDto.from(saved, holders, relinkBatchId, warning);
   }
 
   /**

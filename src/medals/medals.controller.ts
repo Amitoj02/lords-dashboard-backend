@@ -105,7 +105,13 @@ export class MedalsController {
   @HttpCode(HttpStatus.OK)
   @RequireCapability(Capability.EditRanksMedals)
   @ApiOperation({ summary: 'Link a medal to a Discord role' })
-  @ApiOkResponse({ type: MedalDto, description: 'The linked medal.' })
+  @ApiOkResponse({
+    type: MedalDto,
+    description:
+      'The linked medal. Carries `discordRoleWarning` when the role holds privileged Discord ' +
+      'permissions — the link still succeeded (T-0189), so surface it rather than treating it ' +
+      'as a failure.',
+  })
   linkDiscord(
     @Param('id', ParseShortIdPipe) id: string,
     @Body() dto: LinkDiscordDto,

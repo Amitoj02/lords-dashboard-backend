@@ -7,7 +7,7 @@ import { DiscordRolePolicyService } from '../discord/discord-role-policy.service
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MemberRole } from '../common/enums';
+import { AuditSeverity, MemberRole } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RanksService } from './ranks.service';
 import { Rank } from './entities/rank.entity';
@@ -76,11 +76,15 @@ describe('RanksService', () => {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
   const discordSync = { enqueueRoleRelink: jest.fn().mockResolvedValue(null) };
-  // LDA-H1: link validation. Default to "linkable" so the existing happy paths pass.
-  const rolePolicy = { assertRoleLinkable: jest.fn().mockResolvedValue(undefined) };
+  // LDA-H1 link validation. Default to "clean" (no advisory) so the existing
+  // happy paths pass; T-0189 made the privileged verdict a returned warning.
+  const rolePolicy = { checkRoleLinkable: jest.fn().mockResolvedValue(null) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // clearAllMocks only clears CALLS, not implementations — a test that makes the
+    // policy warn or throw would otherwise poison every test after it.
+    rolePolicy.checkRoleLinkable.mockResolvedValue(null);
 
     rankQb = {
       select: jest.fn().mockReturnThis(),
@@ -383,6 +387,74 @@ describe('RanksService', () => {
       expect(audit.record).not.toHaveBeenCalledWith(
         expect.objectContaining({ action: 'discord.role.relink' }),
       );
+    });
+
+    // T-0189: a privileged role used to be a 400. It now links, and the warning
+    // is what the admin (and the ledger) get instead of the rejection.
+    describe('a privileged Discord role (T-0189)', () => {
+      const WARNING = 'Heads up: this Discord role grants privileged permissions (…).';
+
+      it('links anyway and returns the advisory on the response', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        memberRepo.count.mockResolvedValue(0);
+        rolePolicy.checkRoleLinkable.mockResolvedValue(WARNING);
+
+        const dto = await service.linkDiscord(
+          user(),
+          'rank-1',
+          { discordRoleId: '112233445566778899' },
+          null,
+        );
+
+        const saved = rankRepo.save.mock.calls[0][0] as Rank;
+        expect(saved.discordRoleId).toBe('112233445566778899');
+        expect(saved.linked).toBe(true);
+        expect(dto.discordRoleWarning).toBe(WARNING);
+      });
+
+      it('raises the audit row to warn and states what was accepted', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        memberRepo.count.mockResolvedValue(0);
+        rolePolicy.checkRoleLinkable.mockResolvedValue(WARNING);
+
+        await service.linkDiscord(user(), 'rank-1', { discordRoleId: '1122' }, null);
+
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'rank.update',
+            severity: AuditSeverity.Warn,
+            detail: `Linked to Discord role 1122. ${WARNING}`,
+          }),
+        );
+      });
+
+      it('leaves a clean link at its default severity, with no warning field', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        memberRepo.count.mockResolvedValue(0);
+
+        const dto = await service.linkDiscord(user(), 'rank-1', { discordRoleId: '1122' }, null);
+
+        expect(dto.discordRoleWarning).toBeUndefined();
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'rank.update',
+            severity: undefined,
+            detail: 'Linked to Discord role 1122.',
+          }),
+        );
+      });
+
+      it('still refuses a role the bot cannot assign at all (policy throws)', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        rolePolicy.checkRoleLinkable.mockRejectedValue(
+          new BadRequestException('That role sits at or above the bot in the hierarchy'),
+        );
+
+        await expect(
+          service.linkDiscord(user(), 'rank-1', { discordRoleId: '1122' }, null),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(rankRepo.save).not.toHaveBeenCalled();
+      });
     });
   });
 
