@@ -1,7 +1,7 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "409720bd2db148f136b704916eda5cd6e5ce3348",
+  "lastSyncedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
   "lastSyncedAt": "2026-07-27T18:20:00Z",
   "notesForNextSession": "LATEST SESSION (T-0205): the Discord event announcement is now the RSVP surface, and the bot has its FIRST INBOUND PATH. Read that sentence twice before touching src/discord: everything before this was outbound, and a button press is a Discord account writing roster state. The handler (EventRsvpInteractionService) deliberately does NOT re-derive authorization - it calls SessionContextService.resolve(), the same choke point every HTTP route uses, which is what makes a banned or suspended member refused by the SAME rule rather than by a second one that will drift. It then checks rsvp_to_events against the live role, and re-checks botEnabled at press time because an announcement outlives the setting that produced it. *** THE ONE-PING RULE IS THE OWNER'S, AND IT IS LOAD-BEARING. *** events.announce_role_id is pinged by the announcement and by NOTHING else. The pre-event notification is a THREAD on that same message pinging only Attending+Tentative (Discord treats unsolicited mass DMs as abuse), and a re-render pings nobody because editChannelMessage accepts no mention allow-list at all - that omission is the mechanism, do not add the parameter. Every send still pins allowed_mentions.parse: [], so @everyone in admin text stays inert; the two messages that must notify carry EXPLICIT snowflakes alongside it. The announcement is the only message in the app that is RE-RENDERED, which is why it is the only one composed at DRAIN time: its roster comes from event_rsvps when the job runs. That is not a style choice - refreshes are COALESCED (one pending per event), so a payload frozen at enqueue would deliver the first presser's roster and silently drop everyone after. enqueueEventAnnounce/enqueueEventReminder now take (regimentId, eventId); src/events/event-summary.ts is gone and the projection lives in DiscordModule's EventAnnouncementService, which reads events/event_rsvps by ENTITY IMPORT (not a module edge - EventsModule imports DiscordModule and the reverse would close a cycle). event_announcements (PK = FK) is delivery state, not event state: its presence answers 'has this been announced?'. CROSS-REPO: the authoring form still has no 'Role to ping' picker, so announceRoleId is API-only until lords-regiment-dashboard adds one; it is optional and nullable, so the SPA degrades safely and the two do NOT have to ship together. OPEN ITEM worth deciding: editing an event does not re-render or re-post its announcement, so a title or time changed after it went out is wrong in Discord until someone notices.",
   "nextIdCounter": 206,
@@ -14359,7 +14359,7 @@
         "No thread is opened for an event that was never announced (nothing to hang it on); it degrades to the plain reminder embed and pings nobody rather than mass-mentioning in the main channel.",
         "Thread pings past 80 attendees are split into extra best-effort messages; a chunk that fails is logged, not retried, because a retry would re-ping everyone in the chunks that already landed."
       ],
-      "lastTouchedCommit": "",
+      "lastTouchedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
       "createdAt": "2026-07-27T18:20:00Z",
       "updatedAt": "2026-07-27T18:20:00Z",
       "history": [
