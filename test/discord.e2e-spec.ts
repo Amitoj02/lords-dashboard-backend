@@ -15,6 +15,8 @@ import { BotOperation } from '../src/discord/entities/bot-operation.entity';
 import { DiscordBotSettings } from '../src/discord/entities/discord-bot-settings.entity';
 import { DiscordConnection } from '../src/discord/entities/discord-connection.entity';
 import { DiscordSyncJob } from '../src/discord/entities/discord-sync-job.entity';
+import { Medal } from '../src/medals/entities/medal.entity';
+import { MemberMedal } from '../src/medals/entities/member-medal.entity';
 import { Member } from '../src/members/entities/member.entity';
 import { Rank } from '../src/ranks/entities/rank.entity';
 
@@ -845,6 +847,131 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       expect(removes.map((j) => (j.payload as { roleId: string }).roleId)).toContain(
         '900000000000000077',
       );
+    });
+  });
+
+  /**
+   * T-0202 — enlisting a veteran the guild already decorated.
+   *
+   * This is the case the roster-derived reconcile got wrong. The regiment ran on
+   * Discord for years before it ran on this dashboard, so a veteran's rank and
+   * medals live ONLY as guild roles. `reconcileRoles` strips every managed role
+   * the roster cannot account for, and a brand-new member row accounts for
+   * nothing — so approval, the first reconcile of that member's life, wiped years
+   * of history off the person it had just admitted.
+   *
+   * The assertion that matters is the LAST one: after a full drain, the veteran
+   * still wears every role they walked in with. Checking only the database rows
+   * would pass even if the bot took the roles straight back off again.
+   */
+  describe('an approved applicant keeps the rank + medals Discord already gave them (T-0202)', () => {
+    const VETERAN = '900900900900900908';
+    const SERGEANT_ROLE = '900000000000000061';
+    const VALOUR_ROLE = '900000000000000062';
+    const UNLINKED_ROLE = '900000000000000063';
+    let sergeantRankId: string;
+    let valourMedalId: string;
+
+    const veteranProfile = {
+      id: VETERAN,
+      username: 'e2e_veteran',
+      global_name: 'Old Guard',
+      discriminator: '0',
+      avatar: null,
+      email: 'veteran@example.com',
+    };
+
+    beforeAll(async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true })
+        .expect(200);
+
+      // Link a rank ABOVE the entry rank and a medal to real guild roles — the
+      // links are what make either role adoptable at all.
+      const ranks = await dataSource
+        .getRepository(Rank)
+        .find({ where: { regimentId: REGIMENT_ID } });
+      sergeantRankId = ranks.find((r) => r.name === 'Sergeant')!.id;
+      await dataSource
+        .getRepository(Rank)
+        .update({ id: sergeantRankId }, { discordRoleId: SERGEANT_ROLE });
+
+      const medals = await dataSource
+        .getRepository(Medal)
+        .find({ where: { regimentId: REGIMENT_ID } });
+      valourMedalId = medals[0].id;
+      await dataSource
+        .getRepository(Medal)
+        .update({ id: valourMedalId }, { discordRoleId: VALOUR_ROLE });
+
+      // The veteran walks in already wearing all three. The third is linked to
+      // nothing, which is what makes it the control.
+      await mockGateway.assignRole(VETERAN, SERGEANT_ROLE);
+      await mockGateway.assignRole(VETERAN, VALOUR_ROLE);
+      await mockGateway.assignRole(VETERAN, UNLINKED_ROLE);
+    });
+
+    afterAll(async () => {
+      await dataSource.getRepository(Rank).update({ id: sergeantRankId }, { discordRoleId: null });
+      await dataSource.getRepository(Medal).update({ id: valourMedalId }, { discordRoleId: null });
+      const identity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: VETERAN } });
+      if (identity) {
+        const member = await dataSource
+          .getRepository(Member)
+          .findOne({ where: { discordIdentityId: identity.id } });
+        if (member) await dataSource.getRepository(MemberMedal).delete({ memberId: member.id });
+        await dataSource.getRepository(Member).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+      ownerToken = (await signIn(ownerProfile)).token;
+    });
+
+    it('enlists them at their Discord rank, credits the medal, and does NOT strip either', async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      const veteran = await signIn(veteranProfile);
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(veteran.token))
+        .send({
+          applicantName: 'Old Guard',
+          inGameName: 'OldGuard',
+          currentRegiment: 'None',
+          howFound: 'Been here since the start',
+          preferredClasses: 'Line Infantry',
+          skillsToImprove: 'Nothing, frankly',
+          interestConfirmed: true,
+        })
+        .expect(201);
+
+      ownerToken = (await signIn(ownerProfile)).token;
+      const approved = await request(server())
+        .post(`/api/applications/${created.body.id}/approve`)
+        .set(bearer(ownerToken))
+        .expect(200);
+
+      // The roster now records what the guild already knew.
+      const newMemberId = approved.body.promotedMemberId as string;
+      const member = await dataSource.getRepository(Member).findOne({ where: { id: newMemberId } });
+      expect(member!.rankId).toBe(sergeantRankId);
+      const awards = await dataSource
+        .getRepository(MemberMedal)
+        .find({ where: { memberId: newMemberId } });
+      expect(awards.map((a) => a.medalId)).toEqual([valourMedalId]);
+
+      // *** THE REGRESSION GUARD. *** Drain the reconcile the approval queued and
+      // confirm it left the veteran's roles alone. Before T-0202 this is exactly
+      // where the Sergeant and medal roles came off.
+      await drainAll();
+      const ref = await mockGateway.fetchMember(VETERAN);
+      expect(ref!.roles).toEqual(expect.arrayContaining([SERGEANT_ROLE, VALOUR_ROLE]));
+      // And the role the dashboard manages nothing for is still untouched — the
+      // carry-over did not widen what the bot considers its business.
+      expect(ref!.roles).toContain(UNLINKED_ROLE);
     });
   });
 
