@@ -247,7 +247,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
         welcomeMessage: 'Existing greeting',
         enlistmentChannelName: 'new-enlistments',
         auditLogChannelName: 'audit-logs',
-        joinRoleName: 'Guest',
+        membershipRoleName: 'Member',
         banRoleId: null,
         banRoleName: 'Cashiered',
         applyBanRoleOnBan: false,
@@ -288,7 +288,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
 
     it('does not blank the other optional strings on the same endpoint', async () => {
       // The recorded regression risk: a normaliser applied one field too widely.
-      // `joinRoleName` in particular is NOT NULL with a default, so a blanket
+      // `membershipRoleName` in particular is NOT NULL with a default, so a blanket
       // `|| null` across this block would break the schema, not just behaviour.
       await service.updateSettings(user(), { welcomeMessage: '' }, null);
 
@@ -296,7 +296,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
       expect(row.welcomeChannelId).toBe('channel-1');
       expect(row.enlistmentChannelName).toBe('new-enlistments');
       expect(row.auditLogChannelName).toBe('audit-logs');
-      expect(row.joinRoleName).toBe('Guest');
+      expect(row.membershipRoleName).toBe('Member');
       expect(row.banRoleName).toBe('Cashiered');
     });
   });

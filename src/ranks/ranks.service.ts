@@ -20,7 +20,7 @@ import { RankDto } from './dto/rank.dto';
 import { ReorderRanksDto } from './dto/reorder-ranks.dto';
 import { UpdateRankDto } from './dto/update-rank.dto';
 import { Rank } from './entities/rank.entity';
-import { isProtectedRankName } from './protected-ranks';
+import { protectedRankReason } from './protected-ranks';
 
 /**
  * Temporary offset added to every rank's precedence during a reorder. Because
@@ -366,12 +366,12 @@ export class RanksService {
    * through the API: no permission grants it.
    */
   private assertNotProtected(rank: Rank, verb: 'renamed' | 'deleted'): void {
-    if (!isProtectedRankName(rank.name)) return;
+    const because = protectedRankReason(rank.name);
+    if (!because) return;
     throw new ForbiddenException(
-      `"${rank.name}" is required by the dashboard and cannot be ${verb}. ` +
-        'New enlistments are placed on it by name, so renaming or removing it ' +
-        'would break application approvals. Its position, insignia and Discord ' +
-        'role can still be changed.',
+      `"${rank.name}" is required by the dashboard and cannot be ${verb}, ` +
+        `because ${because}. Its position, insignia and Discord role can still ` +
+        'be changed.',
     );
   }
 

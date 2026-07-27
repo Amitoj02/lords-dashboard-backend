@@ -81,6 +81,33 @@
 
 	encode zstd gzip
 
+	# ── Link unfurlers only: server-rendered Open Graph cards (T-0197) ──────────
+	#
+	# A share link is an SPA route, and the SPA is a static client-side build, so
+	# a crawler that does not run JavaScript sees the same generic <head> for
+	# every item — one title, one description, no image. This sends KNOWN
+	# unfurler user-agents (and nobody else) to the API's share shell, which
+	# renders per-item og:*/twitter:* tags. Humans keep getting the real app.
+	#
+	# ⚠️ THIS BLOCK MUST STAY ABOVE `handle /api/*`. Sibling `handle` blocks are
+	# mutually exclusive and evaluated in file order; below it, it would still
+	# work for /gallery/* (which does not match /api/*) but the ordering would be
+	# accidental rather than intended.
+	#
+	# ⚠️ UA-varying response on a path Cloudflare could be told to cache. Nothing
+	# caches /gallery/* today (nginx sends no-store, and the CF cache rules cover
+	# only hashed assets, /, /index.html and /api/*). If a cache rule is ever
+	# added for it, this needs `Vary: User-Agent` or humans will be served the
+	# crawler shell.
+	@unfurler {
+		path /gallery/*
+		header_regexp User-Agent "(?i)(discordbot|facebookexternalhit|twitterbot|whatsapp|slackbot|telegrambot|linkedinbot|redditbot|skypeuripreview|iframely|embedly|googlebot|bingbot|applebot|mastodon|matrix|signal)"
+	}
+	handle @unfurler {
+		rewrite * /api/share{uri}
+		reverse_proxy api:3000
+	}
+
 	# handle blocks are mutually exclusive, so /api/* can never fall through to the
 	# SPA fallback below and return index.html for a missing endpoint.
 	handle /api/* {

@@ -127,7 +127,9 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
         applyBanRoleOnBan: false,
         banRoleId: null,
         banRoleName: null,
-        joinRoleId: null,
+        membershipRoleId: null,
+        gallerySubmissionChannelId: null,
+        galleryApprovedChannelId: null,
         welcomeChannelId: null,
         welcomeMessage: null,
         enlistmentChannelId: null,
@@ -185,7 +187,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     await request(server())
       .patch('/api/discord/settings')
       .set(bearer(ownerToken))
-      .send({ botEnabled: true, joinRoleId: '900000000000000001' })
+      .send({ botEnabled: true, membershipRoleId: '900000000000000001' })
       .expect(200);
 
     const verify = await request(server())
@@ -461,7 +463,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       await request(server())
         .patch('/api/discord/settings')
         .set(bearer(ownerToken))
-        .send({ botEnabled: true, joinRoleId: '900000000000000001' })
+        .send({ botEnabled: true, membershipRoleId: '900000000000000001' })
         .expect(200);
 
       await request(server())
@@ -475,7 +477,8 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       const dm = mockGateway.sentMessages.find((m) => m.target === '555000000000000002');
       expect(dm?.kind).toBe('dm');
       expect(dm?.embeds[0].title).toContain('Welcome to');
-      expect(dm?.embeds[0].fields?.[0].name).toBe('Next steps');
+      // The configured message is the WHOLE message — nothing is appended to it.
+      expect(dm?.embeds[0].fields ?? []).toEqual([]);
     });
   });
 

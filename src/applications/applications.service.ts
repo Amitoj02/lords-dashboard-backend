@@ -173,6 +173,19 @@ export class ApplicationsService {
       submittedAt: saved.submittedAt ? saved.submittedAt.toISOString() : null,
     });
 
+    // Mark the application as in flight IN DISCORD (T-0192) — the Applicant role.
+    //
+    // ⚠️ NOTHING HAPPENS ON THE WEBSITE. No member row is created and no rank is
+    // assigned: submitting is not joining, and an applicant who is shown a rank
+    // on the roster has been told they are in when they are not. The role is
+    // purely a guild-side marker so officers can see who is mid-application, and
+    // it is taken back on approve and on decline.
+    await this.discordSync.enqueueApplicantRole(
+      user.regimentId,
+      identity?.discordUserId ?? null,
+      'add',
+    );
+
     // TODO(audit): no `application.submit` action code exists in the seed; the
     // submit is an applicant self-action, so it is intentionally not audited.
     return ApplicantApplicationDto.from(saved);
@@ -308,6 +321,11 @@ export class ApplicationsService {
       target: { type: 'application', id: application.id, label: application.applicantName },
       detail: dto.reason ?? null,
     });
+
+    // A block declines every open application, so it is a rejection and the
+    // marker comes off with them (T-0192). Keyed on the identity, not on each
+    // declined row — the role is held once, however many applications closed.
+    await this.stripApplicantRole(user.regimentId, identity.id);
 
     // Reload so the returned projection reflects the (possibly now-declined) status.
     return ApplicationDto.from(await this.loadOrFail(user, id));
@@ -497,6 +515,26 @@ export class ApplicationsService {
       detail: `Approved application; promoted to ${member.role} (${ENTRY_RANK_NAME}).`,
     });
 
+    // ── The applicant becomes a member IN DISCORD too (T-0192/T-0194) ────────
+    //
+    // *** THIS IS WHERE THE ENLISTMENT USED TO STOP AT THE DATABASE. *** The
+    // member row was written with the entry rank and nothing was ever enqueued,
+    // so an approved recruit got the rank on the dashboard and NO Discord role
+    // for it. It only ever landed later, by accident, on the next rank/role/medal
+    // change or a manual `POST /discord/resync`. Enlistment was the one
+    // rank-assigning path in the app that did not sync — every path in
+    // MembersService ends in `syncMemberRoles`.
+    //
+    // Ordering is the whole story: the Applicant marker comes OFF, then the
+    // reconcile puts on what the roster now says they are (entry-rank role plus
+    // the Membership role, which `holdsMembershipRole` withholds from a
+    // Mercenary). Both are enqueued AFTER the transaction has committed —
+    // `reconcileRoles` re-reads the member by id and silently returns if the row
+    // is not there yet, and the worker ticks every 3 seconds.
+    const discordUserId = await this.discordUserIdFor(application.discordIdentityId);
+    await this.discordSync.enqueueApplicantRole(user.regimentId, discordUserId, 'remove');
+    await this.discordSync.enqueueRoleSync(user.regimentId, member.id, discordUserId);
+
     // Best-effort decision DM to the applicant (never affects the approval).
     await this.enqueueDecisionDm(
       user.regimentId,
@@ -557,6 +595,11 @@ export class ApplicationsService {
       'decline',
       userMessage,
     );
+
+    // The application is no longer in flight, so the marker comes off (T-0192).
+    // A decline gives NOTHING back in exchange — no membership, no rank — which
+    // is the whole difference from the approve path above.
+    await this.stripApplicantRole(user.regimentId, application.discordIdentityId);
 
     return ApplicationDto.from(saved);
   }
@@ -638,9 +681,7 @@ export class ApplicationsService {
     customMessage?: string | null,
   ): Promise<void> {
     try {
-      if (!discordIdentityId) return;
-      const identity = await this.identities.findOne({ where: { id: discordIdentityId } });
-      const discordUserId = identity?.discordUserId;
+      const discordUserId = await this.discordUserIdFor(discordIdentityId);
       if (!discordUserId) return;
 
       await this.discordSync.enqueueApplicationDecision(regimentId, {
@@ -650,6 +691,40 @@ export class ApplicationsService {
       });
     } catch (error) {
       this.logger.error(`Failed to enqueue ${decision} decision DM: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * The Discord snowflake behind an application's identity, or null when the
+   * applicant never linked one (or the row is gone).
+   *
+   * Extracted because THREE separate outbox producers need it now and each takes
+   * the snowflake, not the identity id — the decision DM, the Applicant-role
+   * grant/strip, and the role reconcile on enlistment. Copying the members-module
+   * idiom `member.discordIdentity?.discordUserId` would not have worked on the
+   * approve path: the member built there has only the FK column set, with no
+   * relation hydrated, so it would have read `undefined` forever.
+   */
+  private async discordUserIdFor(discordIdentityId: string | null): Promise<string | null> {
+    if (!discordIdentityId) return null;
+    const identity = await this.identities.findOne({ where: { id: discordIdentityId } });
+    return identity?.discordUserId ?? null;
+  }
+
+  /**
+   * Take the Applicant role back once an application is no longer in flight
+   * (T-0192). Best-effort and deliberately silent: the role is a marker, so
+   * failing to remove it must never fail the decision that was just recorded.
+   */
+  private async stripApplicantRole(
+    regimentId: string,
+    discordIdentityId: string | null,
+  ): Promise<void> {
+    try {
+      const discordUserId = await this.discordUserIdFor(discordIdentityId);
+      await this.discordSync.enqueueApplicantRole(regimentId, discordUserId, 'remove');
+    } catch (error) {
+      this.logger.error(`Failed to strip the Applicant role: ${(error as Error).message}`);
     }
   }
 

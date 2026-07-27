@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
+import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordSyncService, EventSummary, RoleRelinkPayload } from './discord-sync.service';
 import { DiscordEmbed } from './gateway/discord-gateway';
@@ -22,8 +23,12 @@ const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettin
   auditLogChannelName: null,
   eventAnnouncementChannelId: null,
   eventAnnouncementChannelName: null,
-  joinRoleId: '222',
-  joinRoleName: 'Guest',
+  gallerySubmissionChannelId: null,
+  gallerySubmissionChannelName: null,
+  galleryApprovedChannelId: null,
+  galleryApprovedChannelName: null,
+  membershipRoleId: '222',
+  membershipRoleName: 'Member',
   banRoleId: null,
   banRoleName: null,
   syncRolesOnChange: true,
@@ -49,6 +54,8 @@ describe('DiscordSyncService', () => {
   const settingsRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => x) };
   const membersRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
   const regimentsRepo = { findOne: jest.fn() };
+  /** The Applicant rank, whose linked role IS the Applicant role (T-0192). */
+  const ranksRepo = { findOne: jest.fn() };
 
   /** The embed a producer composed, read straight off the saved job payload. */
   const savedEmbed = (call = 0): DiscordEmbed =>
@@ -103,6 +110,7 @@ describe('DiscordSyncService', () => {
         { provide: getRepositoryToken(DiscordSyncJob), useValue: jobsRepo },
         { provide: getRepositoryToken(DiscordBotSettings), useValue: settingsRepo },
         { provide: getRepositoryToken(Member), useValue: membersRepo },
+        { provide: getRepositoryToken(Rank), useValue: ranksRepo },
         { provide: getRepositoryToken(Regiment), useValue: regimentsRepo },
       ],
     }).compile();
@@ -620,7 +628,8 @@ describe('DiscordSyncService', () => {
       expect(embed.title).toBe('Welcome to The Lords');
       expect(embed.description).toBe('Fall in!');
       expect(embed.imageUrl).toBe('https://cdn.example.com/regiment-banner.png');
-      expect(embed.fields?.[0].name).toBe('Next steps');
+      // Nothing is appended to the admin's message — see buildWelcomeEmbed.
+      expect(embed.fields ?? []).toEqual([]);
     });
 
     // ── T-0184: blank means "use the house default", on the READ side too ─────

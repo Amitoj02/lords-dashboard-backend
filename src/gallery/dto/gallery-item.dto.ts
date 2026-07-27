@@ -75,6 +75,12 @@ export interface GalleryItemProjection {
   author: GalleryMemberRefDto | null;
   /** Whether the current caller has liked the item; omitted for public (no user). */
   liked?: boolean;
+  /**
+   * The moderator who approved it — ONLY set when the caller holds
+   * `moderate_gallery`. Left undefined otherwise so the key is omitted from the
+   * response entirely rather than serialized as null (T-0196).
+   */
+  approvedBy?: GalleryMemberRefDto | null;
 }
 
 /**
@@ -128,6 +134,17 @@ export class GalleryItemDto {
   })
   liked?: boolean;
 
+  @ApiPropertyOptional({
+    type: GalleryMemberRefDto,
+    nullable: true,
+    description:
+      'The moderator who approved this item. Present ONLY for callers holding ' +
+      '`moderate_gallery`; the key is absent from every other response, including the ' +
+      'public feed. Null when the item has not been approved (or was approved before ' +
+      'the moderator was recorded).',
+  })
+  approvedBy?: GalleryMemberRefDto | null;
+
   @ApiProperty({ example: '2026-06-22T18:30:00.000Z', description: 'ISO submit timestamp' })
   submittedAt: string;
 
@@ -160,6 +177,7 @@ export class GalleryItemDto {
     dto.tags = projection.tags;
     dto.likesCount = projection.likesCount;
     dto.liked = projection.liked;
+    dto.approvedBy = projection.approvedBy;
     dto.submittedAt = item.submittedAt.toISOString();
     dto.approvedAt = item.approvedAt ? item.approvedAt.toISOString() : null;
     dto.createdAt = item.createdAt.toISOString();

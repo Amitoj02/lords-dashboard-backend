@@ -5,6 +5,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -18,7 +19,8 @@ import {
   MemberRole,
   StorageTarget,
 } from '../common/enums';
-import { DiscordSyncService } from '../discord/discord-sync.service';
+import { AppConfig } from '../config/configuration';
+import { DiscordSyncService, GallerySummary } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { StorageService } from '../storage/storage.service';
@@ -27,6 +29,7 @@ import { DeclineGalleryDto } from './dto/decline-gallery.dto';
 import {
   GalleryFileDto,
   GalleryItemDto,
+  GalleryMemberRefDto,
   GallerySubmissionSummaryDto,
 } from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
@@ -83,8 +86,11 @@ export class GalleryService {
     private readonly authz: AuthzService,
     // Resolves uploaded file keys to public URLs (namespace-validated).
     private readonly storage: StorageService,
-    // Best-effort decline DMs to the submitter (never fails the decision).
+    // Best-effort decline DMs to the submitter (never fails the decision), and
+    // the review / showcase channel posts (T-0195).
     private readonly discordSync: DiscordSyncService,
+    // The public site URL, so a channel post can link back to the item.
+    private readonly config: ConfigService<AppConfig, true>,
   ) {}
 
   // ── Public feed (unauthenticated — no caller to scope by) ────────────────────
@@ -141,11 +147,17 @@ export class GalleryService {
    * even when the public archive is off. Scoped to the caller's regiment and
    * passes their memberId so the per-item `liked` flag is populated.
    */
-  findArchive(
+  async findArchive(
     user: AuthenticatedUser,
     query: GalleryQueryDto,
   ): Promise<PaginatedResponseDto<GalleryItemDto>> {
-    return this.listItems(user.regimentId, GalleryStatus.Approved, query, user.memberId);
+    return this.listItems(
+      user.regimentId,
+      GalleryStatus.Approved,
+      query,
+      user.memberId,
+      await this.canSeeApprover(user),
+    );
   }
 
   // ── Moderation queue ─────────────────────────────────────────────────────────
@@ -156,7 +168,7 @@ export class GalleryService {
    * declined — so the FE can populate each moderation tab. Declined items carry
    * their `declineReason` through the projection.
    */
-  moderationQueue(
+  async moderationQueue(
     user: AuthenticatedUser,
     query: GalleryQueryDto,
   ): Promise<PaginatedResponseDto<GalleryItemDto>> {
@@ -165,6 +177,10 @@ export class GalleryService {
       query.status ?? GalleryStatus.Pending,
       query,
       user.memberId,
+      // Always true in practice — the route is ModerateGallery-gated — but read
+      // from the matrix rather than assumed, so the field cannot outlive the gate
+      // if the route is ever re-gated.
+      await this.canSeeApprover(user),
     );
   }
 
@@ -299,6 +315,16 @@ export class GalleryService {
       detail: autoApprove ? 'Auto-approved (trusted member)' : null,
     });
 
+    // A trusted member's auto-approved submission skips the review queue, so it
+    // must skip the REVIEW channel too and go straight to the showcase — posting
+    // "awaiting review" for something already published would send officers to a
+    // queue with nothing in it.
+    await this.postToGalleryChannel(
+      user.regimentId,
+      saved.id,
+      autoApprove ? 'approved' : 'pending',
+    );
+
     const reloaded = await this.loadItem(saved.id, user.regimentId, {});
     return this.projectOne(reloaded, memberId);
   }
@@ -306,6 +332,7 @@ export class GalleryService {
   /** Approve a pending/declined item. Audited. */
   async approve(user: AuthenticatedUser, id: string, ip: string | null): Promise<GalleryItemDto> {
     const item = await this.loadItem(id, user.regimentId, {});
+    const wasApproved = item.status === GalleryStatus.Approved;
     item.status = GalleryStatus.Approved;
     item.approvedAt = new Date();
     item.moderatedByMemberId = user.memberId;
@@ -319,7 +346,18 @@ export class GalleryService {
       target: { type: 'gallery', id: saved.id, label: saved.title },
     });
 
-    return this.projectOne(saved, user.memberId);
+    // Showcase it — but only on the transition INTO approved. `approve` is
+    // reachable on an already-approved item (it doubles as "clear the decline"),
+    // and re-posting the same picture every time a moderator touches the row
+    // would spam the channel.
+    if (!wasApproved) {
+      await this.postToGalleryChannel(user.regimentId, saved.id, 'approved');
+    }
+    // The response goes straight back into the moderation console, so it carries
+    // the attribution the console is about to render.
+    saved.moderatedBy = await this.approverFor(saved.moderatedByMemberId);
+
+    return this.projectOne(saved, user.memberId, await this.canSeeApprover(user));
   }
 
   /** Decline an item with an optional reason. Audited. */
@@ -507,12 +545,17 @@ export class GalleryService {
     status: GalleryStatus,
     query: GalleryQueryDto,
     viewerMemberId: string | null,
+    includeApprover = false,
   ): Promise<PaginatedResponseDto<GalleryItemDto>> {
     const qb = this.items
       .createQueryBuilder('item')
       .leftJoinAndSelect('item.author', 'author')
       // Nested identity so the author avatar can fall back to the Discord avatar.
       .leftJoinAndSelect('author.discordIdentity', 'authorIdentity')
+      // The approving officer, on the SAME query rather than a lookup per row —
+      // this feeds a paginated page (T-0196).
+      .leftJoinAndSelect('item.moderatedBy', 'moderator')
+      .leftJoinAndSelect('moderator.discordIdentity', 'moderatorIdentity')
       .where('item.regimentId = :regimentId', { regimentId })
       .andWhere('item.status = :status', { status })
       .andWhere('item.isDraft = :isDraft', { isDraft: false })
@@ -528,7 +571,7 @@ export class GalleryService {
       .take(query.limit)
       .getManyAndCount();
 
-    const data = await this.projectMany(rows, viewerMemberId);
+    const data = await this.projectMany(rows, viewerMemberId, includeApprover);
     return new PaginatedResponseDto(data, total, query.page, query.limit);
   }
 
@@ -556,8 +599,9 @@ export class GalleryService {
   private async projectOne(
     item: GalleryItem,
     viewerMemberId: string | null,
+    includeApprover = false,
   ): Promise<GalleryItemDto> {
-    const [dto] = await this.projectMany([item], viewerMemberId);
+    const [dto] = await this.projectMany([item], viewerMemberId, includeApprover);
     return dto;
   }
 
@@ -569,6 +613,7 @@ export class GalleryService {
   private async projectMany(
     items: GalleryItem[],
     viewerMemberId: string | null,
+    includeApprover = false,
   ): Promise<GalleryItemDto[]> {
     if (items.length === 0) {
       return [];
@@ -595,8 +640,31 @@ export class GalleryService {
             }
           : null,
         liked: likedSet ? likedSet.has(item.id) : undefined,
+        // `undefined` — not null — for a caller without the capability, so the
+        // key is absent from the response rather than present-and-empty. A null
+        // would tell an ordinary viewer that an approver EXISTS and is hidden;
+        // absence tells them nothing, which is the point of the gate.
+        approvedBy: includeApprover ? GalleryService.approverRef(item) : undefined,
       }),
     );
+  }
+
+  /**
+   * The moderator on an item, as a member reference — but only for an item that
+   * is actually APPROVED.
+   *
+   * `moderated_by_member_id` is one column shared by approve and decline, so on a
+   * declined item it holds whoever declined it. Rendering that under "Approved
+   * by" would be a plain lie, so the status is checked here rather than at the
+   * call site, where every future caller would have to remember to.
+   */
+  private static approverRef(item: GalleryItem): GalleryMemberRefDto | null {
+    if (item.status !== GalleryStatus.Approved || !item.moderatedBy) return null;
+    return {
+      memberId: item.moderatedBy.id,
+      name: item.moderatedBy.inGameName,
+      avatarUrl: item.moderatedBy.avatarUrl ?? item.moderatedBy.discordIdentity?.avatarUrl ?? null,
+    };
   }
 
   /** One query mapping itemId -> its file DTOs for the page. */
@@ -659,6 +727,123 @@ export class GalleryService {
       where: { galleryItemId: In(itemIds), memberId },
     });
     return new Set(rows.map((row) => row.galleryItemId));
+  }
+
+  // ── Discord channel posts (T-0195) ──────────────────────────────────────────
+
+  /**
+   * Cross-post a gallery item to its channel: the staff review channel on
+   * submit, the public showcase channel on approve.
+   *
+   * Best-effort in the strongest sense — the whole body is wrapped, because a
+   * regiment must never lose a submission or an approval to a Discord problem.
+   * The producers additionally no-op when the bot is off or the channel is
+   * unset, so this is silent for a regiment that has not configured either.
+   */
+  private async postToGalleryChannel(
+    regimentId: string,
+    itemId: string,
+    stage: 'pending' | 'approved',
+  ): Promise<void> {
+    try {
+      const item = await this.items.findOne({
+        where: { id: itemId, regimentId },
+        relations: { author: { discordIdentity: true }, moderatedBy: true },
+      });
+      if (!item) return;
+      const files = await this.files.find({
+        where: { galleryItemId: item.id },
+        order: { fileName: 'ASC' },
+      });
+      const summary = this.galleryShareSummary(item, files, stage);
+      if (stage === 'pending') {
+        await this.discordSync.enqueueGallerySubmitted(regimentId, summary);
+      } else {
+        await this.discordSync.enqueueGalleryApproved(regimentId, summary);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to enqueue gallery ${stage} post: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Reshape a stored item into what the Discord composer needs.
+   *
+   * ⚠️ THE IMAGE AND THE PLAYABLE URL ARE DIFFERENT THINGS, deliberately:
+   *  - `imageUrl` is a STILL. For an image submission it is the first file; for
+   *    a video it is the uploaded poster frame, because a video URL in an embed
+   *    image slot renders as nothing at all.
+   *  - `playableUrl` is what Discord can build a player from, and only ever
+   *    reaches the message CONTENT. An uploaded video qualifies because its R2
+   *    URL is permanent, unsigned and served inline with a real content type
+   *    (nothing sets Content-Disposition), so Discord's media proxy will play
+   *    it. An EXTERNAL link qualifies too, but for a different reason: Discord
+   *    unfurls YouTube/Medal itself, better than anything reconstructible here.
+   *
+   * Only the FIRST file is shown. A multi-file submission says how many there
+   * are and links back to the dashboard for the rest — a channel post that
+   * expands into ten images is a channel nobody can read.
+   */
+  private galleryShareSummary(
+    item: GalleryItem,
+    files: GalleryFile[],
+    stage: 'pending' | 'approved',
+  ): GallerySummary {
+    const first = files[0] ?? null;
+    const firstIsImage = first?.mediaType === GalleryMediaType.Image;
+    const frontend = this.config.get('frontend', { infer: true });
+    const siteUrl = frontend.url?.replace(/\/$/, '') ?? null;
+
+    // The still: an image file directly, otherwise the video's poster frame.
+    const stillUrl = (firstIsImage ? first?.url : null) ?? item.thumbnailUrl;
+    // The player: an uploaded video's own URL, otherwise the submitter's
+    // external link (which Discord unfurls itself). Never an image — an image
+    // already renders in the embed and a second copy underneath is just noise.
+    const playableUrl = (firstIsImage ? null : first?.url) ?? item.linkUrl;
+
+    return {
+      id: item.id,
+      title: item.title,
+      caption: item.caption,
+      type: item.type,
+      authorName: item.author?.inGameName ?? 'A member',
+      authorAvatarUrl: item.author?.avatarUrl ?? item.author?.discordIdentity?.avatarUrl ?? null,
+      imageUrl: stillUrl,
+      playableUrl: playableUrl,
+      linkUrl: item.linkUrl,
+      shareUrl: siteUrl ? `${siteUrl}/gallery/${item.id}` : null,
+      fileCount: files.length,
+      submittedAt: item.submittedAt ? item.submittedAt.toISOString() : null,
+      approvedByName: stage === 'approved' ? (item.moderatedBy?.inGameName ?? null) : null,
+    };
+  }
+
+  /**
+   * Whether this caller may see WHO approved an item (T-0196).
+   *
+   * Resolved ONCE per request and handed to the projection as a boolean, rather
+   * than checked per row — the same shape `MembersService.permittedActionsResolver`
+   * uses, and for the same reason: a per-row check is a query per row on a
+   * paginated page. `AuthzService.can` is itself memoised for 30s.
+   */
+  private canSeeApprover(user: AuthenticatedUser): Promise<boolean> {
+    return this.authz.can(user.regimentId, user.role, Capability.ModerateGallery);
+  }
+
+  /**
+   * Load the moderator row for a just-saved decision.
+   *
+   * `this.items.save()` returns the entity it was handed, whose `moderatedBy`
+   * relation is whatever was loaded BEFORE the decision — i.e. the previous
+   * moderator, or nothing at all on a first approval. Re-reading it is what
+   * stops the response attributing the approval to the wrong officer.
+   */
+  private async approverFor(memberId: string | null): Promise<Member | null> {
+    if (!memberId) return null;
+    return this.members.findOne({
+      where: { id: memberId },
+      relations: { discordIdentity: true },
+    });
   }
 
   /** Resolve THE regiment's settings row (single-tenant: the oldest row) or null. */

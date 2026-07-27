@@ -93,6 +93,8 @@ describe('ApplicationsService', () => {
   let discordSync: {
     enqueueApplicationSubmitted: jest.Mock;
     enqueueApplicationDecision: jest.Mock;
+    enqueueApplicantRole: jest.Mock;
+    enqueueRoleSync: jest.Mock;
   };
 
   // Per-test transaction manager repositories.
@@ -141,6 +143,9 @@ describe('ApplicationsService', () => {
     discordSync = {
       enqueueApplicationSubmitted: jest.fn().mockResolvedValue(null),
       enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
+      // The Applicant marker (T-0192) and the enlistment role sync (T-0194).
+      enqueueApplicantRole: jest.fn().mockResolvedValue(null),
+      enqueueRoleSync: jest.fn().mockResolvedValue(null),
     };
 
     txRanks = { findOne: jest.fn() };
