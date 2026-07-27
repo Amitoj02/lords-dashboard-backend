@@ -410,6 +410,11 @@ export class DiscordSyncService {
         channelId: s.gallerySubmissionChannelId,
         content: '',
         embed: buildGalleryEmbed(item, brand, 'pending'),
+        // The reviewer needs to WATCH the thing they are being asked to pass.
+        // An embed cannot play a video and does not unfurl a link, so the same
+        // bare-URL second message the showcase post uses is if anything more
+        // necessary here — this channel is where the decision is actually made.
+        mediaUrl: item.playableUrl ?? null,
       });
     });
   }

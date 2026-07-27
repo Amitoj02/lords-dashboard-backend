@@ -268,6 +268,22 @@ describe('DiscordSyncService', () => {
       expect(savedEmbed().title).toContain('awaiting review');
     });
 
+    it('carries the playable url into the REVIEW channel too', async () => {
+      // The reviewer has to be able to watch the clip they are passing; an
+      // embed neither plays a video nor unfurls a link.
+      settingsRepo.findOne.mockResolvedValue(settings({ gallerySubmissionChannelId: 'review-1' }));
+
+      await service.enqueueGallerySubmitted(REGIMENT, {
+        ...item,
+        type: 'link',
+        playableUrl: 'https://youtu.be/abc',
+      });
+
+      const payload = (jobsRepo.create.mock.calls[0][0] as { payload: { mediaUrl: string } })
+        .payload;
+      expect(payload.mediaUrl).toBe('https://youtu.be/abc');
+    });
+
     it('routes an approval to the SHOWCASE channel and carries the playable url', async () => {
       settingsRepo.findOne.mockResolvedValue(settings({ galleryApprovedChannelId: 'show-1' }));
 

@@ -115,7 +115,9 @@ export class GalleryShareService {
     } catch {
       return base;
     }
-    const host = parsed.hostname.toLowerCase();
+    // NOT `parsed.hostname` — the extractors match the bare `youtube.com`, so a
+    // raw hostname misses every `www.` URL, which is the form YouTube hands out.
+    const host = MediaEmbedService.hostOf(parsed);
 
     const youtubeId = MediaEmbedService.extractYouTubeId(parsed, host);
     if (youtubeId) {

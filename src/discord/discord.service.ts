@@ -183,8 +183,21 @@ export class DiscordService {
     // same link validation as rank/medal roles (LDA-H1): a manage_settings holder
     // must not be able to point membershipRoleId/banRoleId at a privileged or
     // above-bot role. Only non-empty values are checked (empty clears the mapping).
-    if (dto.membershipRoleId) await this.rolePolicy.assertRoleLinkable(dto.membershipRoleId);
-    if (dto.banRoleId) await this.rolePolicy.assertRoleLinkable(dto.banRoleId);
+    //
+    // ⚠️ ONLY A *CHANGED* VALUE IS VALIDATED — same rule, and the same reason, as
+    // the protected-rank rename guard (T-0190). This editor posts the WHOLE
+    // settings object on every save, so re-validating an unchanged id meant that
+    // one already-stored privileged role made the entire panel unsaveable:
+    // channels, the welcome message and every toggle were refused along with it,
+    // with an error naming a field the admin had not touched. Worse, the offending
+    // value could not be cleared either, because the clear posts the same body.
+    // A stored value is a decision already taken; what needs checking is a new one.
+    if (dto.membershipRoleId && dto.membershipRoleId !== settings.membershipRoleId) {
+      await this.rolePolicy.assertRoleLinkable(dto.membershipRoleId);
+    }
+    if (dto.banRoleId && dto.banRoleId !== settings.banRoleId) {
+      await this.rolePolicy.assertRoleLinkable(dto.banRoleId);
+    }
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
