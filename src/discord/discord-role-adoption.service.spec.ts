@@ -152,4 +152,82 @@ describe('DiscordRoleAdoptionService', () => {
       expect(await resolve()).toEqual({ rank: null, medals: [] });
     });
   });
+
+  /**
+   * T-0204 — the same read, asked to SAY WHY it came back empty. The enlistment
+   * path is right to shrug a failure off; an admin pressing "Derive data from
+   * Discord" needs to know whether they are looking at a member with no roles or
+   * at an integration that is not working.
+   */
+  describe('readGuildState (the reasons)', () => {
+    const read = (discordUserId: string | null = '900900900900900901', floor = ENTRY_PRECEDENCE) =>
+      service.readGuildState('regiment-1', discordUserId, floor);
+
+    it('reports a member with no linked Discord account', async () => {
+      expect(await read(null)).toEqual({ ok: false, reason: 'not-linked' });
+      expect(gateway.fetchMember).not.toHaveBeenCalled();
+    });
+
+    it('reports a switched-off bot instead of an empty hand', async () => {
+      settings.findOne!.mockResolvedValue({ botEnabled: false });
+
+      expect(await read()).toEqual({ ok: false, reason: 'bot-disabled' });
+      expect(gateway.fetchMember).not.toHaveBeenCalled();
+    });
+
+    it('reports a member the gateway cannot see in the guild', async () => {
+      gateway.fetchMember.mockResolvedValue(null);
+
+      expect(await read()).toEqual({ ok: false, reason: 'not-in-guild' });
+    });
+
+    it('reports an unreachable gateway rather than a member who earned nothing', async () => {
+      gateway.fetchMember.mockRejectedValue(new Error('Discord API 503'));
+
+      expect(await read()).toEqual({ ok: false, reason: 'unreachable' });
+    });
+
+    /**
+     * The one case that is a SUCCESS with nothing in it. "In the guild wearing no
+     * roles" is a real, complete answer — and it is answered without touching the
+     * rank or medal catalogues, because nothing they contain could change it.
+     */
+    it('reports a role-less guild member as a successful read of nothing', async () => {
+      wearing();
+
+      expect(await read()).toEqual({ ok: true, state: { rank: null, medals: [] } });
+      expect(ranks.find).not.toHaveBeenCalled();
+      expect(medals.find).not.toHaveBeenCalled();
+    });
+
+    it('hands back the same state the lenient wrapper flattens', async () => {
+      wearing('role-sergeant', 'role-valour');
+
+      const strict = await read();
+      expect(strict.ok).toBe(true);
+      expect(strict.ok && strict.state.rank).toMatchObject({ id: 'rank-sergeant' });
+      expect(strict.ok && strict.state.medals.map((m) => m.id)).toEqual(['medal-valour']);
+    });
+
+    /**
+     * The floor is the caller's to choose, and for an existing member it is the
+     * rank they hold — which is what makes a derive promotion-only. Infinity is
+     * the "no rank at all" case: everything qualifies.
+     */
+    it('treats the floor as strict, and Infinity as no floor at all', async () => {
+      wearing('role-sergeant');
+
+      // Sergeant (6) is not STRICTLY above a floor of 6 — the rank a member
+      // already holds is never re-adopted as if it were news.
+      expect(await read('900900900900900901', 6)).toMatchObject({ state: { rank: null } });
+      // One rung below it, the same role is a promotion.
+      expect(await read('900900900900900901', 7)).toMatchObject({
+        state: { rank: { id: 'rank-sergeant' } },
+      });
+      // And with no floor at all (a member holding no rank), so is anything.
+      expect(await read('900900900900900901', Number.POSITIVE_INFINITY)).toMatchObject({
+        state: { rank: { id: 'rank-sergeant' } },
+      });
+    });
+  });
 });

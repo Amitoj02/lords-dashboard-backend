@@ -71,6 +71,13 @@ export class PermittedActionsDto {
 
   @ApiProperty({ description: 'Requires manage_roles' })
   unban: boolean;
+
+  @ApiProperty({
+    description:
+      'Requires edit_ranks_medals. Never true on your own record — a derive is a ' +
+      'self-promotion there (T-0204)',
+  })
+  deriveFromDiscord: boolean;
 }
 
 /**
