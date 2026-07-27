@@ -99,7 +99,7 @@ export class MediaEmbedService {
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
       return base;
     }
-    const host = parsed.hostname.replace(/^www\./, '').toLowerCase();
+    const host = MediaEmbedService.hostOf(parsed);
 
     const youtubeId = MediaEmbedService.extractYouTubeId(parsed, host);
     if (youtubeId) {
@@ -132,6 +132,21 @@ export class MediaEmbedService {
       return { ...base, provider: MediaProvider.Video };
     }
     return base;
+  }
+
+  /**
+   * The host the extractors below compare against: lowercased, with a leading
+   * `www.` removed.
+   *
+   * Extracted into a helper because the two callers ARE coupled and drifted the
+   * moment there were two: `extractYouTubeId` matches the bare `youtube.com`,
+   * so a caller that passed `parsed.hostname` straight through silently failed
+   * to recognise every `https://www.youtube.com/watch?v=…` URL — which is the
+   * form the site actually hands out. Anything resolving a provider must go
+   * through here.
+   */
+  static hostOf(parsed: URL): string {
+    return parsed.hostname.replace(/^www\./, '').toLowerCase();
   }
 
   /** Extract a YouTube video id from watch?v= / youtu.be / shorts / embed URLs. */

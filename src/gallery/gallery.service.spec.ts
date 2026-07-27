@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
@@ -151,8 +152,14 @@ describe('GalleryService', () => {
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
   let authz: { can: jest.Mock };
-  let discordSync: { enqueueApplicationDecision: jest.Mock; enqueueGalleryDecision: jest.Mock };
+  let discordSync: {
+    enqueueApplicationDecision: jest.Mock;
+    enqueueGalleryDecision: jest.Mock;
+    enqueueGallerySubmitted: jest.Mock;
+    enqueueGalleryApproved: jest.Mock;
+  };
   let storage: { resolveKeyToPublicUrl: jest.Mock; deleteObject: jest.Mock };
+  let config: { get: jest.Mock };
 
   // Per-test transaction manager repositories.
   let txItems: MockRepo<GalleryItem>;
@@ -189,11 +196,18 @@ describe('GalleryService', () => {
     discordSync = {
       enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
       enqueueGalleryDecision: jest.fn().mockResolvedValue(null),
+      // The review / showcase channel posts (T-0195). Both are best-effort and
+      // wrapped by the service, so a missing mock would have been swallowed as a
+      // logged error rather than failing a test — hence stubbing them explicitly.
+      enqueueGallerySubmitted: jest.fn().mockResolvedValue(null),
+      enqueueGalleryApproved: jest.fn().mockResolvedValue(null),
     };
     storage = {
       resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
       deleteObject: jest.fn().mockResolvedValue(undefined),
     };
+    // Only `frontend.url` is read, to build the share link on a channel post.
+    config = { get: jest.fn(() => ({ url: 'https://lords.example' })) };
 
     txItems = {
       create: jest.fn((x: unknown) => x),
@@ -234,6 +248,7 @@ describe('GalleryService', () => {
         { provide: AuthzService, useValue: authz },
         { provide: StorageService, useValue: storage },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: ConfigService, useValue: config },
       ],
     }).compile();
 

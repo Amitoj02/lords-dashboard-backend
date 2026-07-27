@@ -13,6 +13,7 @@ import { RegimentEvent } from '../src/events/entities/event.entity';
 import { GalleryItem } from '../src/gallery/entities/gallery-item.entity';
 import { Member } from '../src/members/entities/member.entity';
 import { RegimentDocument } from '../src/regiments/entities/regiment-document.entity';
+import { PROTECTED_RANK_NAMES } from '../src/ranks/protected-ranks';
 
 /**
  * End-to-end coverage of the POST-MVP feature modules against a real MySQL
@@ -1191,11 +1192,20 @@ describe('Post-MVP feature modules (e2e)', () => {
       return found;
     };
 
-    it('flags the entry rank as protected and every other rank as not', async () => {
+    it('flags exactly the server-resolved ranks as protected, and no others', async () => {
       const rows = await ladder();
+      const protectedSet = new Set<string>(PROTECTED_RANK_NAMES);
 
-      expect(rows.find((r) => r.name === 'Recruit')?.isProtected).toBe(true);
-      expect(rows.filter((r) => r.name !== 'Recruit').map((r) => r.isProtected)).not.toContain(
+      // Every protected name is actually ON the seeded ladder — a name in the
+      // constant with no row behind it is a broken enlistment flow, not a
+      // harmless typo.
+      for (const name of protectedSet) {
+        expect(rows.map((r) => r.name)).toContain(name);
+      }
+      expect(rows.filter((r) => protectedSet.has(r.name)).map((r) => r.isProtected)).not.toContain(
+        false,
+      );
+      expect(rows.filter((r) => !protectedSet.has(r.name)).map((r) => r.isProtected)).not.toContain(
         true,
       );
     });

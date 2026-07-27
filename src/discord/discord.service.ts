@@ -179,12 +179,25 @@ export class DiscordService {
     const banGateWas = settings.applyBanRoleOnBan;
     const guildGateWas = settings.guildGateEnabled;
 
-    // The join/ban roles are assigned by the bot, so they are subject to the same
-    // link validation as rank/medal roles (LDA-H1): a manage_settings holder must
-    // not be able to point joinRoleId/banRoleId at a privileged or above-bot role.
-    // Only non-empty values are checked (empty clears the mapping).
-    if (dto.joinRoleId) await this.rolePolicy.assertRoleLinkable(dto.joinRoleId);
-    if (dto.banRoleId) await this.rolePolicy.assertRoleLinkable(dto.banRoleId);
+    // The membership/ban roles are assigned by the bot, so they are subject to the
+    // same link validation as rank/medal roles (LDA-H1): a manage_settings holder
+    // must not be able to point membershipRoleId/banRoleId at a privileged or
+    // above-bot role. Only non-empty values are checked (empty clears the mapping).
+    //
+    // ⚠️ ONLY A *CHANGED* VALUE IS VALIDATED — same rule, and the same reason, as
+    // the protected-rank rename guard (T-0190). This editor posts the WHOLE
+    // settings object on every save, so re-validating an unchanged id meant that
+    // one already-stored privileged role made the entire panel unsaveable:
+    // channels, the welcome message and every toggle were refused along with it,
+    // with an error naming a field the admin had not touched. Worse, the offending
+    // value could not be cleared either, because the clear posts the same body.
+    // A stored value is a decision already taken; what needs checking is a new one.
+    if (dto.membershipRoleId && dto.membershipRoleId !== settings.membershipRoleId) {
+      await this.rolePolicy.assertRoleLinkable(dto.membershipRoleId);
+    }
+    if (dto.banRoleId && dto.banRoleId !== settings.banRoleId) {
+      await this.rolePolicy.assertRoleLinkable(dto.banRoleId);
+    }
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
     if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
@@ -211,8 +224,21 @@ export class DiscordService {
       settings.eventAnnouncementChannelId = dto.eventAnnouncementChannelId || null;
     if (dto.eventAnnouncementChannelName !== undefined)
       settings.eventAnnouncementChannelName = dto.eventAnnouncementChannelName || null;
-    if (dto.joinRoleId !== undefined) settings.joinRoleId = dto.joinRoleId;
-    if (dto.joinRoleName !== undefined) settings.joinRoleName = dto.joinRoleName;
+    if (dto.gallerySubmissionChannelId !== undefined)
+      settings.gallerySubmissionChannelId = dto.gallerySubmissionChannelId || null;
+    if (dto.gallerySubmissionChannelName !== undefined)
+      settings.gallerySubmissionChannelName = dto.gallerySubmissionChannelName || null;
+    if (dto.galleryApprovedChannelId !== undefined)
+      settings.galleryApprovedChannelId = dto.galleryApprovedChannelId || null;
+    if (dto.galleryApprovedChannelName !== undefined)
+      settings.galleryApprovedChannelName = dto.galleryApprovedChannelName || null;
+    // `|| null` unlike the old joinRoleId, which stored '' on a clear. Every read
+    // is a truthiness check so the two behaved identically, but the reconcile now
+    // compares this id against a member's CURRENT role snowflakes — and '' would
+    // have been a value that matches nothing while still reading as "configured".
+    if (dto.membershipRoleId !== undefined)
+      settings.membershipRoleId = dto.membershipRoleId || null;
+    if (dto.membershipRoleName !== undefined) settings.membershipRoleName = dto.membershipRoleName;
     if (dto.banRoleId !== undefined) settings.banRoleId = dto.banRoleId || null;
     if (dto.banRoleName !== undefined) settings.banRoleName = dto.banRoleName || null;
     if (dto.syncRolesOnChange !== undefined) settings.syncRolesOnChange = dto.syncRolesOnChange;

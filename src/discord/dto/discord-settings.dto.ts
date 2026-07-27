@@ -35,8 +35,29 @@ export class DiscordBotSettingsDto {
   @ApiProperty({ nullable: true }) auditLogChannelName: string | null;
   @ApiProperty({ nullable: true }) eventAnnouncementChannelId: string | null;
   @ApiProperty({ nullable: true }) eventAnnouncementChannelName: string | null;
-  @ApiProperty({ nullable: true }) joinRoleId: string | null;
-  @ApiProperty() joinRoleName: string;
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Staff channel a gallery submission is posted to for review. It carries unapproved ' +
+      'content, so it must not be readable by the guild at large.',
+  })
+  gallerySubmissionChannelId: string | null;
+  @ApiProperty({ nullable: true }) gallerySubmissionChannelName: string | null;
+  @ApiProperty({
+    nullable: true,
+    description: 'Public channel an APPROVED gallery item is showcased in.',
+  })
+  galleryApprovedChannelId: string | null;
+  @ApiProperty({ nullable: true }) galleryApprovedChannelName: string | null;
+  @ApiProperty({
+    nullable: true,
+    description:
+      "The regiment's single Member role, carried by every enrolled member regardless of " +
+      'rank. Granted from roster state — an approved member receives it, a mercenary and a ' +
+      'guild visitor do not. It is NOT assigned on joining the guild.',
+  })
+  membershipRoleId: string | null;
+  @ApiProperty() membershipRoleName: string;
   @ApiProperty({ nullable: true, description: 'Role applied on an app-side ban.' })
   banRoleId: string | null;
   @ApiProperty({ nullable: true }) banRoleName: string | null;
@@ -64,8 +85,12 @@ export class DiscordBotSettingsDto {
       auditLogChannelName: s.auditLogChannelName,
       eventAnnouncementChannelId: s.eventAnnouncementChannelId,
       eventAnnouncementChannelName: s.eventAnnouncementChannelName,
-      joinRoleId: s.joinRoleId,
-      joinRoleName: s.joinRoleName,
+      gallerySubmissionChannelId: s.gallerySubmissionChannelId,
+      gallerySubmissionChannelName: s.gallerySubmissionChannelName,
+      galleryApprovedChannelId: s.galleryApprovedChannelId,
+      galleryApprovedChannelName: s.galleryApprovedChannelName,
+      membershipRoleId: s.membershipRoleId,
+      membershipRoleName: s.membershipRoleName,
       banRoleId: s.banRoleId,
       banRoleName: s.banRoleName,
       syncRolesOnChange: s.syncRolesOnChange,
@@ -111,15 +136,43 @@ export class UpdateDiscordSettingsDto {
   @IsString()
   @MaxLength(120)
   eventAnnouncementChannelName?: string;
+  @ApiPropertyOptional({
+    description:
+      'Staff channel gallery submissions are posted to for review. Unapproved content lands ' +
+      'here, so point it at a channel the guild at large cannot read.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  gallerySubmissionChannelId?: string;
   @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  gallerySubmissionChannelName?: string;
+  @ApiPropertyOptional({ description: 'Public channel approved gallery items are showcased in.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  galleryApprovedChannelId?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  galleryApprovedChannelName?: string;
+  @ApiPropertyOptional({
+    description:
+      "The regiment's single Member role. Granted to enrolled members from roster state " +
+      '(mercenaries excluded) and NOT assigned on joining the guild.',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(20)
   @Matches(DISCORD_SNOWFLAKE_OR_EMPTY, {
-    message: 'joinRoleId must be a Discord snowflake (17–20 digits)',
+    message: 'membershipRoleId must be a Discord snowflake (17–20 digits)',
   })
-  joinRoleId?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) joinRoleName?: string;
+  membershipRoleId?: string;
+  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(120) membershipRoleName?: string;
   @ApiPropertyOptional({ description: 'Role snowflake applied on an app-side ban.' })
   @IsOptional()
   @IsString()

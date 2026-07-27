@@ -16,7 +16,7 @@ import { AuditSeverity, MemberRole } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RanksService } from './ranks.service';
 import { Rank } from './entities/rank.entity';
-import { ENTRY_RANK_NAME } from './protected-ranks';
+import { ENTRY_RANK_NAME, PROTECTED_RANKS } from './protected-ranks';
 
 const REGIMENT = 'regiment-1';
 
@@ -417,6 +417,59 @@ describe('RanksService', () => {
         { id: 'rank-recruit', regimentId: REGIMENT },
         { precedence: 2 },
       );
+    });
+  });
+
+  /**
+   * The entry rank was the first protected row; two more joined it once the
+   * enlistment flow started resolving them by name too. This block walks the
+   * whole set from the constant rather than restating the names, so a rank added
+   * to `PROTECTED_RANKS` is covered the moment it is added — the failure mode
+   * being defended against is a fourth name arriving with no test behind it.
+   */
+  describe('every protected rank, not just the entry rank', () => {
+    it.each(PROTECTED_RANKS.map((rank) => [rank.name]))(
+      '%s cannot be renamed or deleted',
+      async (name) => {
+        const row = buildRank({ id: 'rank-x', name, precedence: 10 });
+
+        rankRepo.findOne.mockResolvedValue(row);
+        await expect(
+          service.update(user(), 'rank-x', { name: 'Something Else' }, null),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+
+        rankRepo.findOne.mockResolvedValue(row);
+        await expect(service.remove(user(), 'rank-x', null)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+        expect(rankRepo.save).not.toHaveBeenCalled();
+        expect(rankRepo.remove).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(PROTECTED_RANKS.map((rank) => [rank.name, rank.because]))(
+      'tells the admin WHY %s is frozen',
+      async (name, because) => {
+        // A bare "this rank is protected" makes the ladder feel arbitrary. Each
+        // row names the mechanism holding it, and the message is rendered from
+        // the same constant so the two cannot drift.
+        rankRepo.findOne.mockResolvedValue(buildRank({ id: 'rank-x', name, precedence: 10 }));
+
+        await expect(
+          service.update(user(), 'rank-x', { name: 'Something Else' }, null),
+        ).rejects.toThrow(because);
+      },
+    );
+
+    it('leaves every OTHER rank on the ladder freely renameable', async () => {
+      rankRepo.findOne
+        .mockResolvedValueOnce(buildRank({ id: 'rank-sgt', name: 'Sergeant' }))
+        .mockResolvedValueOnce(null); // assertNameFree
+      memberRepo.count.mockResolvedValue(0);
+
+      await expect(
+        service.update(user(), 'rank-sgt', { name: 'Colour Sergeant' }, null),
+      ).resolves.toMatchObject({ name: 'Colour Sergeant' });
     });
   });
 

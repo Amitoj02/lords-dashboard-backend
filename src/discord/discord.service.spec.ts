@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -238,6 +238,88 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
    * default. It normalises here; the sibling cases pin that the normalisation did
    * not spread to the columns that must keep their existing semantics.
    */
+  /**
+   * T-0191. The Membership role is validated STRICTLY — the bot assigns it to
+   * every approved member with no admin in the loop to weigh a warning — but
+   * only when it CHANGES.
+   *
+   * The editor posts the whole settings object on every save, so re-validating
+   * an unchanged id made one already-stored privileged role lock the entire
+   * panel: channels, welcome copy and every toggle refused along with it, and
+   * the offending value could not even be cleared, because the clear posts the
+   * same body. Same shape of bug, same fix, as the protected-rank rename guard.
+   */
+  describe('role-link validation only fires on a CHANGE (T-0191)', () => {
+    const stored = (overrides: Partial<DiscordBotSettings> = {}) =>
+      ({
+        regimentId: REGIMENT,
+        membershipRoleId: '900000000000000001',
+        membershipRoleName: 'Member',
+        banRoleId: null,
+        applyBanRoleOnBan: false,
+        guildGateEnabled: false,
+        ...overrides,
+      }) as DiscordBotSettings;
+
+    beforeEach(() => {
+      sync.getSettings.mockImplementation(() => Promise.resolve(stored()));
+      settingsRepo.save.mockImplementation((s: DiscordBotSettings) => Promise.resolve(s));
+      rolePolicy.assertRoleLinkable.mockResolvedValue(undefined);
+    });
+
+    it('does not re-validate the membership role when the same id is posted back', async () => {
+      await service.updateSettings(
+        user(),
+        { membershipRoleId: '900000000000000001', auditLogChannelId: '123' },
+        null,
+      );
+
+      expect(rolePolicy.assertRoleLinkable).not.toHaveBeenCalled();
+      expect(settingsRepo.save).toHaveBeenCalled();
+    });
+
+    it('saves an UNRELATED field even though the stored role would fail validation', async () => {
+      // The actual reported symptom: a privileged role saved earlier made the
+      // gallery-channel pickers unsaveable, with an error naming a field the
+      // admin had not touched.
+      rolePolicy.assertRoleLinkable.mockRejectedValue(new BadRequestException('privileged'));
+
+      await expect(
+        service.updateSettings(
+          user(),
+          { membershipRoleId: '900000000000000001', gallerySubmissionChannelId: '456' },
+          null,
+        ),
+      ).resolves.toBeDefined();
+      expect(settingsRepo.save.mock.calls[0][0].gallerySubmissionChannelId).toBe('456');
+    });
+
+    it('DOES validate a genuinely new membership role', async () => {
+      await service.updateSettings(user(), { membershipRoleId: '900000000000000002' }, null);
+
+      expect(rolePolicy.assertRoleLinkable).toHaveBeenCalledWith('900000000000000002');
+    });
+
+    it('still refuses a NEW privileged role', async () => {
+      rolePolicy.assertRoleLinkable.mockRejectedValue(new BadRequestException('privileged'));
+
+      await expect(
+        service.updateSettings(user(), { membershipRoleId: '900000000000000002' }, null),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(settingsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('lets an admin CLEAR a role that would no longer validate', async () => {
+      // Clearing posts '' — falsy, so it never reaches the policy at all. That
+      // is the escape hatch out of a bad stored value.
+      rolePolicy.assertRoleLinkable.mockRejectedValue(new BadRequestException('privileged'));
+
+      await service.updateSettings(user(), { membershipRoleId: '' }, null);
+
+      expect(settingsRepo.save.mock.calls[0][0].membershipRoleId).toBeNull();
+    });
+  });
+
   describe('welcome-message normalisation (T-0184)', () => {
     const stored = (overrides: Partial<DiscordBotSettings> = {}) =>
       ({
@@ -247,7 +329,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
         welcomeMessage: 'Existing greeting',
         enlistmentChannelName: 'new-enlistments',
         auditLogChannelName: 'audit-logs',
-        joinRoleName: 'Guest',
+        membershipRoleName: 'Member',
         banRoleId: null,
         banRoleName: 'Cashiered',
         applyBanRoleOnBan: false,
@@ -288,7 +370,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
 
     it('does not blank the other optional strings on the same endpoint', async () => {
       // The recorded regression risk: a normaliser applied one field too widely.
-      // `joinRoleName` in particular is NOT NULL with a default, so a blanket
+      // `membershipRoleName` in particular is NOT NULL with a default, so a blanket
       // `|| null` across this block would break the schema, not just behaviour.
       await service.updateSettings(user(), { welcomeMessage: '' }, null);
 
@@ -296,7 +378,7 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
       expect(row.welcomeChannelId).toBe('channel-1');
       expect(row.enlistmentChannelName).toBe('new-enlistments');
       expect(row.auditLogChannelName).toBe('audit-logs');
-      expect(row.joinRoleName).toBe('Guest');
+      expect(row.membershipRoleName).toBe('Member');
       expect(row.banRoleName).toBe('Cashiered');
     });
   });

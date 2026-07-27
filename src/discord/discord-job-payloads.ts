@@ -48,6 +48,19 @@ export interface WelcomePayload {
   embed?: DiscordEmbed | null;
 }
 
+/**
+ * A gallery channel post (T-0195): the embed, plus optionally a bare media URL.
+ *
+ * ⚠️ `mediaUrl` IS A SECOND MESSAGE, not a field of the embed. Discord builds a
+ * video player from a bare media URL in a message's CONTENT and never from a
+ * URL inside an embed — so a playable submission genuinely requires two sends.
+ * Absent/null (every pre-existing row, and every image or link submission) means
+ * one message, exactly as before.
+ */
+export interface GalleryPostPayload extends ChannelMessagePayload {
+  mediaUrl?: string | null;
+}
+
 /** Assign/remove one role from one user. */
 export interface RoleTargetPayload {
   discordUserId: string;
@@ -109,6 +122,8 @@ export interface DiscordJobPayloadMap {
   [DiscordSyncJobType.Announce]: ChannelMessagePayload;
   [DiscordSyncJobType.EventReminder]: ChannelMessagePayload;
   [DiscordSyncJobType.ApplicationSubmitted]: ChannelMessagePayload;
+  [DiscordSyncJobType.GallerySubmitted]: GalleryPostPayload;
+  [DiscordSyncJobType.GalleryApproved]: GalleryPostPayload;
   [DiscordSyncJobType.AuditLog]: AuditMirrorPayload;
   [DiscordSyncJobType.ApplicationDecision]: DirectMessagePayload;
   [DiscordSyncJobType.Welcome]: WelcomePayload;
