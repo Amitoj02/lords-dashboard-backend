@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
+import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { DiscordSyncService, EventSummary, RoleRelinkPayload } from './discord-sync.service';
 import { DiscordEmbed } from './gateway/discord-gateway';
@@ -22,8 +23,12 @@ const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettin
   auditLogChannelName: null,
   eventAnnouncementChannelId: null,
   eventAnnouncementChannelName: null,
-  joinRoleId: '222',
-  joinRoleName: 'Guest',
+  gallerySubmissionChannelId: null,
+  gallerySubmissionChannelName: null,
+  galleryApprovedChannelId: null,
+  galleryApprovedChannelName: null,
+  membershipRoleId: '222',
+  membershipRoleName: 'Member',
   banRoleId: null,
   banRoleName: null,
   syncRolesOnChange: true,
@@ -49,6 +54,8 @@ describe('DiscordSyncService', () => {
   const settingsRepo = { findOne: jest.fn(), create: jest.fn((x) => x), save: jest.fn((x) => x) };
   const membersRepo = { find: jest.fn(), createQueryBuilder: jest.fn() };
   const regimentsRepo = { findOne: jest.fn() };
+  /** The Applicant rank, whose linked role IS the Applicant role (T-0192). */
+  const ranksRepo = { findOne: jest.fn() };
 
   /** The embed a producer composed, read straight off the saved job payload. */
   const savedEmbed = (call = 0): DiscordEmbed =>
@@ -103,6 +110,7 @@ describe('DiscordSyncService', () => {
         { provide: getRepositoryToken(DiscordSyncJob), useValue: jobsRepo },
         { provide: getRepositoryToken(DiscordBotSettings), useValue: settingsRepo },
         { provide: getRepositoryToken(Member), useValue: membersRepo },
+        { provide: getRepositoryToken(Rank), useValue: ranksRepo },
         { provide: getRepositoryToken(Regiment), useValue: regimentsRepo },
       ],
     }).compile();
@@ -168,6 +176,140 @@ describe('DiscordSyncService', () => {
       expect(jobsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ jobType: DiscordSyncJobType.MemberBanRole }),
       );
+    });
+  });
+
+  /**
+   * T-0192. The Applicant role is resolved through the RANK it is linked to
+   * rather than a settings column, so an admin configures it in the same Ranks
+   * & Medals screen as every other role link and there is no second place for
+   * it to be half-configured.
+   */
+  describe('enqueueApplicantRole', () => {
+    const linked = () => ranksRepo.findOne.mockResolvedValue({ discordRoleId: 'applicant-role' });
+
+    it('adds the role linked to the Applicant RANK', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      linked();
+
+      await service.enqueueApplicantRole(REGIMENT, USER_ID, 'add');
+
+      expect(ranksRepo.findOne).toHaveBeenCalledWith({
+        where: { regimentId: REGIMENT, name: 'Applicant' },
+      });
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.RoleAssign,
+          payload: { discordUserId: USER_ID, roleId: 'applicant-role' },
+        }),
+      );
+    });
+
+    it('removes it on a decision', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      linked();
+
+      await service.enqueueApplicantRole(REGIMENT, USER_ID, 'remove');
+
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ jobType: DiscordSyncJobType.RoleRemove }),
+      );
+    });
+
+    it('no-ops when the Applicant rank has no linked role — the state production is in', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      ranksRepo.findOne.mockResolvedValue({ discordRoleId: null });
+
+      expect(await service.enqueueApplicantRole(REGIMENT, USER_ID, 'add')).toBeNull();
+      expect(jobsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('no-ops when the Applicant rank is missing from the ladder entirely', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      ranksRepo.findOne.mockResolvedValue(null);
+
+      expect(await service.enqueueApplicantRole(REGIMENT, USER_ID, 'add')).toBeNull();
+    });
+
+    it('no-ops for an applicant with no linked Discord account', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      linked();
+
+      expect(await service.enqueueApplicantRole(REGIMENT, null, 'add')).toBeNull();
+      // Never even looks the rank up — nothing to assign it to.
+      expect(ranksRepo.findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  /** T-0195 — the two gallery channels. */
+  describe('gallery channel routing', () => {
+    const item = {
+      id: 'gal000000001',
+      title: 'The charge at dawn',
+      caption: null,
+      type: 'image',
+      authorName: 'Jane',
+      imageUrl: 'https://cdn.example.com/a.png',
+      shareUrl: 'https://lords.example/gallery/gal000000001',
+      fileCount: 1,
+      submittedAt: '2026-07-01T10:00:00.000Z',
+    };
+
+    it('routes a submission to the REVIEW channel (no-op without one)', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ gallerySubmissionChannelId: null }));
+      expect(await service.enqueueGallerySubmitted(REGIMENT, item)).toBeNull();
+
+      settingsRepo.findOne.mockResolvedValue(settings({ gallerySubmissionChannelId: 'review-1' }));
+      await service.enqueueGallerySubmitted(REGIMENT, item);
+
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ jobType: DiscordSyncJobType.GallerySubmitted }),
+      );
+      expect(savedEmbed().title).toContain('awaiting review');
+    });
+
+    it('carries the playable url into the REVIEW channel too', async () => {
+      // The reviewer has to be able to watch the clip they are passing; an
+      // embed neither plays a video nor unfurls a link.
+      settingsRepo.findOne.mockResolvedValue(settings({ gallerySubmissionChannelId: 'review-1' }));
+
+      await service.enqueueGallerySubmitted(REGIMENT, {
+        ...item,
+        type: 'link',
+        playableUrl: 'https://youtu.be/abc',
+      });
+
+      const payload = (jobsRepo.create.mock.calls[0][0] as { payload: { mediaUrl: string } })
+        .payload;
+      expect(payload.mediaUrl).toBe('https://youtu.be/abc');
+    });
+
+    it('routes an approval to the SHOWCASE channel and carries the playable url', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ galleryApprovedChannelId: 'show-1' }));
+
+      await service.enqueueGalleryApproved(REGIMENT, {
+        ...item,
+        type: 'video',
+        playableUrl: 'https://cdn.example.com/clip.mp4',
+        approvedByName: 'Officer Reid',
+      });
+
+      const payload = (
+        jobsRepo.create.mock.calls[0][0] as { payload: { channelId: string; mediaUrl: string } }
+      ).payload;
+      expect(payload.channelId).toBe('show-1');
+      // Discord builds a player from a bare URL in the CONTENT, never from an
+      // embed — so the worker needs it carried separately.
+      expect(payload.mediaUrl).toBe('https://cdn.example.com/clip.mp4');
+      expect(savedEmbed().fields?.map((f) => f.name)).toContain('Approved by');
+    });
+
+    it('does not name an approver on a PENDING post', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ gallerySubmissionChannelId: 'review-1' }));
+
+      await service.enqueueGallerySubmitted(REGIMENT, { ...item, approvedByName: 'Officer Reid' });
+
+      expect(savedEmbed().fields?.map((f) => f.name)).not.toContain('Approved by');
     });
   });
 
@@ -620,7 +762,8 @@ describe('DiscordSyncService', () => {
       expect(embed.title).toBe('Welcome to The Lords');
       expect(embed.description).toBe('Fall in!');
       expect(embed.imageUrl).toBe('https://cdn.example.com/regiment-banner.png');
-      expect(embed.fields?.[0].name).toBe('Next steps');
+      // Nothing is appended to the admin's message — see buildWelcomeEmbed.
+      expect(embed.fields ?? []).toEqual([]);
     });
 
     // ── T-0184: blank means "use the house default", on the READ side too ─────

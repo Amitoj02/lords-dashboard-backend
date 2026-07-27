@@ -57,16 +57,49 @@ export class DiscordBotSettings {
   @Column({ type: 'varchar', length: 120, nullable: true })
   eventAnnouncementChannelName: string | null;
 
+  /**
+   * Where a gallery submission is posted the moment it arrives, for officers to
+   * review. Staff-facing: it carries items nobody has approved yet, so it must
+   * be a channel the regiment at large cannot read.
+   */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  gallerySubmissionChannelId: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  gallerySubmissionChannelName: string | null;
+
+  /**
+   * Where an APPROVED gallery item is showcased. Public-facing, and the reason
+   * the two are separate settings rather than one: the same media is fit for the
+   * whole guild only after a moderator has passed it.
+   */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  galleryApprovedChannelId: string | null;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  galleryApprovedChannelName: string | null;
+
   /** Template used when welcoming a new guild member. */
   @Column({ type: 'varchar', length: 512, nullable: true })
   welcomeMessage: string | null;
 
-  /** Role snowflake auto-assigned to members on join (the "Guest" role). */
+  /**
+   * The regiment's single "Member" role — the one Discord role every enrolled
+   * member carries regardless of rank, so the guild can hang its permissions off
+   * one role instead of a dozen rank roles.
+   *
+   * ⚠️ THIS WAS `joinRoleId`, AND IT MEANT THE OPPOSITE. It used to be assigned
+   * by {@link DiscordOnboardingService} to every account that walked into the
+   * guild, which made it worthless as a permission anchor: visitors who had
+   * never applied held the same role as enlisted members. It is now granted from
+   * ROSTER STATE by the role reconcile — an approved member gets it, a mercenary
+   * and a visitor do not — and nothing assigns it on join.
+   */
   @Column({ type: 'varchar', length: 20, nullable: true })
-  joinRoleId: string | null;
+  membershipRoleId: string | null;
 
-  @Column({ type: 'varchar', length: 120, default: 'Guest' })
-  joinRoleName: string;
+  @Column({ type: 'varchar', length: 120, default: 'Member' })
+  membershipRoleName: string;
 
   /**
    * Role snowflake applied on an app-side ban (a locked-down "Ban" role the

@@ -25,6 +25,7 @@ import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
 import { DiscordSyncJob } from './entities/discord-sync-job.entity';
 import { DiscordGateway } from './gateway/discord-gateway';
+import { holdsMembershipRole } from './membership-role';
 
 /** Job types whose side effect is safe to re-run after an orphaned restart. */
 const IDEMPOTENT_JOB_TYPES = new Set<string>([
@@ -347,6 +348,26 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         // ledger and the delivery matrix report on them separately.
         await this.postToChannel(this.payloadOf(job, type));
         return;
+      case DiscordSyncJobType.GallerySubmitted:
+      case DiscordSyncJobType.GalleryApproved: {
+        const p = this.payloadOf(job, type);
+        await this.postToChannel({ channelId: p.channelId, content: p.content, embed: p.embed });
+        // A playable video needs its own message: Discord builds a player from a
+        // bare media URL in the CONTENT and never from one inside an embed. Sent
+        // AFTER the embed so the card leads and the player follows it, and
+        // best-effort so a failed player never retries the whole job and posts
+        // the embed twice.
+        if (p.mediaUrl) {
+          try {
+            await this.gateway.sendChannelMessage(p.channelId, p.mediaUrl);
+          } catch (error) {
+            this.logger.error(
+              `Gallery media message failed for job ${job.id}: ${(error as Error).message}`,
+            );
+          }
+        }
+        return;
+      }
       case DiscordSyncJobType.AuditLog: {
         const p = this.payloadOf(job, type);
         await this.postToChannel(p);
@@ -384,11 +405,12 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Reconcile a member's bot-managed Discord roles. The DESIRED managed-role set
-   * is the member's linked rank role plus the linked role of every medal they
-   * currently hold. We assign any desired role they lack and remove any MANAGED
-   * role they hold that is no longer desired (e.g. the role of a revoked medal),
-   * only ever touching roles in {@link managedRoleIds} — unmanaged roles are
-   * never added or removed. Best-effort.
+   * is the member's linked rank role, the linked role of every medal they
+   * currently hold, and — when they qualify — the regiment's Membership role. We
+   * assign any desired role they lack and remove any MANAGED role they hold that
+   * is no longer desired (e.g. the role of a revoked medal), only ever touching
+   * roles in {@link managedRoleIds} — unmanaged roles are never added or
+   * removed. Best-effort.
    *
    * `outgoingRoleId` is the extra role a bulk re-link must strip (T-0159). It
    * cannot be derived: once the rank/medal points at its new role the previous
@@ -428,15 +450,23 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       if (mm.medal?.discordRoleId) desired.add(mm.medal.discordRoleId);
     }
 
+    // The Membership role is reconciled like any other managed role — added when
+    // the roster says this person is enrolled, stripped when it does not.
+    //
+    // ⚠️ THIS IS THE OPPOSITE OF WHAT THE OLD JOIN ROLE DID. That role was
+    // assign-only and explicitly excluded from every strip below, because it was
+    // owned by the guild-join flow rather than by roster state. It is now owned
+    // by roster state alone, so the exclusions are gone: a member who becomes a
+    // Mercenary, or a visitor still carrying the role from the old join-time
+    // grant, loses it on their next reconcile. That is the entire point — the
+    // role has to mean "enrolled" for the guild to hang permissions off it.
+    const settings = await this.settings.findOne({ where: { regimentId } });
+    const membershipRoleId = settings?.membershipRoleId ?? null;
+    if (membershipRoleId && holdsMembershipRole(member)) desired.add(membershipRoleId);
+
     const managed = await this.managedRoleIds(regimentId);
     const strippable = new Set(managed);
     if (outgoingRoleId) strippable.add(outgoingRoleId);
-    // The join/Guest role is assign-only (owned by the guild-join flow); a role
-    // reconcile must never strip it even though managedRoleIds lists it (that set
-    // is also used by the ban strip, which SHOULD remove it). Only rank/medal
-    // roles are reconciled here.
-    const settings = await this.settings.findOne({ where: { regimentId } });
-    const joinRoleId = settings?.joinRoleId ?? null;
 
     // Diff against the member's CURRENT roles when the gateway can report them so
     // revoked-medal roles are removed; otherwise fall back to an idempotent
@@ -452,10 +482,9 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     }
 
     if (current) {
-      // Remove any STRIPPABLE role the member holds that is no longer desired,
-      // except the assign-only join/Guest role.
+      // Remove any STRIPPABLE role the member holds that is no longer desired.
       for (const roleId of current) {
-        if (strippable.has(roleId) && roleId !== joinRoleId && !desired.has(roleId)) {
+        if (strippable.has(roleId) && !desired.has(roleId)) {
           await this.gateway.removeRole(discordUserId, roleId);
         }
       }
@@ -469,7 +498,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       // A re-link knows EXACTLY which role left the mapping, so the blind sweep
       // below is unnecessary — one targeted strip is both correct and ~25x
       // cheaper against the rate budget on a 600-member fan-out.
-      if (outgoingRoleId !== joinRoleId && !desired.has(outgoingRoleId)) {
+      if (!desired.has(outgoingRoleId)) {
         await this.gateway.removeRole(discordUserId, outgoingRoleId);
       }
       return;
@@ -479,12 +508,14 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     // and medal the member does NOT currently hold, so a revoked medal's role —
     // and, since T-0159, a superseded RANK role — is still removed. Without the
     // rank half, a promotion left the old rank role on the member every time
-    // fetchMember failed.
+    // fetchMember failed. The Membership role rides along because it is now
+    // roster-derived like the others: undesired here means "not enrolled".
     const ranks = await this.ranks.find({ where: { regimentId } });
     const medals = await this.medals.find({ where: { regimentId } });
-    for (const linked of [...ranks, ...medals]) {
-      const roleId = linked.discordRoleId;
-      if (roleId && roleId !== joinRoleId && !desired.has(roleId)) {
+    const blindSweep = [...ranks, ...medals].map((linked) => linked.discordRoleId);
+    blindSweep.push(membershipRoleId);
+    for (const roleId of blindSweep) {
+      if (roleId && !desired.has(roleId)) {
         await this.gateway.removeRole(discordUserId, roleId);
       }
     }
@@ -531,8 +562,8 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
 
   /**
    * The set of Discord role snowflakes the bot manages: every rank role, every
-   * medal role, and the join role. Reconciliation and the ban strip only ever
-   * touch roles in this set — unmanaged roles are left untouched.
+   * medal role, and the Membership role. Reconciliation and the ban strip only
+   * ever touch roles in this set — unmanaged roles are left untouched.
    */
   private async managedRoleIds(regimentId: string): Promise<Set<string>> {
     const ids = new Set<string>();
@@ -545,7 +576,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       if (medal.discordRoleId) ids.add(medal.discordRoleId);
     }
     const settings = await this.settings.findOne({ where: { regimentId } });
-    if (settings?.joinRoleId) ids.add(settings.joinRoleId);
+    if (settings?.membershipRoleId) ids.add(settings.membershipRoleId);
     return ids;
   }
 

@@ -132,11 +132,21 @@ describe('notification embeds (T-0173 / T-0174 / T-0175)', () => {
   });
 
   describe('welcome', () => {
-    it('carries the regiment banner and a next-steps section', () => {
+    it('carries the regiment banner', () => {
       const embed = buildWelcomeEmbed({ brand, message: 'Fall in!' });
 
       expect(embed.imageUrl).toBe('https://cdn.example.com/banner.png');
-      expect(embed.fields?.[0].name).toBe('Next steps');
+    });
+
+    it('appends NOTHING to the configured message', () => {
+      // The admin's message box is the whole message. A hardcoded "Next steps"
+      // field used to be appended here, which meant a regiment could not write a
+      // complete welcome — whatever they typed arrived with three bullets they
+      // never asked for and had no setting to remove.
+      const embed = buildWelcomeEmbed({ brand, message: 'Fall in!' });
+
+      expect(embed.description).toBe('Fall in!');
+      expect(embed.fields ?? []).toEqual([]);
     });
 
     it('renders without a banner or crest when the regiment has neither', () => {

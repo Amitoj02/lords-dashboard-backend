@@ -154,6 +154,16 @@ export enum DiscordSyncJobType {
   Welcome = 'welcome',
   /** Post a new enlistment application to the enlistments channel (T-0042). */
   ApplicationSubmitted = 'application.submitted',
+  /** Post a new gallery submission to the staff review channel (T-0195). */
+  GallerySubmitted = 'gallery.submitted',
+  /**
+   * Showcase an APPROVED gallery item in the public gallery channel (T-0195).
+   * Separate from {@link GallerySubmitted} rather than a flag on it because the
+   * two go to different channels with different audiences, and the operations
+   * ledger reports on them separately — the same reason Announce and
+   * EventReminder are two types.
+   */
+  GalleryApproved = 'gallery.approved',
   /** Mirror an audit-log entry to the audit-log channel (T-0043). */
   AuditLog = 'audit.log',
   /** DM an applicant the outcome of a decision (approve/decline/hold). */

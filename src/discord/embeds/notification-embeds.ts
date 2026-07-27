@@ -106,6 +106,43 @@ export interface EventSummary {
 export type ApplicationDecisionOutcome = 'approve' | 'decline' | 'hold';
 
 /**
+ * A gallery submission as the review / showcase channels need it (T-0195).
+ *
+ * Every URL here is resolved by the producer from data already on the row —
+ * nothing in this module fetches, and nothing guesses. `imageUrl` and
+ * `playableUrl` are separate because Discord renders them by different means:
+ * an image goes IN the embed, while a video only becomes a player when its bare
+ * URL is the message CONTENT.
+ */
+export interface GallerySummary {
+  /** The item's short id, used to build the share link. */
+  id: string;
+  title: string;
+  caption: string | null;
+  /** `image` | `video` | `link`, rendered as the "Type" field. */
+  type: string;
+  authorName: string;
+  authorAvatarUrl?: string | null;
+  /** Permanent public URL of the still to show in the embed. Null ⇒ no image. */
+  imageUrl?: string | null;
+  /**
+   * A permanent, directly-playable media URL — an uploaded video, or an external
+   * clip page Discord already unfurls. Null when there is nothing playable.
+   */
+  playableUrl?: string | null;
+  /** The submitter's own external link, when the item is a link submission. */
+  linkUrl?: string | null;
+  /** Public share link back to the dashboard, when a site URL is configured. */
+  shareUrl?: string | null;
+  /** How many files ride along, so a multi-file post says so. */
+  fileCount?: number;
+  /** ISO-8601 submission instant, rendered as the footer timestamp. */
+  submittedAt?: string | null;
+  /** Who approved it — showcase posts only. */
+  approvedByName?: string | null;
+}
+
+/**
  * Drop empty/whitespace-only optional answers instead of rendering a blank
  * field. Discord REJECTS a field with an empty value (`50035`), so this is not
  * cosmetic — an unanswered optional question would fail the whole post.
@@ -264,6 +301,58 @@ export function buildDecisionEmbed(input: {
   });
 }
 
+/**
+ * The gallery review / showcase channel post (T-0195).
+ *
+ * ⚠️ WHAT DISCORD WILL AND WILL NOT RENDER, because it decides this shape:
+ *  - An IMAGE url set as the embed image renders inline. That covers image
+ *    submissions and the poster frame of a video.
+ *  - A VIDEO never plays from inside an embed, no matter which field it is put
+ *    in. Discord only builds a player from a bare media URL in the message
+ *    CONTENT. So the playable url is NOT in this embed at all — the producer
+ *    carries it separately and the worker sends it as its own message.
+ *  - An EXTERNAL link (YouTube, Medal) is unfurled by Discord itself from the
+ *    bare URL, and its own unfurl is richer than anything reconstructible here.
+ *    So the link is surfaced as a field and left for Discord to expand rather
+ *    than being scraped and re-rendered — which is also why no external host is
+ *    ever fetched to build this.
+ *
+ * `pending` posts go to a STAFF channel and say so; `approved` posts go to a
+ * public one and name the officer who passed it.
+ */
+export function buildGalleryEmbed(
+  item: GallerySummary,
+  brand: RegimentBrand,
+  stage: 'pending' | 'approved',
+): DiscordEmbed {
+  const submittedAt = toDate(item.submittedAt);
+  const extra = (item.fileCount ?? 0) - 1;
+  return clampEmbed({
+    title:
+      stage === 'pending'
+        ? `🖼️ Gallery submission awaiting review — ${item.title}`
+        : `🖼️ ${item.title}`,
+    description: item.caption ?? undefined,
+    // The share link is the embed's own url, so the title is clickable straight
+    // through to the item rather than needing a field of its own.
+    url: safeUrl(item.shareUrl),
+    color: stage === 'pending' ? OUTCOME_COLOURS.hold : brandColour(brand),
+    imageUrl: safeUrl(item.imageUrl),
+    thumbnailUrl: safeUrl(item.authorAvatarUrl),
+    timestamp: (submittedAt ?? new Date()).toISOString(),
+    fields: [
+      ...field('Submitted by', item.authorName, true),
+      ...field('Type', item.type, true),
+      ...field('Approved by', stage === 'approved' ? item.approvedByName : null, true),
+      // Only when there IS more than one — a single-file post saying "1 file"
+      // is noise in a channel that gets one of these per submission.
+      ...field('Files', extra > 0 ? `${extra + 1} (first shown)` : null, true),
+      ...field('Link', safeUrl(item.linkUrl), false),
+    ],
+    footer: { text: brand.name },
+  });
+}
+
 /** The gallery moderation-outcome DM (T-0173). */
 export function buildGalleryDeclineEmbed(input: {
   brand: RegimentBrand;
@@ -404,7 +493,15 @@ export function expandWelcomeTokens(
 }
 
 /**
- * The guild-join welcome (T-0175): branded, with a short next-steps section.
+ * The guild-join welcome (T-0175): branded, and carrying the admin's message and
+ * NOTHING ELSE.
+ *
+ * ⚠️ NO HOUSE COPY IS APPENDED. This used to add a hardcoded "Next steps" field
+ * ("Read the pinned rules…", "Submit an enlistment application…", "RSVP to an
+ * upcoming event…") underneath the configured greeting, so an admin who wrote a
+ * complete welcome got it followed by three bullets they never asked for and
+ * could not remove from the settings screen. The message box is the whole
+ * message; if a regiment wants next steps, they type them.
  *
  * Token expansion happens HERE rather than in the producer (T-0185) so it is
  * structurally impossible for an expansion to escape the embed limits: this
@@ -426,11 +523,6 @@ export function buildWelcomeEmbed(input: {
     discordUserId,
     regimentName: brand.name,
   });
-  const nextSteps = [
-    '• Read the pinned rules and introduce yourself.',
-    '• Submit an enlistment application when you are ready to join the ranks.',
-    '• RSVP to an upcoming event to muster with us.',
-  ].join('\n');
   return clampEmbed({
     title: `Welcome to ${brand.name}`,
     description: body,
@@ -441,7 +533,6 @@ export function buildWelcomeEmbed(input: {
     // nothing in this embed reads the joining member's profile.
     imageUrl: safeUrl(brand.bannerUrl),
     thumbnailUrl: safeUrl(brand.crestUrl),
-    fields: [{ name: 'Next steps', value: nextSteps }],
     footer: { text: brand.name },
   });
 }

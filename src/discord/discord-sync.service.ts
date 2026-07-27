@@ -6,6 +6,8 @@ import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
+import { Rank } from '../ranks/entities/rank.entity';
+import { APPLICANT_RANK_NAME } from '../ranks/protected-ranks';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { RoleRelinkExpandPayload, RoleRelinkSubject } from './discord-job-payloads';
 import {
@@ -13,12 +15,14 @@ import {
   AuditSummary,
   EnlistmentSummary,
   EventSummary,
+  GallerySummary,
   RegimentBrand,
   buildAuditEmbed,
   buildDecisionEmbed,
   buildEnlistmentEmbed,
   buildEventEmbed,
   buildGalleryDeclineEmbed,
+  buildGalleryEmbed,
   buildWelcomeEmbed,
   defaultDecisionMessage,
 } from './embeds/notification-embeds';
@@ -43,6 +47,7 @@ export type {
   AuditSummary,
   EnlistmentSummary,
   EventSummary,
+  GallerySummary,
   RegimentBrand,
 } from './embeds/notification-embeds';
 
@@ -97,6 +102,10 @@ export class DiscordSyncService {
     private readonly settings: Repository<DiscordBotSettings>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
+    // The Applicant role is resolved through the rank it is linked to, so the
+    // admin configures it where every other role link lives (T-0192).
+    @InjectRepository(Rank)
+    private readonly ranks: Repository<Rank>,
     // The regiment's name/crest/banner/accent tone brand every embed (T-0173).
     @InjectRepository(Regiment)
     private readonly regiments: Repository<Regiment>,
@@ -348,13 +357,87 @@ export class DiscordSyncService {
     });
   }
 
-  /** Enqueue the join-role (Guest) assignment for a newly-joined member. */
-  async enqueueJoinRole(regimentId: string, discordUserId: string): Promise<DiscordSyncJob | null> {
+  /**
+   * Add or remove the Discord role linked to the `Applicant` rank (T-0192).
+   *
+   * The role is resolved through the RANK row rather than a settings column, so
+   * the admin configures it in the same Ranks & Medals screen as every other
+   * role link and there is no second place for it to be half-configured. The
+   * `Applicant` rank is frozen against rename/delete precisely because this
+   * lookup is by name.
+   *
+   * ⚠️ NOBODY IS EVER PLACED ON THAT RANK. An applicant has no member row — the
+   * rank exists only to carry the link. That asymmetry is why this is a bare
+   * `role.assign`/`role.remove` and not a reconcile: there is no roster state to
+   * reconcile against.
+   *
+   * Silently no-ops when the rank is missing or unlinked, which is the state a
+   * regiment that has not configured an Applicant role is in — and the state
+   * production is in today. It is a notification, not a gate: nothing about the
+   * application itself depends on it.
+   */
+  async enqueueApplicantRole(
+    regimentId: string,
+    discordUserId: string | null,
+    action: 'add' | 'remove',
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async () => {
+      if (!discordUserId) return null;
+      const rank = await this.ranks.findOne({
+        where: { regimentId, name: APPLICANT_RANK_NAME },
+      });
+      if (!rank?.discordRoleId) return null;
+      return this.insertJob(
+        regimentId,
+        action === 'add' ? DiscordSyncJobType.RoleAssign : DiscordSyncJobType.RoleRemove,
+        { discordUserId, roleId: rank.discordRoleId },
+      );
+    });
+  }
+
+  /**
+   * Post a gallery submission to the staff review channel (T-0195). No-ops when
+   * the bot is off or no review channel is configured.
+   */
+  async enqueueGallerySubmitted(
+    regimentId: string,
+    item: GallerySummary,
+  ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
-      if (!s.joinRoleId) return null;
-      return this.insertJob(regimentId, DiscordSyncJobType.RoleAssign, {
-        discordUserId,
-        roleId: s.joinRoleId,
+      if (!s.gallerySubmissionChannelId) return null;
+      const brand = await this.resolveBrand(regimentId);
+      return this.insertJob(regimentId, DiscordSyncJobType.GallerySubmitted, {
+        channelId: s.gallerySubmissionChannelId,
+        content: '',
+        embed: buildGalleryEmbed(item, brand, 'pending'),
+        // The reviewer needs to WATCH the thing they are being asked to pass.
+        // An embed cannot play a video and does not unfurl a link, so the same
+        // bare-URL second message the showcase post uses is if anything more
+        // necessary here — this channel is where the decision is actually made.
+        mediaUrl: item.playableUrl ?? null,
+      });
+    });
+  }
+
+  /**
+   * Showcase an APPROVED gallery item in the public gallery channel (T-0195).
+   * No-ops when the bot is off or no showcase channel is configured.
+   */
+  async enqueueGalleryApproved(
+    regimentId: string,
+    item: GallerySummary,
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      if (!s.galleryApprovedChannelId) return null;
+      const brand = await this.resolveBrand(regimentId);
+      return this.insertJob(regimentId, DiscordSyncJobType.GalleryApproved, {
+        channelId: s.galleryApprovedChannelId,
+        content: '',
+        embed: buildGalleryEmbed(item, brand, 'approved'),
+        // Discord renders a player from a bare media URL in the message CONTENT,
+        // never from an embed — so a playable video needs a second message. The
+        // worker sends it after the embed; see GalleryPostPayload.
+        mediaUrl: item.playableUrl ?? null,
       });
     });
   }

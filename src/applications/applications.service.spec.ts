@@ -93,6 +93,8 @@ describe('ApplicationsService', () => {
   let discordSync: {
     enqueueApplicationSubmitted: jest.Mock;
     enqueueApplicationDecision: jest.Mock;
+    enqueueApplicantRole: jest.Mock;
+    enqueueRoleSync: jest.Mock;
   };
 
   // Per-test transaction manager repositories.
@@ -141,6 +143,9 @@ describe('ApplicationsService', () => {
     discordSync = {
       enqueueApplicationSubmitted: jest.fn().mockResolvedValue(null),
       enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
+      // The Applicant marker (T-0192) and the enlistment role sync (T-0194).
+      enqueueApplicantRole: jest.fn().mockResolvedValue(null),
+      enqueueRoleSync: jest.fn().mockResolvedValue(null),
     };
 
     txRanks = { findOne: jest.fn() };
@@ -907,6 +912,121 @@ describe('ApplicationsService', () => {
         ConflictException,
       );
       expect(txMembers.save).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * T-0192/T-0194 — the Discord side of the enlistment lifecycle.
+   *
+   * These pin ORDER and ABSENCE, not just presence. The bug this replaces was
+   * that approve() wrote the member row and enqueued NOTHING, so a recruit got
+   * the rank on the dashboard and no Discord role for it until some unrelated
+   * later change happened to trigger a sync.
+   */
+  describe('the Discord side of the enlistment lifecycle', () => {
+    /** The linked snowflake behind `identity-applicant`. */
+    const withSnowflake = () =>
+      identities.findOne!.mockResolvedValue({
+        id: 'identity-applicant',
+        applicationsBlockedAt: null,
+        discordUserId: '900900900900900901',
+      });
+
+    it('marks a submitted application with the Applicant role', async () => {
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
+      applications.find!.mockResolvedValue([]);
+      withSnowflake();
+
+      await service.submit(APPLICANT, validCreateDto());
+
+      expect(discordSync.enqueueApplicantRole).toHaveBeenCalledWith(
+        'regiment-1',
+        '900900900900900901',
+        'add',
+      );
+    });
+
+    it('gives a submitter NOTHING on the website — no member row, no rank', async () => {
+      // Submitting is not joining. The role is a guild-side marker only.
+      settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
+      applications.find!.mockResolvedValue([]);
+      withSnowflake();
+
+      await service.submit(APPLICANT, validCreateDto());
+
+      expect(txMembers.create).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+    });
+
+    it('APPROVE enqueues a role sync — the bug was that it enqueued nothing', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      withSnowflake();
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      // The member id from the transaction, and the SNOWFLAKE — not the identity
+      // id. enqueueRoleSync returns null on a falsy third argument, so passing
+      // the wrong one would have been a silent no-op forever.
+      expect(discordSync.enqueueRoleSync).toHaveBeenCalledWith(
+        'regiment-1',
+        'member-new',
+        '900900900900900901',
+      );
+    });
+
+    it('APPROVE takes the Applicant role back before reconciling the new roles', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      withSnowflake();
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      expect(discordSync.enqueueApplicantRole).toHaveBeenCalledWith(
+        'regiment-1',
+        '900900900900900901',
+        'remove',
+      );
+      // Order matters: the marker comes off, then the roster's roles go on.
+      const removeAt = discordSync.enqueueApplicantRole.mock.invocationCallOrder[0];
+      const syncAt = discordSync.enqueueRoleSync.mock.invocationCallOrder[0];
+      expect(removeAt).toBeLessThan(syncAt);
+    });
+
+    it('DECLINE takes the Applicant role back and grants nothing in exchange', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      withSnowflake();
+
+      await service.decline(STAFF, 'app-1', {}, null);
+
+      expect(discordSync.enqueueApplicantRole).toHaveBeenCalledWith(
+        'regiment-1',
+        '900900900900900901',
+        'remove',
+      );
+      // The whole difference from approve: no membership, no rank, no sync.
+      expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+    });
+
+    it('HOLD leaves the Applicant role on — the application is still in flight', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      withSnowflake();
+
+      await service.hold(STAFF, 'app-1', {}, null);
+
+      expect(discordSync.enqueueApplicantRole).not.toHaveBeenCalled();
+    });
+
+    it('an applicant with no linked Discord account approves normally', async () => {
+      // The role is best-effort; a missing snowflake must not fail an enlistment.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
+      identities.findOne!.mockResolvedValue({ id: 'identity-applicant', discordUserId: null });
+
+      const result = await service.approve(STAFF, 'app-1', {}, null);
+
+      expect(result.status).toBe(ApplicationStatus.Approved);
+      expect(discordSync.enqueueRoleSync).toHaveBeenCalledWith('regiment-1', 'member-new', null);
     });
   });
 
