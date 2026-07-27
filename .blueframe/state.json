@@ -1,7 +1,7 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
+  "lastSyncedCommit": "f124324a1e6803a27b56c923ed0bedf53b6be956",
   "lastSyncedAt": "2026-07-27T20:10:00Z",
   "notesForNextSession": "LATEST SESSION (T-0206 + T-0207): finished the event-announcement feature the owner actually asked for, and learned the lesson recorded in the memory 'always do BOTH repos'. T-0205 shipped the backend and left the SPA with no way to set announceRoleId, so the owner's first requirement - 'when creating events it asks for a Role to ping' - did not exist and every event announced silently. *** IF A TASK HAS A FRONTEND HALF, IT IS PART OF THE TASK. Flagging a gap is not delivering it. *** Two defects surfaced only by DRIVING THE FORM in the running app: GET /discord/roles was gated on edit_ranks_medals while the event form is manage_events (Moderator holds one and not the other, so a Moderator got a 403 on a form they may open) - fixed with a new @RequireAnyCapability OR guard, deliberately NOT @RequireRole, which would have bypassed the editable permissions matrix; and @everyone was offered in the picker, a control that would have silently pinged nobody because Discord needs parse:['everyone'] for it and the API never sends that. T-0207 then made the announcement track the event: update refreshes it (covering every field including the banner), reanchor refreshes every row it moved, and ARCHIVE closes it - nothing else ever would, because the close sweep looks for ENDED events and an archived one never reaches `previous`. An edit NEVER re-pings; it edits the existing message and that path takes no mention allow-list at all. THE BANNER WAS ALREADY WIRED - it just cannot render in dev, because the URL is http://localhost:9100 (MinIO) and Discord's servers cannot reach it. Do not 'fix' that; production R2 URLs work. TWO LOCAL TRAPS worth knowing: the dev DB needs `migration:run` pointed at lords_dashboard (I migrated only the e2e DB and left the owner with 500s), and the api container wedges itself on every restart via nest-cli deleteOutDir + tsconfig incremental - see the memory. OPEN, NOT DONE: the deleteOutDir/incremental one-line fix is still uncommitted (it was held back so it would not land inside a release PR), and the T-0204 derive e2e cases still flake when the full suite runs.",
   "nextIdCounter": 208,
@@ -14511,7 +14511,7 @@
         "No re-post when the original message was deleted in Discord - the edit simply fails and lands in the operations ledger.",
         "Deleting an event still relies on the close sweep (which covers deletedAt) rather than closing inline."
       ],
-      "lastTouchedCommit": "",
+      "lastTouchedCommit": "f124324a1e6803a27b56c923ed0bedf53b6be956",
       "createdAt": "2026-07-27T20:10:00Z",
       "updatedAt": "2026-07-27T20:10:00Z",
       "history": [
