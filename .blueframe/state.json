@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
-  "lastSyncedAt": "2026-07-27T18:20:00Z",
-  "notesForNextSession": "LATEST SESSION (T-0205): the Discord event announcement is now the RSVP surface, and the bot has its FIRST INBOUND PATH. Read that sentence twice before touching src/discord: everything before this was outbound, and a button press is a Discord account writing roster state. The handler (EventRsvpInteractionService) deliberately does NOT re-derive authorization - it calls SessionContextService.resolve(), the same choke point every HTTP route uses, which is what makes a banned or suspended member refused by the SAME rule rather than by a second one that will drift. It then checks rsvp_to_events against the live role, and re-checks botEnabled at press time because an announcement outlives the setting that produced it. *** THE ONE-PING RULE IS THE OWNER'S, AND IT IS LOAD-BEARING. *** events.announce_role_id is pinged by the announcement and by NOTHING else. The pre-event notification is a THREAD on that same message pinging only Attending+Tentative (Discord treats unsolicited mass DMs as abuse), and a re-render pings nobody because editChannelMessage accepts no mention allow-list at all - that omission is the mechanism, do not add the parameter. Every send still pins allowed_mentions.parse: [], so @everyone in admin text stays inert; the two messages that must notify carry EXPLICIT snowflakes alongside it. The announcement is the only message in the app that is RE-RENDERED, which is why it is the only one composed at DRAIN time: its roster comes from event_rsvps when the job runs. That is not a style choice - refreshes are COALESCED (one pending per event), so a payload frozen at enqueue would deliver the first presser's roster and silently drop everyone after. enqueueEventAnnounce/enqueueEventReminder now take (regimentId, eventId); src/events/event-summary.ts is gone and the projection lives in DiscordModule's EventAnnouncementService, which reads events/event_rsvps by ENTITY IMPORT (not a module edge - EventsModule imports DiscordModule and the reverse would close a cycle). event_announcements (PK = FK) is delivery state, not event state: its presence answers 'has this been announced?'. CROSS-REPO: the authoring form still has no 'Role to ping' picker, so announceRoleId is API-only until lords-regiment-dashboard adds one; it is optional and nullable, so the SPA degrades safely and the two do NOT have to ship together. OPEN ITEM worth deciding: editing an event does not re-render or re-post its announcement, so a title or time changed after it went out is wrong in Discord until someone notices.",
-  "nextIdCounter": 206,
+  "lastSyncedCommit": "f124324a1e6803a27b56c923ed0bedf53b6be956",
+  "lastSyncedAt": "2026-07-27T20:10:00Z",
+  "notesForNextSession": "LATEST SESSION (T-0206 + T-0207): finished the event-announcement feature the owner actually asked for, and learned the lesson recorded in the memory 'always do BOTH repos'. T-0205 shipped the backend and left the SPA with no way to set announceRoleId, so the owner's first requirement - 'when creating events it asks for a Role to ping' - did not exist and every event announced silently. *** IF A TASK HAS A FRONTEND HALF, IT IS PART OF THE TASK. Flagging a gap is not delivering it. *** Two defects surfaced only by DRIVING THE FORM in the running app: GET /discord/roles was gated on edit_ranks_medals while the event form is manage_events (Moderator holds one and not the other, so a Moderator got a 403 on a form they may open) - fixed with a new @RequireAnyCapability OR guard, deliberately NOT @RequireRole, which would have bypassed the editable permissions matrix; and @everyone was offered in the picker, a control that would have silently pinged nobody because Discord needs parse:['everyone'] for it and the API never sends that. T-0207 then made the announcement track the event: update refreshes it (covering every field including the banner), reanchor refreshes every row it moved, and ARCHIVE closes it - nothing else ever would, because the close sweep looks for ENDED events and an archived one never reaches `previous`. An edit NEVER re-pings; it edits the existing message and that path takes no mention allow-list at all. THE BANNER WAS ALREADY WIRED - it just cannot render in dev, because the URL is http://localhost:9100 (MinIO) and Discord's servers cannot reach it. Do not 'fix' that; production R2 URLs work. TWO LOCAL TRAPS worth knowing: the dev DB needs `migration:run` pointed at lords_dashboard (I migrated only the e2e DB and left the owner with 500s), and the api container wedges itself on every restart via nest-cli deleteOutDir + tsconfig incremental - see the memory. OPEN, NOT DONE: the deleteOutDir/incremental one-line fix is still uncommitted (it was held back so it would not land inside a release PR), and the T-0204 derive e2e cases still flake when the full suite runs.",
+  "nextIdCounter": 208,
   "connections": [],
   "tasks": [
     {
@@ -14369,6 +14369,158 @@
           "to": "review",
           "by": "claude",
           "note": "owner spec: role pinged only at creation, three RSVP sections + three buttons on the announcement, buttons stay live, thread + attendee ping at the notify-before offset instead of DMs, buttons disabled when the event ends. Implemented on feat/discord-event-rsvp-buttons-and-threads; local CI green (965 unit, 139 e2e), lint + prettier + tsc clean. PR opened against dev."
+        }
+      ]
+    },
+    {
+      "id": "T-0206",
+      "title": "Offer a Discord ping role on the event form (and let event authors read the role list)",
+      "summary": "T-0205 shipped the API field and NO WAY TO SET IT: `announceRoleId` was accepted by the backend, nothing in the SPA sent it, so every event announced silently and the owner's very first requirement - 'when creating events it asks for a Role to ping' - did not exist. This is the missing half, plus the two defects that only surfaced by DRIVING THE FORM against the running stack rather than reasoning about it. (1) GET /discord/roles was gated on edit_ranks_medals because the rank/medal link pickers were its only consumer; the event form is manage_events, and the defaults do not overlap - Moderator holds manage_events but not edit_ranks_medals - so a Moderator could open a form they are entitled to open and have its options 403. `@RequireCapability` is a logical AND, so adding the second capability would have DEMANDED BOTH and locked out more people; hence `@RequireAnyCapability`, the OR counterpart. Deliberately not `@RequireRole(...)`, which already exists and would have been one line: that bypasses the role_permissions matrix the regiment actually edits, so a regiment that moved manage_events off Moderator would keep handing them the role list. (2) `@everyone` came back in the live role list and would have been a control that silently does nothing - Discord will not ping it from an explicit role allow-list, that needs parse:['everyone'] which the API never sends - so it is filtered out of the picker. The value is sent on every save INCLUDING BLANK, because omitting the key on a blank would leave the stored role in place and clearing the picker would not clear the ping; an edit that never touches it still omits it, so a rename does not rewrite the role.",
+      "status": "deployed",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "discord-bot",
+      "feature": "event-rsvp",
+      "subfeature": "announce-role-picker",
+      "repo": "",
+      "paths": [
+        "src/authz/guards/any-capability.guard.ts",
+        "src/authz/guards/any-capability.guard.spec.ts",
+        "src/authz/decorators/require-any-capability.decorator.ts",
+        "src/authz/authz.module.ts",
+        "src/discord/discord.controller.ts"
+      ],
+      "dependsOn": [
+        "T-0205"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "the OR guard admits a caller holding the SECOND capability, and short-circuits on the first match",
+          "status": "passed"
+        },
+        {
+          "desc": "it refuses a caller holding none, and never grants on an un-annotated route",
+          "status": "passed"
+        },
+        {
+          "desc": "one capability is enough even when the other is denied (pins OR, not AND)",
+          "status": "passed"
+        },
+        {
+          "desc": "frontend: the ping role is sent on create and a blank CLEARS it; an untouched edit omits the key",
+          "status": "passed"
+        },
+        {
+          "desc": "verified live: the picker lists the real guild roles, @everyone is absent, and publishing persists announce_role_id with no 500",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "A second authorization primitive now exists. `@RequireCapability` (AND) and `@RequireAnyCapability` (OR) read almost identically at a call site, and picking the wrong one silently widens or narrows a route. The OR guard is applied to exactly ONE route - a low-sensitivity READ - and anything that mutates should keep naming the single capability that owns it.",
+          "status": "open",
+          "notedAt": "2026-07-27T20:10:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "announceRoleId is validated for snowflake FORMAT only - not checked against the guild, and not run through DiscordRolePolicyService, because mentioning a role is not assigning one (no hierarchy or managed-role constraint applies).",
+        "Managed/integration roles (e.g. the bot's own) are still offered; they are mentionable, just rarely useful."
+      ],
+      "lastTouchedCommit": "325bd66",
+      "createdAt": "2026-07-27T20:10:00Z",
+      "updatedAt": "2026-07-27T20:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T20:10:00Z",
+          "from": null,
+          "to": "deployed",
+          "by": "claude",
+          "note": "owner asked why event creation errored; the local dev DB was simply un-migrated. Found and fixed two real defects while driving the form. BE PR #62 + FE PR #54, both merged to dev."
+        }
+      ]
+    },
+    {
+      "id": "T-0207",
+      "title": "Keep the Discord event announcement in step with the event",
+      "summary": "An announcement was written ONCE and never touched again, so the moment an author edited the event the channel started lying: the embed kept advertising the title, description, banner, start time and duration as they were at first announcement. That is worse than not announcing at all - it is confidently wrong about when to turn up. The machinery already existed (T-0205's EventAnnouncementRefresh recomposes the whole embed from the row at drain time), so this is mostly about calling it from the paths that change what the embed says: `update` (covers EVERY field an author can edit, banner included), and `reanchor` for every row it moved - the cascaded occurrences too, since each has its own announcement and an occurrence still showing last week's muster time is exactly the failure. ARCHIVE now CLOSES the announcement instead of leaving it live: nothing else would ever retire it, because the close sweep looks for ENDED events and an archived one never reaches `previous` (the status sweep skips it), so the channel would have kept working RSVP buttons forever for an event members can no longer see. The refresh enqueue now SHORT-CIRCUITS on 'never announced' and on 'already closed' - checked at enqueue rather than left to the worker, because a cascaded re-anchor asks per occurrence and most have no announcement, and because an edit to an ended event must never revive its buttons. Editing NEVER re-pings: it edits the existing message, and the edit path structurally accepts no mention allow-list.",
+      "status": "review",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "discord-bot",
+      "feature": "event-rsvp",
+      "subfeature": "announcement-resync",
+      "repo": "",
+      "paths": [
+        "src/events/events.service.ts",
+        "src/events/events.service.spec.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "test/discord.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0205",
+        "T-0206"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "an edit re-renders the announcement, and does NOT re-announce (so it cannot re-ping)",
+          "status": "passed"
+        },
+        {
+          "desc": "archiving closes the announcement, retiring its RSVP buttons",
+          "status": "passed"
+        },
+        {
+          "desc": "a cascaded re-anchor refreshes every row it moved, occurrences included",
+          "status": "passed"
+        },
+        {
+          "desc": "the enqueue queues nothing for an event that was never announced, or whose announcement is closed",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: editing the title rewrites the SAME message, posts no second announcement, and the edit carries no ping",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Every event edit now touches Discord. The refresh is coalesced (one pending job per event) and no-ops when the event was never announced, so the added load is small - but an admin bulk-editing a series will queue one edit per announced occurrence, against Discord's per-channel edit rate limit.",
+          "status": "open",
+          "notedAt": "2026-07-27T20:10:00Z"
+        },
+        {
+          "desc": "The BANNER only renders in Discord if Discord's servers can fetch the URL. In dev that is http://localhost:9100/... (MinIO) and silently shows nothing; production is a public R2 URL and works. A future storage change that makes banner URLs private would break the announcement image with no error anywhere.",
+          "status": "open",
+          "notedAt": "2026-07-27T20:10:00Z"
+        },
+        {
+          "desc": "PRE-EXISTING, observed again here: the T-0204 derive e2e cases fail intermittently when the FULL suite runs (they pass alone, and the full suite passed on 3 consecutive fresh databases). Cross-suite state on the shared single-tenant rows is the likely cause. CI can hit it.",
+          "status": "open",
+          "notedAt": "2026-07-27T20:10:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Unarchive does NOT re-open the announcement: it stays closed, because re-opening would need a fresh message and that would re-ping the role.",
+        "No re-post when the original message was deleted in Discord - the edit simply fails and lands in the operations ledger.",
+        "Deleting an event still relies on the close sweep (which covers deletedAt) rather than closing inline."
+      ],
+      "lastTouchedCommit": "f124324a1e6803a27b56c923ed0bedf53b6be956",
+      "createdAt": "2026-07-27T20:10:00Z",
+      "updatedAt": "2026-07-27T20:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T20:10:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner: 'include the event banner' (already wired - it just cannot render from a localhost MinIO URL) and 'editing the event should re-render its discord announcement'. Implemented on feat/event-announcement-resync; 977 unit + 140 e2e green."
         }
       ]
     }

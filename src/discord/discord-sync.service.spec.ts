@@ -416,6 +416,7 @@ describe('DiscordSyncService', () => {
 
     it('carries ONLY the event id, so the roster is read at drain time', async () => {
       settingsRepo.findOne.mockResolvedValue(settings());
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, closedAt: null });
       pendingRefreshes(0);
 
       await service.enqueueEventAnnouncementRefresh(REGIMENT, EVENT_ID);
@@ -434,7 +435,28 @@ describe('DiscordSyncService', () => {
       // job already reflects every press before it drains, because it recomposes
       // from the database rather than from a frozen payload.
       settingsRepo.findOne.mockResolvedValue(settings());
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, closedAt: null });
       pendingRefreshes(1);
+
+      expect(await service.enqueueEventAnnouncementRefresh(REGIMENT, EVENT_ID)).toBeNull();
+      expect(jobsRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('queues NOTHING for an event that was never announced (T-0207)', async () => {
+      // A cascaded re-anchor asks for a refresh per occurrence, and most have no
+      // announcement at all. Discovering that with a job each would be churn.
+      settingsRepo.findOne.mockResolvedValue(settings());
+      announcements.findDelivery.mockResolvedValue(null);
+      pendingRefreshes(0);
+
+      expect(await service.enqueueEventAnnouncementRefresh(REGIMENT, EVENT_ID)).toBeNull();
+      expect(jobsRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses to re-render a CLOSED announcement, so an edit cannot revive its buttons (T-0207)', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, closedAt: new Date() });
+      pendingRefreshes(0);
 
       expect(await service.enqueueEventAnnouncementRefresh(REGIMENT, EVENT_ID)).toBeNull();
       expect(jobsRepo.create).not.toHaveBeenCalled();
