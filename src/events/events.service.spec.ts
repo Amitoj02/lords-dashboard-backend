@@ -58,6 +58,7 @@ const buildEvent = (overrides: Partial<RegimentEvent> = {}): RegimentEvent => ({
   recurrenceCadence: null,
   recurrenceActive: false,
   recurrenceTemplateId: null,
+  announceRoleId: null,
   serverName: 'LORDS-1',
   serverPassword: 'hunter2',
   serverRegion: 'EU',
@@ -136,7 +137,10 @@ describe('EventsService', () => {
   // Capability gate for archived-event visibility (T-0097/T-0098). Defaults to
   // denying ManageEvents; individual tests opt in with mockResolvedValue(true).
   const authz = { can: jest.fn() };
-  const discordSync = { enqueueEventAnnounce: jest.fn().mockResolvedValue(null) };
+  const discordSync = {
+    enqueueEventAnnounce: jest.fn().mockResolvedValue(null),
+    enqueueEventAnnouncementRefresh: jest.fn().mockResolvedValue(null),
+  };
   const storage = {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
@@ -289,15 +293,25 @@ describe('EventsService', () => {
       const created = eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>;
       expect(created.isDraft).toBe(false);
       expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledTimes(1);
-      // The announcement is composed by DiscordSyncService now (T-0174); the
-      // service hands over a projection of the event, never rendered text — and
-      // that projection structurally cannot carry the server password.
-      expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledWith(
-        REGIMENT,
-        expect.objectContaining({ title: 'Muster', rsvpCount: 0, eventType: 'One-off' }),
+      // The announcement is composed inside the Discord module (T-0174/T-0205);
+      // the events service hands over an ID and NOTHING ELSE, so there is no
+      // projection here that could carry the server password — and no second
+      // place for the create path and a later re-render to disagree about what
+      // the announcement says.
+      expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledWith(REGIMENT, 'event-new');
+    });
+
+    it('persists the announce ping role, and clears it on a blank (T-0205)', async () => {
+      await service.create(user(), { ...baseDto(), announceRoleId: '777000000000000001' }, null);
+      expect((eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>).announceRoleId).toBe(
+        '777000000000000001',
       );
-      const summary = discordSync.enqueueEventAnnounce.mock.calls[0][1] as Record<string, unknown>;
-      expect(summary).not.toHaveProperty('serverPassword');
+
+      eventTxRepo.create.mockClear();
+      await service.create(user(), { ...baseDto(), announceRoleId: '' }, null);
+      expect(
+        (eventTxRepo.create.mock.calls[0][0] as Partial<RegimentEvent>).announceRoleId,
+      ).toBeNull();
     });
 
     it('stores a cadence as an active recurring template (T-0074)', async () => {
@@ -938,6 +952,20 @@ describe('EventsService', () => {
       expect(created.respondedAt).toBeInstanceOf(Date);
       expect(rsvps.save).toHaveBeenCalled();
       expect(result.id).toBe('event-1');
+    });
+
+    it('re-renders the Discord announcement, so a WEB RSVP moves the embed too (T-0205)', async () => {
+      // The announcement is one view of one roster. A channel that reflected
+      // only the RSVPs made by button would be worse than one showing none.
+      events.findOne.mockResolvedValue(buildEvent());
+      rsvps.findOne.mockResolvedValue(null);
+
+      await service.rsvp(user(), 'event-1', { status: RsvpStatus.Interested });
+      expect(discordSync.enqueueEventAnnouncementRefresh).toHaveBeenCalledWith(REGIMENT, 'event-1');
+
+      discordSync.enqueueEventAnnouncementRefresh.mockClear();
+      await service.removeRsvp(user(), 'event-1');
+      expect(discordSync.enqueueEventAnnouncementRefresh).toHaveBeenCalledWith(REGIMENT, 'event-1');
     });
 
     it('updates an existing RSVP in place', async () => {

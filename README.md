@@ -70,7 +70,7 @@ Four things worth knowing before you read any code:
 
 - **Single origin, no CORS in production.** The SPA's `apiBaseUrl` is the relative string `/api`, so Caddy serves both halves from one hostname and the Discord OAuth callback is same-site. The API is deliberately _not_ split onto an `api.` subdomain.
 - **Uploaded bytes never touch the API.** `POST /api/storage/uploads` validates target, MIME type, size and capability, then returns a presigned S3/R2 `PUT`; the browser uploads directly. MinIO stands in for R2 locally.
-- **All Discord work goes through a transactional outbox** (`discord_sync_jobs`), drained by a worker on a 3-second tick with retry backoff. `discord.js` is confined to one boundary file.
+- **All Discord work goes through a transactional outbox** (`discord_sync_jobs`), drained by a worker on a 3-second tick with retry backoff. `discord.js` is confined to one boundary file. There are no slash commands; the bot's one inbound path is the RSVP buttons under an event announcement, and a press runs the same authorization the HTTP route does.
 - **Single-tenant, multi-tenant-shaped.** One regiment runs on an instance, but every domain row carries `regiment_id` and the permission matrix is stored per regiment.
 
 ---
@@ -97,7 +97,7 @@ Fourteen controllers, all under the global `api` prefix. The table below is one 
 | **Authz**              | `src/authz/`                 | The capability × role matrix engine — a `@RequireCapability()` guard over a cached `role_permissions` read                                                 |
 | **Members**            | `src/members/`               | Roster directory, profiles, service record, event history, staff actions (rank/role, medals, suspend/ban), and GDPR self-service export + deletion         |
 | **Applications**       | `src/applications/`          | Recruitment intake: self-submit and edit; staff queue with approve → enlist, decline, hold, block                                                          |
-| **Events**             | `src/events/`                | Public + member calendars, create/edit, archive/complete/re-anchor, recurring series, RSVP, attendance, encrypted server-password reveal, three schedulers |
+| **Events**             | `src/events/`                | Public + member calendars, create/edit, archive/complete/re-anchor, recurring series, RSVP (on the site or from the Discord announcement), attendance, encrypted server-password reveal, three schedulers |
 | **Gallery**            | `src/gallery/`               | Public feed, member archive, submissions, moderation queue, likes, and YouTube / Medal.tv link resolution into embed metadata                              |
 | **Ranks** · **Medals** | `src/ranks/` · `src/medals/` | Admin-editable ladder and cabinet: CRUD, reorder by precedence, delete blocked while held/awarded, `Recruit` frozen against rename/delete, link and unlink to a Discord role |
 | **Regiments**          | `src/regiments/`             | The three public, unauthenticated reads: regiment profile + presentation slice, legal documents, landing-page statistics                                   |
@@ -302,6 +302,8 @@ Approving enlists the applicant at the entry rank.
 | GET         | `/events/:id/attendees`, `/events/:id/rsvps`                                                  | `view_members_directory`                            |
 | POST        | `/events/:id/reveal-password`                                                                 | `reveal_event_passwords` (and you must have RSVP'd) |
 
+An event may name a Discord role to ping (`announceRoleId`). It is pinged **exactly once**, when the announcement is posted — never on the pre-event reminder and never when the announcement's RSVP list is re-rendered — so one event produces one ping, whether it was created by hand or materialised by the recurrence sweep. RSVPs made here and RSVPs made by pressing a button in Discord are the same rows and move the same embed.
+
 </details>
 
 <details>
@@ -398,6 +400,28 @@ The bot sits behind **two independent switches**:
 
 Even Discord's permission bits are redeclared locally as bigints so the dependency stays contained. There are **no Discord webhooks anywhere** — every outbound message goes through the bot token via that MySQL-backed outbox.
 
+**Mentions are off by default and allow-listed by exception.** Every send pins `allowed_mentions.parse: []`, so an `@everyone` typed into admin-authored text renders as inert literal text. The two messages that genuinely have to notify somebody — an event announcement pinging its role, and the pre-event thread pinging the attendees — carry an explicit list of snowflakes alongside that empty `parse`, and nothing can widen it. A message **edit** accepts no allow-list at all, which is why re-rendering an announcement on every RSVP does not re-ping anyone.
+
+</details>
+
+<details>
+<summary><strong>Event announcements, RSVP buttons and the pre-event thread</strong></summary>
+
+An announcement is the only message this app **re-renders**, so it is also the only one composed at *drain* time rather than at enqueue: its embed carries **Attending / Tentative / Declined** sections read from `event_rsvps` when the job runs, and three buttons underneath that write back to the same table. Freezing the roster into the payload would deliver whichever RSVP happened to be first.
+
+```
+event created (by hand or by the recurrence sweep)
+  └─ announcement posted, role pinged once, buttons live
+       ├─ member presses a button  → RSVP upserted → embed re-rendered (coalesced: one pending refresh per event)
+       ├─ member RSVPs on the site → same rows, same re-render
+       ├─ "notify before" comes due → thread opened on that message, attendees pinged in it (never DM'd)
+       └─ event ends              → buttons disabled; the roster stays as the record of who turned out
+```
+
+A button press is not a back door. It resolves the presser through `SessionContextService` — the same choke point every HTTP route uses, so a banned or suspended member is refused there rather than by a second, divergent check — then requires `rsvp_to_events` against their live role. A Discord account with no roster row is told to apply; pressing a button never creates a member. Every reply is ephemeral, so forty RSVPs do not produce forty messages in the channel.
+
+The thread exists specifically so the bot never mass-DMs: Discord's policy treats unsolicited bulk DMs as abuse, and one thread message reaches the same people. Where the announcement landed is recorded in `event_announcements`, which is what makes the re-render, the thread and the retirement all target the original message.
+
 </details>
 
 <details>
@@ -424,9 +448,9 @@ The audit ledger records as a **side effect**: a failure there is logged and swa
 
 ## 🗄 Database
 
-The complete normalized (3NF) model — 29 tables, enums, junctions, soft deletes, the authorization matrix and the auth/identity model — is documented in **[`SCHEMA.md`](./SCHEMA.md)**.
+The complete normalized (3NF) model — 30 tables, enums, junctions, soft deletes, the authorization matrix and the auth/identity model — is documented in **[`SCHEMA.md`](./SCHEMA.md)**.
 
-`synchronize` is hardcoded `false` and must stay that way. Schema changes are made by editing an entity and generating a migration; **five** migrations exist today, the first being a squash of the original eighteen — so a database that ran those must be **dropped and recreated, not migrated forward**. All date columns are `datetime(6)` rather than `timestamp`, avoiding both the 2038 cap (events are scheduled into the future) and implicit timezone conversion.
+`synchronize` is hardcoded `false` and must stay that way. Schema changes are made by editing an entity and generating a migration; **six** migrations exist today, the first being a squash of the original eighteen — so a database that ran those must be **dropped and recreated, not migrated forward**. All date columns are `datetime(6)` rather than `timestamp`, avoiding both the 2038 cap (events are scheduled into the future) and implicit timezone conversion.
 
 > [!IMPORTANT]
 > **`seed:prod` runs on every production deploy, so seeding is two-tier.** "Idempotent" is not enough: re-applying a hardcoded default to a row an admin has since edited is idempotent _and_ destructive.

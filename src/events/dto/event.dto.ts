@@ -120,6 +120,14 @@ export class EventDto {
 
   // ── Member-only fields (present only when includeServer is set) ──────────────
 
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Discord role pinged when the event was announced (member view only). Never projected ' +
+      'publicly — it is guild configuration, not calendar information.',
+  })
+  announceRoleId?: string | null;
+
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   serverName?: string | null;
 
@@ -219,6 +227,7 @@ export class EventDto {
     dto.hasServerPassword = !!event.serverPassword;
 
     if (opts.includeServer) {
+      dto.announceRoleId = event.announceRoleId;
       dto.serverName = event.serverName || null;
       dto.serverRegion = event.serverRegion || null;
       dto.recurrenceRule = event.recurrenceRule;

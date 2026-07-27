@@ -7,25 +7,50 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  APIActionRowComponent,
+  APIComponentInMessageActionRow,
   APIEmbed,
+  APIMessageTopLevelComponent,
+  ButtonStyle,
   ChannelType,
   Client,
+  ComponentType,
   Events,
   GatewayIntentBits,
   Guild,
   MessageCreateOptions,
+  MessageFlags,
+  MessageMentionOptions,
+  SendableChannels,
 } from 'discord.js';
 import { AppConfig } from '../../config/configuration';
 import {
+  DiscordActionRow,
+  DiscordButtonPress,
   DiscordChannel,
   DiscordEmbed,
   DiscordGateway,
   DiscordGuildMemberRef,
   DiscordGatewayStatus,
+  DiscordInteractionHandler,
+  DiscordMentionAllowList,
+  DiscordMessageEdit,
   DiscordRole,
+  DiscordSendExtras,
   MemberJoinHandler,
   MemberLeaveHandler,
 } from './discord-gateway';
+
+/** App button style → discord.js. `primary` is the affirmative RSVP. */
+const BUTTON_STYLES = {
+  primary: ButtonStyle.Primary,
+  secondary: ButtonStyle.Secondary,
+  success: ButtonStyle.Success,
+  danger: ButtonStyle.Danger,
+} as const;
+
+/** How long an event thread stays open with no activity (Discord's max: 1 week). */
+const THREAD_AUTO_ARCHIVE_MINUTES = 10_080;
 
 /**
  * The production {@link DiscordGateway} backed by a discord.js Client, held in
@@ -50,6 +75,7 @@ export class RealDiscordGateway
   private ready = false;
   private readonly joinHandlers: MemberJoinHandler[] = [];
   private readonly leaveHandlers: MemberLeaveHandler[] = [];
+  private readonly interactionHandlers: DiscordInteractionHandler[] = [];
 
   constructor(private readonly config: ConfigService<AppConfig, true>) {
     super();
@@ -77,6 +103,11 @@ export class RealDiscordGateway
         if (!this.isBoundGuild(member.guild.id, 'GuildMemberRemove')) return;
         void this.fanOut(this.leaveHandlers, member.id, 'leave');
       });
+      this.client.on(Events.InteractionCreate, (interaction) => {
+        if (!interaction.isButton()) return;
+        if (!this.isBoundGuild(interaction.guildId ?? '', 'InteractionCreate')) return;
+        void this.dispatchButton(interaction);
+      });
       this.client.on(Events.Error, (err) => this.logger.error(`Gateway error: ${err.message}`));
       await this.client.login(discord.botToken);
     } catch (error) {
@@ -103,6 +134,73 @@ export class RealDiscordGateway
 
   registerMemberLeaveHandler(handler: MemberLeaveHandler): void {
     this.leaveHandlers.push(handler);
+  }
+
+  registerInteractionHandler(handler: DiscordInteractionHandler): void {
+    this.interactionHandlers.push(handler);
+  }
+
+  /**
+   * Answer one button press.
+   *
+   * ── THE THREE-SECOND CLOCK IS WHY THIS DEFERS FIRST ─────────────────────────
+   * Discord discards an interaction that is not acknowledged within three
+   * seconds and shows the presser "This interaction failed". A handler here does
+   * real work — resolve the identity, resolve the roster member, check the
+   * capability, upsert the RSVP — against a database that is occasionally slow,
+   * so acknowledging FIRST and filling in the answer afterwards is the only
+   * shape that cannot lose a press. `deferReply` buys fifteen minutes.
+   *
+   * Ephemeral throughout: the confirmation is for the presser alone. The channel
+   * already learns the outcome from the re-rendered announcement, and an event
+   * with forty RSVPs must not also produce forty "you're going!" messages.
+   *
+   * Nothing here may reject — an unhandled rejection inside discord.js's emitter
+   * would take down the API process.
+   */
+  private async dispatchButton(interaction: {
+    customId: string;
+    user: { id: string };
+    channelId: string;
+    message: { id: string };
+    deferReply: (options: { flags: MessageFlags.Ephemeral }) => Promise<unknown>;
+    editReply: (options: { content: string }) => Promise<unknown>;
+  }): Promise<void> {
+    const press: DiscordButtonPress = {
+      customId: interaction.customId,
+      discordUserId: interaction.user.id,
+      channelId: interaction.channelId,
+      messageId: interaction.message.id,
+    };
+    try {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    } catch (error) {
+      // A press we could not acknowledge is already lost to the presser; do NOT
+      // run the handlers, or a retried click would double-apply its side effect.
+      this.logger.error(`Could not acknowledge a button press: ${(error as Error).message}`);
+      return;
+    }
+
+    let content = 'That control is no longer active.';
+    for (const handler of this.interactionHandlers) {
+      try {
+        const reply = await handler(press);
+        if (reply) {
+          content = reply.content;
+          break;
+        }
+      } catch (error) {
+        this.logger.error(`A button handler failed: ${(error as Error).message}`);
+        content = 'Something went wrong handling that. Try again in a moment.';
+        break;
+      }
+    }
+
+    try {
+      await interaction.editReply({ content });
+    } catch (error) {
+      this.logger.error(`Could not answer a button press: ${(error as Error).message}`);
+    }
   }
 
   /**
@@ -249,22 +347,67 @@ export class RealDiscordGateway
     channelId: string,
     content: string,
     embeds?: DiscordEmbed[],
+    extras?: DiscordSendExtras,
   ): Promise<{ messageId: string }> {
+    const channel = await this.resolveGuildChannel(channelId);
+    const message = await channel.send(this.toSendOptions(content, embeds, extras));
+    return { messageId: message.id };
+  }
+
+  async editChannelMessage(
+    channelId: string,
+    messageId: string,
+    update: DiscordMessageEdit,
+  ): Promise<void> {
+    const channel = await this.resolveGuildChannel(channelId);
+    const message = await channel.messages.fetch(messageId);
+    await message.edit({
+      // No mention allow-list is even accepted by this method: an announcement is
+      // re-rendered on every RSVP, and a re-render that re-pings the role would
+      // turn one ping into forty.
+      allowedMentions: { parse: [] },
+      ...(update.content !== undefined ? { content: update.content } : {}),
+      ...(update.embeds ? { embeds: update.embeds.map((embed) => this.toApiEmbed(embed)) } : {}),
+      // `[]` is meaningful here — it is how the RSVP buttons are removed when an
+      // event ends — so this checks for PRESENCE, not truthiness.
+      ...(update.components ? { components: this.toApiComponents(update.components) } : {}),
+    });
+  }
+
+  async createMessageThread(
+    channelId: string,
+    messageId: string,
+    name: string,
+  ): Promise<{ threadId: string }> {
+    const channel = await this.resolveGuildChannel(channelId);
+    const message = await channel.messages.fetch(messageId);
+    // Discord caps a thread name at 100 characters and rejects the whole call
+    // over it, so an event with a long title must be shortened, not refused.
+    const thread = await message.startThread({
+      name: name.slice(0, 100),
+      autoArchiveDuration: THREAD_AUTO_ARCHIVE_MINUTES,
+    });
+    return { threadId: thread.id };
+  }
+
+  /**
+   * Resolve a channel id (a real channel OR a thread) to something sendable,
+   * scoped to the bound guild (LDA-M6): a channel id that resolves to a
+   * DIFFERENT guild the bot happens to be in must never receive this regiment's
+   * announcements. DMs have no guildId and are handled by sendDirectMessage.
+   */
+  private async resolveGuildChannel(channelId: string): Promise<SendableChannels> {
     const client = this.requireClient();
     const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased() || !('send' in channel)) {
+    if (!channel || !channel.isTextBased() || !channel.isSendable()) {
       throw new ServiceUnavailableException('Channel is not a sendable text channel');
     }
-    // Scope the send to the bound guild (LDA-M6): a channel id that resolves to a
-    // DIFFERENT guild the bot happens to be in must never receive this regiment's
-    // announcements. DMs have no guildId and are handled by sendDirectMessage.
     const boundGuildId = this.config.get('discord', { infer: true }).guildId;
     const channelGuildId = 'guildId' in channel ? channel.guildId : null;
     if (!boundGuildId || channelGuildId !== boundGuildId) {
       throw new ServiceUnavailableException('Channel is not in the configured regiment guild');
     }
-    const message = await channel.send(this.toSendOptions(content, embeds));
-    return { messageId: message.id };
+    return channel;
   }
 
   async sendDirectMessage(
@@ -287,21 +430,64 @@ export class RealDiscordGateway
    * rejects an empty-string content, so an embed-only message must not carry the
    * key at all.
    */
-  private toSendOptions(content: string, embeds?: DiscordEmbed[]): MessageCreateOptions {
+  private toSendOptions(
+    content: string,
+    embeds?: DiscordEmbed[],
+    extras?: DiscordSendExtras,
+  ): MessageCreateOptions {
     const options: MessageCreateOptions = {
-      // Neutralise ALL mention resolution on every outbound message (LDA-M6). User
-      // free-text only lands in embed descriptions today (where Discord does not
-      // resolve mentions), but that is a fragile invariant one future `content:`
-      // producer would break; pinning parse:[] here makes @everyone/@here/role/user
-      // pings inert at the single send boundary, permanently.
-      allowedMentions: { parse: [] },
+      allowedMentions: this.toAllowedMentions(extras?.mentions),
     };
     if (content) options.content = content;
     if (embeds?.length) options.embeds = embeds.map((embed) => this.toApiEmbed(embed));
+    if (extras?.components?.length) options.components = this.toApiComponents(extras.components);
     // Neither half present would be an empty message; fall back to the content
     // key so the API returns a clear error instead of us sending `{}`.
     if (!options.content && !options.embeds) options.content = content;
     return options;
+  }
+
+  /**
+   * Build the mention allow-list.
+   *
+   * `parse: []` is UNCONDITIONAL — it is what neutralises `@everyone`/`@here`
+   * and any stray `<@id>` inside admin-authored text at the single send
+   * boundary, permanently (LDA-M6). A caller that needs a real ping supplies
+   * EXPLICIT SNOWFLAKES, which are added alongside; they cannot widen `parse`,
+   * so there is no path from "this message mentions a role" to "this message
+   * pinged the whole guild".
+   *
+   * Both arrays are truncated to Discord's documented maximum of 100 ids. Over
+   * that, Discord rejects the message outright — and a rejected event thread
+   * pings nobody at all, which is strictly worse than pinging the first hundred.
+   */
+  private toAllowedMentions(mentions?: DiscordMentionAllowList): MessageMentionOptions {
+    const allowed: MessageMentionOptions = { parse: [] };
+    if (mentions?.roles?.length) allowed.roles = mentions.roles.slice(0, 100);
+    if (mentions?.users?.length) allowed.users = mentions.users.slice(0, 100);
+    return allowed;
+  }
+
+  /**
+   * Map action rows onto Discord's wire shape. Built as plain API objects rather
+   * than through `ButtonBuilder`/`ActionRowBuilder` for the same reason
+   * {@link toApiEmbed} avoids `EmbedBuilder`: the builders VALIDATE and THROW,
+   * and a throw inside the send path is indistinguishable from a transient
+   * Discord failure — the outbox would retry it five times and then fail it
+   * permanently.
+   */
+  private toApiComponents(rows: DiscordActionRow[]): APIMessageTopLevelComponent[] {
+    return rows.map((row): APIActionRowComponent<APIComponentInMessageActionRow> => ({
+      type: ComponentType.ActionRow,
+      components: row.buttons.map((button) => ({
+        type: ComponentType.Button,
+        style: BUTTON_STYLES[button.style],
+        label: button.label,
+        custom_id: button.customId,
+        ...(button.emoji ? { emoji: { name: button.emoji } } : {}),
+        ...(button.disabled ? { disabled: true } : {}),
+      })),
+    }));
   }
 
   /**

@@ -76,7 +76,17 @@ describe('MockDiscordGateway', () => {
       const { messageId } = await gateway.sendChannelMessage('channel-1', 'hello');
 
       expect(gateway.sentMessages).toEqual([
-        { kind: 'channel', target: 'channel-1', content: 'hello', embeds: [], messageId },
+        {
+          kind: 'channel',
+          target: 'channel-1',
+          content: 'hello',
+          embeds: [],
+          // Recorded as EMPTY rather than absent (T-0205), so "this message
+          // pinged nobody" is an assertion you can actually write.
+          components: [],
+          mentions: {},
+          messageId,
+        },
       ]);
     });
 

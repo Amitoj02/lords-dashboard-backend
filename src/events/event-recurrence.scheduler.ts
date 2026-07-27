@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DateTime, DurationLikeObject } from 'luxon';
 import { DataSource, EntityManager, IsNull, Repository } from 'typeorm';
 import { EventStatus, RecurrenceCadence } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { isDuplicateKeyError } from './duplicate-key';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
 import { EventPlatform } from './entities/event-platform.entity';
@@ -121,6 +122,8 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
     @InjectRepository(RegimentEvent)
     private readonly events: Repository<RegimentEvent>,
     private readonly dataSource: DataSource,
+    // A materialised occurrence is announced like any other event (T-0205).
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   onModuleInit(): void {
@@ -237,15 +240,24 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
     durationUnits: DurationLikeObject | null,
     children: { platforms: EventPlatform['platform'][]; tags: string[]; notifyOffsets: number[] },
   ): Promise<boolean> {
+    let occurrenceId: string;
     try {
-      await this.dataSource.transaction((manager) =>
+      occurrenceId = await this.dataSource.transaction((manager) =>
         this.createOccurrence(manager, template, startsAt, durationUnits, children),
       );
-      return true;
     } catch (error) {
       if (isDuplicateKeyError(error)) return false; // a concurrent sweep won the race
       throw error;
     }
+    // ⚠️ ANNOUNCED *AFTER* THE TRANSACTION COMMITS, NOT INSIDE IT (T-0205). A
+    // generated occurrence is a real muster and gets the same announcement — the
+    // role ping, the RSVP buttons, the lot — as one created by hand; before this
+    // the sweep materialised rows in silence and the guild only ever heard about
+    // the template. The enqueue reads the occurrence back by id, so it must be
+    // visible to another connection first, and it is best-effort by contract, so
+    // a Discord problem can never roll back a materialised occurrence.
+    await this.discordSync.enqueueEventAnnounce(template.regimentId, occurrenceId);
+    return true;
   }
 
   /** The template's platform/tag/notify-offset child rows, as plain value arrays. */
@@ -264,14 +276,14 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
     ];
   }
 
-  /** Insert one occurrence row + its cloned child collections. */
+  /** Insert one occurrence row + its cloned child collections; returns its id. */
   private async createOccurrence(
     manager: EntityManager,
     template: RegimentEvent,
     startsAt: Date,
     durationUnits: DurationLikeObject | null,
     children: { platforms: EventPlatform['platform'][]; tags: string[]; notifyOffsets: number[] },
-  ): Promise<void> {
+  ): Promise<string> {
     const zone = DateTime.now().setZone(template.timezone).isValid ? template.timezone : 'UTC';
     const eventRepo = manager.getRepository(RegimentEvent);
     const occurrence = eventRepo.create({
@@ -292,6 +304,11 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
       recurrenceCadence: null,
       recurrenceActive: false,
       recurrenceTemplateId: template.id,
+      // Inherited so each occurrence pings the template's role ONCE, when it is
+      // announced (T-0205). The ping belongs to the announcement, and every
+      // occurrence gets its own — so a weekly muster pings weekly, not once for
+      // the whole series and not again at reminder time.
+      announceRoleId: template.announceRoleId,
       serverName: template.serverName,
       // Reading the transformer-backed column yields plaintext; saving re-encrypts.
       serverPassword: template.serverPassword,
@@ -320,5 +337,6 @@ export class EventRecurrenceScheduler implements OnModuleInit, OnModuleDestroy {
         .getRepository(EventNotifyOffset)
         .insert(children.notifyOffsets.map((minutes) => ({ eventId: saved.id, minutes })));
     }
+    return saved.id;
   }
 }

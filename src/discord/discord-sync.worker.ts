@@ -18,8 +18,12 @@ import {
   ChannelMessagePayload,
   DiscordJobPayloadMap,
   DirectMessagePayload,
+  EventAnnouncePayload,
 } from './discord-job-payloads';
 import { DiscordSyncService } from './discord-sync.service';
+import { buildEventRsvpButtons } from './embeds/event-components';
+import { buildEventEmbed } from './embeds/notification-embeds';
+import { EventAnnouncementService } from './event-announcement.service';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
@@ -38,7 +42,34 @@ const IDEMPOTENT_JOB_TYPES = new Set<string>([
   // and applying a member's share of a re-link is a reconcile.
   DiscordSyncJobType.RoleRelinkExpand,
   DiscordSyncJobType.RoleRelinkApply,
+  // Both are EDITS of one existing message, recomposed from the database each
+  // time. Re-running either lands on exactly the state the first run aimed at,
+  // and neither notifies anybody — the mention allow-list is empty on an edit.
+  // The thread ping is deliberately absent: opening a thread and pinging the
+  // attendees is a one-shot, visible side effect.
+  DiscordSyncJobType.EventAnnouncementRefresh,
+  DiscordSyncJobType.EventAnnouncementClose,
 ]);
+
+/**
+ * How many mentions ride in one thread message.
+ *
+ * Two ceilings meet here: a message body is capped at 2,000 characters (a
+ * snowflake mention costs ~23 of them) and `allowed_mentions.users` is capped at
+ * 100 ids — and Discord REJECTS the whole message over either, so an event with
+ * a large turnout would ping nobody at all. Eighty leaves headroom under both
+ * for the lead-in sentence.
+ */
+const PING_CHUNK_SIZE = 80;
+
+/** Split the attendee mentions into messages Discord will actually accept. */
+function chunkMentions(discordUserIds: string[]): string[][] {
+  const chunks: string[][] = [];
+  for (let i = 0; i < discordUserIds.length; i += PING_CHUNK_SIZE) {
+    chunks.push(discordUserIds.slice(i, i + PING_CHUNK_SIZE));
+  }
+  return chunks;
+}
 
 /** The bulk fan-out job types (a rank/medal re-link, T-0158). */
 const BULK_JOB_TYPES = [DiscordSyncJobType.RoleRelinkExpand, DiscordSyncJobType.RoleRelinkApply];
@@ -137,6 +168,9 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     // The enqueue side owns the re-link paging query; the cursor job's whole
     // side effect is "expand one page", so the worker delegates it there.
     private readonly sync: DiscordSyncService,
+    // Event announcements are the one notification recomposed at DRAIN time
+    // (T-0205), because their RSVP roster changes after the job is queued.
+    private readonly announcements: EventAnnouncementService,
   ) {}
 
   onModuleInit(): void {
@@ -339,15 +373,34 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         });
         return;
       }
-      case DiscordSyncJobType.Announce:
+      case DiscordSyncJobType.Announce: {
+        const p = this.payloadOf(job, type);
+        await this.postEventAnnouncement(p);
+        return;
+      }
       case DiscordSyncJobType.EventReminder:
       case DiscordSyncJobType.ApplicationSubmitted:
-        // Announcements, event reminders and enlistment posts are pre-composed
-        // channel messages (channel + content/embed resolved at enqueue), so they
-        // drain identically. They stay separate JOB TYPES because the operations
+        // Event reminders and enlistment posts are pre-composed channel messages
+        // (channel + content/embed resolved at enqueue), so they drain
+        // identically. They stay separate JOB TYPES because the operations
         // ledger and the delivery matrix report on them separately.
         await this.postToChannel(this.payloadOf(job, type));
         return;
+      case DiscordSyncJobType.EventAnnouncementRefresh: {
+        const p = this.payloadOf(job, type);
+        await this.refreshEventAnnouncement(job.regimentId, p.eventId);
+        return;
+      }
+      case DiscordSyncJobType.EventThreadPing: {
+        const p = this.payloadOf(job, type);
+        await this.openEventThread(job.regimentId, p.eventId, p.minutesBefore ?? 0);
+        return;
+      }
+      case DiscordSyncJobType.EventAnnouncementClose: {
+        const p = this.payloadOf(job, type);
+        await this.closeEventAnnouncement(job.regimentId, p.eventId);
+        return;
+      }
       case DiscordSyncJobType.GallerySubmitted:
       case DiscordSyncJobType.GalleryApproved: {
         const p = this.payloadOf(job, type);
@@ -401,6 +454,165 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       default:
         throw new Error(`Unknown sync job type: ${job.jobType}`);
     }
+  }
+
+  /**
+   * Post an event announcement and REMEMBER WHERE IT LANDED (T-0205).
+   *
+   * The write-back is what every later step depends on: an RSVP re-renders that
+   * message, the lead-time notification hangs a thread off it, and the close
+   * sweep disables its buttons. It is guarded exactly like the audit mirror's
+   * write-back — a throw after a successful send would retry the job and post a
+   * SECOND announcement, complete with a second role ping.
+   *
+   * ⚠️ BACKWARD COMPATIBILITY: a payload with none of the new fields is an
+   * `announce` row from before this change, and it takes the ORIGINAL call —
+   * same argument count, same shape — so a job sitting in the outbox at deploy
+   * time delivers exactly as it would have on the previous release. The extras
+   * are only passed when there is something to pass.
+   */
+  private async postEventAnnouncement(p: EventAnnouncePayload): Promise<void> {
+    const hasExtras = !!p.components?.length || !!p.mentions;
+    const sent = hasExtras
+      ? await this.gateway.sendChannelMessage(
+          p.channelId,
+          p.content ?? '',
+          p.embed ? [p.embed] : undefined,
+          { components: p.components ?? undefined, mentions: p.mentions ?? undefined },
+        )
+      : await this.postToChannel(p);
+    // The message id is READ only on the event path, so a legacy announcement
+    // does not start depending on a return value it never used.
+    if (!p.eventId) return;
+    try {
+      await this.announcements.recordDelivery(p.eventId, p.channelId, sent.messageId);
+    } catch (error) {
+      this.logger.error(
+        `Announced event ${p.eventId} but could not record its message: ` +
+          `${(error as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Re-render an announcement's embed from the CURRENT roster (T-0205).
+   *
+   * The buttons are re-sent as part of the edit rather than left alone: a
+   * message edit that omits `components` keeps them, but re-sending is what
+   * makes this job self-healing — an announcement whose buttons were lost to a
+   * partial edit gets them back on the next RSVP.
+   */
+  private async refreshEventAnnouncement(regimentId: string, eventId: string): Promise<void> {
+    const delivery = await this.announcements.findDelivery(eventId);
+    // Nothing to edit, or the event is over and its buttons are already retired
+    // — a late press must not resurrect them.
+    if (!delivery || delivery.closedAt) return;
+    const event = await this.announcements.loadEvent(regimentId, eventId);
+    if (!event) return;
+    const brand = await this.sync.resolveBrand(regimentId);
+    const summary = await this.announcements.summaryFor(event);
+    await this.gateway.editChannelMessage(delivery.channelId, delivery.messageId, {
+      embeds: [buildEventEmbed(summary, brand)],
+      components: buildEventRsvpButtons(eventId),
+    });
+  }
+
+  /**
+   * Open the pre-event thread and ping everyone who said they were coming
+   * (T-0205) — the replacement for DM'ing each attendee, which Discord's policy
+   * treats as abuse at any scale worth doing.
+   *
+   * ── ORDER IS THE IDEMPOTENCY STORY ──────────────────────────────────────────
+   * The thread id is written back the moment the thread exists, BEFORE the
+   * pings. A crash between the two costs a missing ping; the other order would
+   * cost a second thread on every retry. Discord itself refuses a second thread
+   * on the same message, so the retry would fail permanently and the operator
+   * would be handed an unresolvable operation instead of a minor omission.
+   *
+   * Only the FIRST ping message is allowed to fail the job. Later chunks are
+   * best-effort — the same rule the gallery's second message follows — because
+   * a retry re-sends the chunks that already delivered, and a duplicate ping is
+   * worse than a missing one.
+   */
+  private async openEventThread(
+    regimentId: string,
+    eventId: string,
+    minutesBefore: number,
+  ): Promise<void> {
+    const delivery = await this.announcements.findDelivery(eventId);
+    if (!delivery || delivery.threadId) return;
+    const event = await this.announcements.loadEvent(regimentId, eventId);
+    if (!event) return;
+
+    const brand = await this.sync.resolveBrand(regimentId);
+    const summary = await this.announcements.summaryFor(event);
+    const targets = await this.announcements.pingTargets(eventId);
+
+    const { threadId } = await this.gateway.createMessageThread(
+      delivery.channelId,
+      delivery.messageId,
+      event.title,
+    );
+    try {
+      await this.announcements.recordThread(eventId, threadId);
+    } catch (error) {
+      this.logger.error(
+        `Opened thread ${threadId} for event ${eventId} but could not record it: ` +
+          `${(error as Error).message}`,
+      );
+    }
+
+    const chunks = chunkMentions(targets);
+    // The reminder card leads, so the thread reads as an announcement even when
+    // nobody RSVP'd and there is no one to ping.
+    await this.gateway.sendChannelMessage(
+      threadId,
+      chunks[0]?.map((id) => `<@${id}>`).join(' ') ?? '',
+      [buildEventEmbed(summary, brand, { minutesBefore })],
+      chunks[0] ? { mentions: { users: chunks[0] } } : undefined,
+    );
+    for (const chunk of chunks.slice(1)) {
+      try {
+        await this.gateway.sendChannelMessage(
+          threadId,
+          chunk.map((id) => `<@${id}>`).join(' '),
+          undefined,
+          { mentions: { users: chunk } },
+        );
+      } catch (error) {
+        this.logger.error(`Event ${eventId} thread ping chunk failed: ${(error as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * Disable an ended event's RSVP buttons (T-0205). The message and its roster
+   * stay exactly as they are — the announcement is the historical record of who
+   * turned out — and only the controls go dead.
+   *
+   * `closedAt` is stamped AFTER the edit lands, so a failed edit is retried
+   * rather than silently marked done.
+   */
+  private async closeEventAnnouncement(regimentId: string, eventId: string): Promise<void> {
+    const delivery = await this.announcements.findDelivery(eventId);
+    if (!delivery || delivery.closedAt) return;
+    const event = await this.announcements.loadEvent(regimentId, eventId);
+    if (event) {
+      const brand = await this.sync.resolveBrand(regimentId);
+      const summary = await this.announcements.summaryFor(event);
+      await this.gateway.editChannelMessage(delivery.channelId, delivery.messageId, {
+        embeds: [buildEventEmbed(summary, brand)],
+        components: buildEventRsvpButtons(eventId, true),
+      });
+    } else {
+      // The event is gone (deleted or archived after it ended) but its message is
+      // not. Kill the buttons anyway — a live control on an orphaned message is
+      // the one state that would let a press hit an event nothing can render.
+      await this.gateway.editChannelMessage(delivery.channelId, delivery.messageId, {
+        components: buildEventRsvpButtons(eventId, true),
+      });
+    }
+    await this.announcements.markClosed(eventId);
   }
 
   /**

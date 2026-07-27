@@ -39,7 +39,7 @@ const event: EventSummary = {
   timezone: 'America/Toronto',
   bannerUrl: 'https://cdn.example.com/event.png',
   eventType: 'One-off',
-  rsvpCount: 7,
+  roster: { attending: [], tentative: [], declined: [] },
 };
 
 describe('notification embeds (T-0173 / T-0174 / T-0175)', () => {
@@ -109,6 +109,36 @@ describe('notification embeds (T-0173 / T-0174 / T-0175)', () => {
       expect(day.title).toBe('⏰ Reminder — Line Battle starts in 1 day');
       expect(quarter.title).toBe('⏰ Reminder — Line Battle starts in 15 minutes');
       expect(day.color).not.toBe(announce.color);
+    });
+
+    it('shows all three RSVP sections, empty ones included (T-0205)', () => {
+      // An empty section that disappeared would make the embed reshape itself on
+      // the first press, and a reader could not tell "nobody declined" from
+      // "declining is not on offer".
+      const names = buildEventEmbed(event, brand).fields?.map((f) => f.name) ?? [];
+      expect(names).toEqual(
+        expect.arrayContaining(['✅ Attending — 0', '❔ Tentative — 0', '❌ Declined — 0']),
+      );
+      const values = Object.fromEntries(
+        (buildEventEmbed(event, brand).fields ?? []).map((f) => [f.name, f.value]),
+      );
+      expect(values['✅ Attending — 0']).toBe('—');
+    });
+
+    it('overflows a long roster by WHOLE entries, never mid-mention', () => {
+      // Every entry is a `<@id>` mention. `clampEmbed` would happily cut one in
+      // half at 1024 characters and Discord would render the remains as literal
+      // text, so the list is trimmed to whole names and the rest is counted.
+      const attending = Array.from({ length: 200 }, (_, i) => `<@${100000000000000000 + i}>`);
+      const embed = buildEventEmbed({ ...event, roster: { ...event.roster, attending } }, brand);
+      const value = embed.fields?.find((f) => f.name === '✅ Attending — 200')?.value ?? '';
+
+      expect(value).toMatch(/ \+\d+ more$/);
+      expect(value.length).toBeLessThanOrEqual(1024);
+      // No half-written mention survived the trim.
+      for (const entry of value.replace(/ \+\d+ more$/, '').split(', ')) {
+        expect(entry).toMatch(/^<@\d+>$/);
+      }
     });
   });
 

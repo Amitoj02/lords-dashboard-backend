@@ -1,11 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
+  DiscordActionRow,
+  DiscordButtonPress,
   DiscordChannel,
   DiscordEmbed,
   DiscordGateway,
   DiscordGuildMemberRef,
   DiscordGatewayStatus,
+  DiscordInteractionHandler,
+  DiscordInteractionReply,
+  DiscordMentionAllowList,
+  DiscordMessageEdit,
   DiscordRole,
+  DiscordSendExtras,
   MemberJoinHandler,
   MemberLeaveHandler,
 } from './discord-gateway';
@@ -24,6 +31,19 @@ export interface RecordedMessage {
   content: string;
   embeds: DiscordEmbed[];
   messageId: string;
+  /**
+   * The button rows the message carries (T-0205). Empty for every message that
+   * has none, so a test can assert "the announcement offered three buttons"
+   * without reaching past the port into discord.js.
+   */
+  components: DiscordActionRow[];
+  /**
+   * WHO THIS MESSAGE WAS ALLOWED TO PING. Recorded because it is a security
+   * property, not a cosmetic one: an assertion that the event thread pinged
+   * exactly the attending members — and that a re-render pinged nobody — is only
+   * possible if the allow-list is observable under DISCORD_BOT_MOCK.
+   */
+  mentions: DiscordMentionAllowList;
 }
 
 /** A canned role set so listRoles()/status look realistic in the wizard. All are
@@ -89,10 +109,16 @@ export class MockDiscordGateway extends DiscordGateway {
   private readonly members = new Map<string, Set<string>>();
   private readonly joinHandlers: MemberJoinHandler[] = [];
   private readonly leaveHandlers: MemberLeaveHandler[] = [];
+  private readonly interactionHandlers: DiscordInteractionHandler[] = [];
   /** Everything "delivered", so tests can assert message + embed shape. */
   private readonly sent: RecordedMessage[] = [];
+  /** messageId → the last edit applied to it, so a re-render is assertable. */
+  private readonly edits = new Map<string, DiscordMessageEdit>();
+  /** messageId → the thread opened on it, mirroring Discord's one-per-message rule. */
+  private readonly threads = new Map<string, string>();
   /** Monotonic, so two messages sent in the same millisecond get distinct ids. */
   private messageCounter = 0;
+  private threadCounter = 0;
 
   constructor() {
     super();
@@ -150,8 +176,9 @@ export class MockDiscordGateway extends DiscordGateway {
     channelId: string,
     content: string,
     embeds?: DiscordEmbed[],
+    extras?: DiscordSendExtras,
   ): Promise<{ messageId: string }> {
-    const messageId = this.record('channel', channelId, content, embeds);
+    const messageId = this.record('channel', channelId, content, embeds, extras);
     this.logger.log(`[mock] #${channelId} <- ${describe(content, embeds)}`);
     return Promise.resolve({ messageId });
   }
@@ -166,9 +193,53 @@ export class MockDiscordGateway extends DiscordGateway {
     return Promise.resolve({ messageId });
   }
 
+  editChannelMessage(
+    channelId: string,
+    messageId: string,
+    update: DiscordMessageEdit,
+  ): Promise<void> {
+    this.edits.set(messageId, update);
+    // Keep the recorded ORIGINAL in step with the edit, so a test that asserts on
+    // the announcement's current state does not have to know whether it was
+    // posted or re-rendered last.
+    const original = this.sent.find((m) => m.messageId === messageId);
+    if (original) {
+      if (update.content !== undefined) original.content = update.content;
+      if (update.embeds) original.embeds = [...update.embeds];
+      if (update.components) original.components = [...update.components];
+    }
+    this.logger.log(`[mock] #${channelId} edit ${messageId}`);
+    return Promise.resolve();
+  }
+
+  createMessageThread(
+    channelId: string,
+    messageId: string,
+    name: string,
+  ): Promise<{ threadId: string }> {
+    // Discord allows exactly one thread per message and errors on a second, so
+    // the mock hands back the existing one rather than minting a duplicate.
+    const existing = this.threads.get(messageId);
+    if (existing) return Promise.resolve({ threadId: existing });
+    const threadId = `mock-thread-${++this.threadCounter}`;
+    this.threads.set(messageId, threadId);
+    this.logger.log(`[mock] #${channelId} thread "${name}" on ${messageId} -> ${threadId}`);
+    return Promise.resolve({ threadId });
+  }
+
   /** Everything sent since construction (or the last {@link resetSentMessages}). */
   get sentMessages(): readonly RecordedMessage[] {
     return this.sent;
+  }
+
+  /** The last edit applied to each message id (T-0205). */
+  get editedMessages(): ReadonlyMap<string, DiscordMessageEdit> {
+    return this.edits;
+  }
+
+  /** messageId → the thread opened on it (T-0205). */
+  get openedThreads(): ReadonlyMap<string, string> {
+    return this.threads;
   }
 
   /**
@@ -179,6 +250,7 @@ export class MockDiscordGateway extends DiscordGateway {
    */
   resetSentMessages(): void {
     this.sent.length = 0;
+    this.edits.clear();
   }
 
   /** Append to the buffer and mint the id the caller gets back. */
@@ -187,9 +259,20 @@ export class MockDiscordGateway extends DiscordGateway {
     target: string,
     content: string,
     embeds?: DiscordEmbed[],
+    extras?: DiscordSendExtras,
   ): string {
     const messageId = `mock-msg-${++this.messageCounter}`;
-    this.sent.push({ kind, target, content, embeds: embeds ? [...embeds] : [], messageId });
+    this.sent.push({
+      kind,
+      target,
+      content,
+      embeds: embeds ? [...embeds] : [],
+      components: extras?.components ? [...extras.components] : [],
+      // `{}` — not undefined — for a message with no allow-list, so an assertion
+      // that a message pinged NOBODY reads the same as one that pinged someone.
+      mentions: extras?.mentions ? { ...extras.mentions } : {},
+      messageId,
+    });
     return messageId;
   }
 
@@ -209,6 +292,24 @@ export class MockDiscordGateway extends DiscordGateway {
 
   registerMemberLeaveHandler(handler: MemberLeaveHandler): void {
     this.leaveHandlers.push(handler);
+  }
+
+  registerInteractionHandler(handler: DiscordInteractionHandler): void {
+    this.interactionHandlers.push(handler);
+  }
+
+  /**
+   * Test/dev helper: deliver a button press (T-0205) and hand back what the
+   * presser would have been told. Mirrors the real gateway's dispatch — first
+   * non-null reply wins, a throwing handler is isolated — so a spec that drives
+   * the mock exercises the same claiming rule as production.
+   */
+  async simulateButtonPress(press: DiscordButtonPress): Promise<DiscordInteractionReply | null> {
+    for (const handler of this.interactionHandlers) {
+      const reply = await handler(press);
+      if (reply) return reply;
+    }
+    return null;
   }
 
   /** Test/dev helper: simulate a GuildMemberAdd so onboarding can be exercised. */

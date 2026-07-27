@@ -95,6 +95,93 @@ export interface DiscordEmbed {
   imageUrl?: string;
 }
 
+// ── Message components + mentions (T-0205) ───────────────────────────────────
+//
+// The same rule as the embeds above: these are OURS. They are plain data so a
+// component set can travel through the `discord_sync_jobs.payload` JSON column
+// and come back out as itself, and so discord.js stays confined to
+// RealDiscordGateway. The gateway re-shapes them at the edge.
+
+/** One button in a message action row. */
+export interface DiscordButton {
+  /** Up to 100 chars, echoed back verbatim on the interaction. */
+  customId: string;
+  label: string;
+  style: 'primary' | 'secondary' | 'success' | 'danger';
+  /** A unicode emoji shown before the label. */
+  emoji?: string;
+  disabled?: boolean;
+}
+
+/** A row of up to five buttons under a message. */
+export interface DiscordActionRow {
+  buttons: DiscordButton[];
+}
+
+/**
+ * ⚠️ THE ONLY WAY TO MAKE AN OUTBOUND MESSAGE PING ANYONE.
+ *
+ * Every send neutralises mention resolution with `parse: []` (LDA-M6), which is
+ * what keeps an `@everyone` typed into an admin-authored string inert. An event
+ * announcement genuinely has to ping ONE role, and an event thread has to ping
+ * the members who said they are coming — so the allow-list is an EXPLICIT LIST
+ * OF IDS, never a parse type. `parse` is still sent as `[]` alongside it, so
+ * `@everyone`/`@here` remain unresolvable no matter what text the message
+ * carries; only the snowflakes named here can notify anybody.
+ */
+export interface DiscordMentionAllowList {
+  /** Role snowflakes that may be pinged (Discord caps this at 100). */
+  roles?: string[];
+  /** User snowflakes that may be pinged (Discord caps this at 100). */
+  users?: string[];
+}
+
+/**
+ * The optional extras of a send. Deliberately a fourth OPTIONAL argument rather
+ * than a reshaped signature: every pre-existing caller passes two or three
+ * arguments and keeps behaving exactly as it did — the same additive move that
+ * introduced `embeds` in T-0172, and what keeps outbox rows written before this
+ * change delivering unchanged.
+ */
+export interface DiscordSendExtras {
+  components?: DiscordActionRow[];
+  mentions?: DiscordMentionAllowList;
+}
+
+/** The fields of an existing message a re-render may replace. */
+export interface DiscordMessageEdit {
+  content?: string;
+  embeds?: DiscordEmbed[];
+  components?: DiscordActionRow[];
+}
+
+/** A button press, reduced to what the app needs to act on it. */
+export interface DiscordButtonPress {
+  /** The button's `customId`, exactly as it was composed. */
+  customId: string;
+  /** Who pressed it. */
+  discordUserId: string;
+  /** The channel (or thread) the message lives in. */
+  channelId: string;
+  /** The message the button is attached to. */
+  messageId: string;
+}
+
+/** What a handler wants said back to the presser, privately. */
+export interface DiscordInteractionReply {
+  content: string;
+}
+
+/**
+ * Subscribe to button presses. Returning null means "not mine" — the gateway
+ * then tries the next handler, so several features can own different buttons
+ * without knowing about each other. Handlers must not throw; the gateway
+ * isolates them anyway, exactly like the member-event fan-out.
+ */
+export type DiscordInteractionHandler = (
+  press: DiscordButtonPress,
+) => Promise<DiscordInteractionReply | null>;
+
 /** Handler invoked when a member joins the guild (drives onboarding). */
 export type MemberJoinHandler = (discordUserId: string) => void | Promise<void>;
 
@@ -130,7 +217,38 @@ export abstract class DiscordGateway {
     channelId: string,
     content: string,
     embeds?: DiscordEmbed[],
+    extras?: DiscordSendExtras,
   ): Promise<{ messageId: string }>;
+
+  /**
+   * Re-render an ALREADY POSTED message (T-0205). Only the keys present in
+   * `update` are replaced — passing `components: []` is how the RSVP buttons are
+   * cleared, while omitting the key leaves them alone.
+   *
+   * An edit can never introduce a ping: no mention allow-list is accepted here,
+   * so the implementation pins `parse: []` and nothing else. That matters
+   * because the announcement is re-rendered on every RSVP — without it, each
+   * refresh would re-notify the pinged role.
+   */
+  abstract editChannelMessage(
+    channelId: string,
+    messageId: string,
+    update: DiscordMessageEdit,
+  ): Promise<void>;
+
+  /**
+   * Open a thread hanging off an existing message (T-0205) and return its id —
+   * which is itself a channel id, so {@link sendChannelMessage} posts into it.
+   *
+   * This is what replaces DM'ing every attendee when an event is about to start:
+   * Discord's own policy treats unsolicited mass DMs as abuse, and a thread
+   * reaches exactly the same people with one message.
+   */
+  abstract createMessageThread(
+    channelId: string,
+    messageId: string,
+    name: string,
+  ): Promise<{ threadId: string }>;
 
   /**
    * DM a user. Returns `{ messageId }` like {@link sendChannelMessage}.
@@ -162,6 +280,19 @@ export abstract class DiscordGateway {
   abstract registerMemberLeaveHandler(handler: MemberLeaveHandler): void;
 
   /**
+   * Subscribe to BUTTON presses (T-0205). Accumulates like the member handlers,
+   * and for the same reason: the presses are dispatched by `customId`, so a
+   * second feature's buttons must not displace the first's.
+   *
+   * ⚠️ This is the bot's first INBOUND path. Everything before it was outbound —
+   * the module header's "no slash commands" still holds (there are none), but
+   * "the bot only posts and manages roles" no longer does: a member can now
+   * change roster state by pressing a button, so the handler is responsible for
+   * the same authorisation the HTTP route would apply.
+   */
+  abstract registerInteractionHandler(handler: DiscordInteractionHandler): void;
+
+  /**
    * Dev/testing hook implemented ONLY by {@link MockDiscordGateway}: fire the
    * registered join handlers as if Discord had delivered GuildMemberAdd.
    * Optional (not `abstract`) so the real gateway is not forced to fake events;
@@ -171,4 +302,10 @@ export abstract class DiscordGateway {
 
   /** Dev/testing counterpart of {@link simulateMemberJoin} (GuildMemberRemove). */
   simulateMemberLeave?(discordUserId: string): Promise<void>;
+
+  /**
+   * Dev/testing hook (mock only): deliver a button press as if Discord had sent
+   * an InteractionCreate, and hand back what the presser would have been told.
+   */
+  simulateButtonPress?(press: DiscordButtonPress): Promise<DiscordInteractionReply | null>;
 }
