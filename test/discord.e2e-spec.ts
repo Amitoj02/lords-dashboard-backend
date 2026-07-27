@@ -16,6 +16,7 @@ import { DiscordBotSettings } from '../src/discord/entities/discord-bot-settings
 import { DiscordConnection } from '../src/discord/entities/discord-connection.entity';
 import { DiscordSyncJob } from '../src/discord/entities/discord-sync-job.entity';
 import { Member } from '../src/members/entities/member.entity';
+import { Rank } from '../src/ranks/entities/rank.entity';
 
 /**
  * End-to-end coverage of the Discord bot (MOCK gateway) against real MySQL:
@@ -306,7 +307,17 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     expect(drained.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
   });
 
-  it('onboards a joining member: welcome + Guest join-role jobs, then drains them', async () => {
+  /**
+   * T-0191/T-0193. A guild join used to assign the configured join role to
+   * WHOEVER walked in, which is what made that role useless as the regiment's
+   * permission anchor: a visitor who had never applied held exactly what an
+   * enlisted member held. Roles now come from roster state, so the two halves
+   * of that rule have to be asserted together — the stranger case is the one
+   * that regresses silently if the old grant is ever reinstated.
+   */
+  it('welcomes a STRANGER who joins, and gives them no roles whatsoever', async () => {
+    await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+
     await request(server())
       .post('/api/discord/simulate/member-join')
       .set(bearer(ownerToken))
@@ -314,10 +325,29 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .expect(200);
 
     expect((await jobsOfType(DiscordSyncJobType.Welcome)).length).toBeGreaterThanOrEqual(1);
-    expect((await jobsOfType(DiscordSyncJobType.RoleAssign)).length).toBeGreaterThanOrEqual(1);
+    expect(await jobsOfType(DiscordSyncJobType.RoleAssign)).toHaveLength(0);
+    expect(await jobsOfType(DiscordSyncJobType.RoleSync)).toHaveLength(0);
+
     await drainAll();
     const welcomes = await jobsOfType(DiscordSyncJobType.Welcome);
     expect(welcomes.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+  });
+
+  it('restores a RETURNING member’s roles when they rejoin the guild', async () => {
+    // Leaving a guild strips every role Discord holds for you and rejoining
+    // gives none of them back, so a veteran reappeared with the rank the roster
+    // still credited them with and nothing to show for it.
+    await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+
+    await request(server())
+      .post('/api/discord/simulate/member-join')
+      .set(bearer(ownerToken))
+      .send({ discordUserId: APPLICANT_DISCORD_ID })
+      .expect(200);
+
+    const syncs = await jobsOfType(DiscordSyncJobType.RoleSync);
+    expect(syncs).toHaveLength(1);
+    expect((syncs[0].payload as { memberId: string }).memberId).toBe(memberId);
   });
 
   describe('embed transport (T-0172 / T-0173 / T-0174 / T-0175)', () => {
@@ -706,6 +736,118 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     });
   });
 
+  /**
+   * T-0192/T-0193/T-0194 — the enlistment lifecycle against REAL MySQL.
+   *
+   * This is the suite that would have caught the original bug. The unit tests
+   * assert against a mocked DiscordSyncService; only a real round-trip proves a
+   * job row is actually written, and the fixture member at the top of this file
+   * is enrolled through the genuine apply -> approve loop.
+   *
+   * ⚠️ THE BOT MUST BE ON BEFORE THE ACTION. Every producer runs inside
+   * `guarded()`, which no-ops when `botEnabled` is false — so these same
+   * assertions in a block that forgot to enable it would find zero jobs and
+   * pass while the feature was dead.
+   */
+  describe('enlistment writes Discord roles (T-0194)', () => {
+    const APPLICANT_TWO = '900900900900900907';
+    let applicantToken: string;
+    let applicationId: string;
+
+    const applicantProfileTwo = {
+      id: APPLICANT_TWO,
+      username: 'e2e_second_applicant',
+      global_name: 'Second Applicant',
+      discriminator: '0',
+      avatar: null,
+      email: 'second@example.com',
+    };
+
+    beforeAll(async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true })
+        .expect(200);
+      // Link the Applicant rank to a role, which is what makes the marker
+      // resolvable at all — an unlinked rank is a silent no-op by design.
+      const ranks = await request(server()).get('/api/ranks').set(bearer(ownerToken)).expect(200);
+      const applicantRank = (ranks.body as { id: string; name: string }[]).find(
+        (r) => r.name === 'Applicant',
+      );
+      await dataSource
+        .getRepository(Rank)
+        .update({ id: applicantRank!.id }, { discordRoleId: '900000000000000077' });
+    });
+
+    afterAll(async () => {
+      const ranks = await request(server()).get('/api/ranks').set(bearer(ownerToken));
+      const applicantRank = (ranks.body as { id: string; name: string }[]).find(
+        (r) => r.name === 'Applicant',
+      );
+      if (applicantRank) {
+        await dataSource
+          .getRepository(Rank)
+          .update({ id: applicantRank.id }, { discordRoleId: null });
+      }
+      const identity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: APPLICANT_TWO } });
+      if (identity) {
+        await dataSource.getRepository(Member).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+      ownerToken = (await signIn(ownerProfile)).token;
+    });
+
+    it('marks a SUBMITTED application with the Applicant role', async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      applicantToken = (await signIn(applicantProfileTwo)).token;
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(applicantToken))
+        .send({
+          applicantName: 'Second Applicant',
+          inGameName: 'SecondApp',
+          currentRegiment: 'None',
+          howFound: 'Discord invite',
+          preferredClasses: 'Line Infantry',
+          skillsToImprove: 'Melee',
+          interestConfirmed: true,
+        })
+        .expect(201);
+      applicationId = created.body.id as string;
+
+      const assigns = await jobsOfType(DiscordSyncJobType.RoleAssign);
+      expect(assigns.map((j) => (j.payload as { roleId: string }).roleId)).toContain(
+        '900000000000000077',
+      );
+    });
+
+    it('APPROVE strips the marker and enqueues a full role reconcile', async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      ownerToken = (await signIn(ownerProfile)).token;
+
+      await request(server())
+        .post(`/api/applications/${applicationId}/approve`)
+        .set(bearer(ownerToken))
+        .expect(200);
+
+      // *** THE REGRESSION GUARD. *** Before this, approve() enqueued only the
+      // decision DM: the member got the Recruit rank in the database and no
+      // Discord role for it until an unrelated later change happened to sync.
+      const syncs = await jobsOfType(DiscordSyncJobType.RoleSync);
+      expect(syncs.length).toBeGreaterThan(0);
+      expect((syncs[0].payload as { discordUserId: string }).discordUserId).toBe(APPLICANT_TWO);
+
+      const removes = await jobsOfType(DiscordSyncJobType.RoleRemove);
+      expect(removes.map((j) => (j.payload as { roleId: string }).roleId)).toContain(
+        '900000000000000077',
+      );
+    });
+  });
+
   it('stops enqueuing entirely when the bot is disabled', async () => {
     await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
     await request(server())
@@ -714,8 +856,9 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .send({ botEnabled: false })
       .expect(200);
 
-    // A member-join normally enqueues Welcome + join-role jobs; with the bot
-    // disabled every enqueue no-ops, so nothing is queued at all.
+    // A member-join normally enqueues a Welcome (and, for a returning member, a
+    // role reconcile); with the bot disabled every enqueue no-ops, so nothing is
+    // queued at all.
     await request(server())
       .post('/api/discord/simulate/member-join')
       .set(bearer(ownerToken))
