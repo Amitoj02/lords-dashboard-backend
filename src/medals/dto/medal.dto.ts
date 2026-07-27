@@ -59,23 +59,37 @@ export class MedalDto {
   })
   relinkBatchId?: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    required: false,
+    description:
+      'Advisory set ONLY on the link response, and only when the role just linked carries ' +
+      'privileged Discord permissions (T-0189). The link SUCCEEDED — this is something to ' +
+      'show the admin, not an error to handle. Absent on every other projection.',
+  })
+  discordRoleWarning?: string | null;
+
   /**
    * Build the projection from a medal plus its derived award counts. The caller
    * is responsible for computing `holdersCount` (distinct members) and
    * `awardsCount` (total award rows) — usually batched for the whole list.
    *
-   * `relinkBatchId` is omitted rather than nulled when no bulk run was queued, so
-   * the field never appears on the list projection at all.
+   * `relinkBatchId` and `discordRoleWarning` are omitted rather than nulled when
+   * there is nothing to say, so neither field appears on the list projection.
    */
   static from(
     medal: Medal,
     holdersCount: number,
     awardsCount: number,
     relinkBatchId?: string | null,
+    discordRoleWarning?: string | null,
   ): MedalDto {
     const dto = new MedalDto();
     if (relinkBatchId) {
       dto.relinkBatchId = relinkBatchId;
+    }
+    if (discordRoleWarning) {
+      dto.discordRoleWarning = discordRoleWarning;
     }
     dto.id = medal.id;
     dto.title = medal.title;

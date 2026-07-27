@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Rank } from '../entities/rank.entity';
+import { isProtectedRankName } from '../protected-ranks';
 
 /**
  * Response projection of a {@link Rank}. Exposes the editable ladder fields plus
@@ -32,6 +33,16 @@ export class RankDto {
   @ApiProperty({ description: 'Number of members currently holding this rank' })
   holdersCount: number;
 
+  @ApiProperty({
+    description:
+      'True when the server itself resolves this rank by name (T-0190), which makes the name ' +
+      'load-bearing: PATCH refuses a rename and DELETE refuses outright, both with 403, for ' +
+      'every caller regardless of capability. Precedence, insignia and the Discord role mapping ' +
+      'stay editable. Present on every projection so the admin UI can lock those two controls ' +
+      'up front instead of discovering the rule from a failed request.',
+  })
+  isProtected: boolean;
+
   @ApiProperty({ description: 'ISO timestamp the rank was created' })
   createdAt: string;
 
@@ -49,17 +60,35 @@ export class RankDto {
   })
   relinkBatchId?: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    required: false,
+    description:
+      'Advisory set ONLY on the link response, and only when the role just linked carries ' +
+      'privileged Discord permissions (T-0189). The link SUCCEEDED — this is something to ' +
+      'show the admin, not an error to handle. Absent on every other projection.',
+  })
+  discordRoleWarning?: string | null;
+
   /**
    * Build the projection from a rank plus its computed holder count. The count is
    * derived server-side (a grouped members query), never read off the entity.
    *
-   * `relinkBatchId` is omitted rather than nulled when no bulk run was queued, so
-   * the field never appears on the list projection at all.
+   * `relinkBatchId` and `discordRoleWarning` are omitted rather than nulled when
+   * there is nothing to say, so neither field appears on the list projection.
    */
-  static from(rank: Rank, holdersCount: number, relinkBatchId?: string | null): RankDto {
+  static from(
+    rank: Rank,
+    holdersCount: number,
+    relinkBatchId?: string | null,
+    discordRoleWarning?: string | null,
+  ): RankDto {
     const dto = new RankDto();
     if (relinkBatchId) {
       dto.relinkBatchId = relinkBatchId;
+    }
+    if (discordRoleWarning) {
+      dto.discordRoleWarning = discordRoleWarning;
     }
     dto.id = rank.id;
     dto.name = rank.name;
@@ -69,6 +98,9 @@ export class RankDto {
     dto.discordRoleId = rank.discordRoleId;
     dto.linked = rank.linked;
     dto.holdersCount = holdersCount;
+    // Derived from the rank's own name, never stored: the protection exists
+    // because of a constant in the code, so the code is what answers for it.
+    dto.isProtected = isProtectedRankName(rank.name);
     dto.createdAt = rank.createdAt.toISOString();
     dto.updatedAt = rank.updatedAt.toISOString();
     return dto;

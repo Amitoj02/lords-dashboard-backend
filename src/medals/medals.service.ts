@@ -8,7 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { StorageTarget } from '../common/enums';
+import { AuditSeverity, StorageTarget } from '../common/enums';
 import { DiscordRolePolicyService } from '../discord/discord-role-policy.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
@@ -227,6 +227,10 @@ export class MedalsService {
    * Map the medal to a Discord role and flag it linked. Recorded as a
    * `medal.update` audit row (there is no dedicated link action code), and — when
    * the role actually changed — followed by a bulk re-link of every holder.
+   *
+   * A role carrying privileged Discord permissions no longer blocks the link
+   * (T-0189); it comes back as `discordRoleWarning` for the admin UI to surface
+   * and raises the audit row to `warn` so the ledger says what was accepted.
    */
   async linkDiscord(
     user: AuthenticatedUser,
@@ -238,9 +242,10 @@ export class MedalsService {
     const before = this.snapshot(medal);
     const previousRoleId = medal.discordRoleId;
 
-    // Reject roles the bot must never assign (LDA-H1). No-op while the bot is
-    // mocked; the DTO still enforces the snowflake format.
-    await this.rolePolicy.assertRoleLinkable(dto.discordRoleId);
+    // Reject roles the bot CANNOT assign (LDA-H1); a privileged role is allowed
+    // through with an advisory instead (T-0189). No-op while the bot is mocked;
+    // the DTO still enforces the snowflake format.
+    const warning = await this.rolePolicy.checkRoleLinkable(dto.discordRoleId);
 
     medal.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) medal.discordRoleName = dto.discordRoleName ?? null;
@@ -256,12 +261,16 @@ export class MedalsService {
       before,
       after: this.snapshot(saved),
       // Mirrors RanksService.linkDiscord: the unlink side already said why it
-      // fired, so the link side must too or the ledger reads asymmetrically.
-      detail: `Linked to Discord role ${saved.discordRoleId}.`,
+      // fired, so the link side must too or the ledger reads asymmetrically —
+      // including the privileged-role advisory and the severity that carries it.
+      detail: warning
+        ? `Linked to Discord role ${saved.discordRoleId}. ${warning}`
+        : `Linked to Discord role ${saved.discordRoleId}.`,
+      severity: warning ? AuditSeverity.Warn : undefined,
     });
     const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
-    return this.project(saved, relinkBatchId);
+    return this.project(saved, relinkBatchId, warning);
   }
 
   /**
@@ -389,10 +398,14 @@ export class MedalsService {
   }
 
   /** Project a single saved medal, computing its current award counts. */
-  private async project(medal: Medal, relinkBatchId?: string | null): Promise<MedalDto> {
+  private async project(
+    medal: Medal,
+    relinkBatchId?: string | null,
+    discordRoleWarning?: string | null,
+  ): Promise<MedalDto> {
     const stats = await this.awardStats([medal.id]);
     const s = stats.get(medal.id);
-    return MedalDto.from(medal, s?.holders ?? 0, s?.awards ?? 0, relinkBatchId);
+    return MedalDto.from(medal, s?.holders ?? 0, s?.awards ?? 0, relinkBatchId, discordRoleWarning);
   }
 
   /** Field snapshot used for audit before/after values. */

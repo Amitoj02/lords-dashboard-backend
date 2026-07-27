@@ -105,7 +105,13 @@ export class RanksController {
   @HttpCode(HttpStatus.OK)
   @RequireCapability(Capability.EditRanksMedals)
   @ApiOperation({ summary: 'Link a rank to a Discord role' })
-  @ApiOkResponse({ type: RankDto, description: 'The linked rank.' })
+  @ApiOkResponse({
+    type: RankDto,
+    description:
+      'The linked rank. Carries `discordRoleWarning` when the role holds privileged Discord ' +
+      'permissions — the link still succeeded (T-0189), so surface it rather than treating it ' +
+      'as a failure.',
+  })
   linkDiscord(
     @Param('id', ParseShortIdPipe) id: string,
     @CurrentUser() user: AuthenticatedUser,

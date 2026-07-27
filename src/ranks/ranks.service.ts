@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -8,7 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { StorageTarget } from '../common/enums';
+import { AuditSeverity, StorageTarget } from '../common/enums';
 import { DiscordRolePolicyService } from '../discord/discord-role-policy.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { Member } from '../members/entities/member.entity';
@@ -19,6 +20,7 @@ import { RankDto } from './dto/rank.dto';
 import { ReorderRanksDto } from './dto/reorder-ranks.dto';
 import { UpdateRankDto } from './dto/update-rank.dto';
 import { Rank } from './entities/rank.entity';
+import { isProtectedRankName } from './protected-ranks';
 
 /**
  * Temporary offset added to every rank's precedence during a reorder. Because
@@ -109,6 +111,9 @@ export class RanksService {
    * Update a regiment-scoped rank (404 otherwise). Re-checks name/precedence
    * uniqueness for changed fields (excluding the row itself) and records the
    * before/after snapshot on the audit row.
+   *
+   * A protected rank's NAME is frozen (T-0190); everything else about it —
+   * precedence, insignia, Discord role — stays as editable as any other rank.
    */
   async update(
     user: AuthenticatedUser,
@@ -120,6 +125,10 @@ export class RanksService {
     const before = this.snapshot(rank);
 
     if (dto.name !== undefined && dto.name !== rank.name) {
+      // Only a CHANGED name is refused: the admin console posts the whole rank
+      // body on every save, so rejecting the mere presence of `name` would block
+      // an icon or precedence edit on a protected rank.
+      this.assertNotProtected(rank, 'renamed');
       await this.assertNameFree(user.regimentId, dto.name, id);
       rank.name = dto.name;
     }
@@ -151,9 +160,14 @@ export class RanksService {
    * Delete a regiment-scoped rank. The member.rankId FK is RESTRICT, so a rank
    * still worn by anyone cannot be removed — guard it here (counting soft-deleted
    * members too, since their rows still hold the FK) and surface a friendly 409.
+   *
+   * A protected rank is refused outright, before the holder count: an empty
+   * Recruit ladder is exactly when the FK would NOT have stopped the delete
+   * (T-0190).
    */
   async remove(user: AuthenticatedUser, id: string, ip: string | null): Promise<void> {
     const rank = await this.loadRank(id, user.regimentId);
+    this.assertNotProtected(rank, 'deleted');
 
     const inUse = await this.members.count({ where: { rankId: id }, withDeleted: true });
     if (inUse > 0) {
@@ -220,6 +234,10 @@ export class RanksService {
    * Bind a rank to a Discord role: set its snowflake id (and optionally a fresh
    * display name) and mark it linked. Audited as a rank.update, and — when the
    * role actually changed — followed by a bulk re-link of every holder.
+   *
+   * A role carrying privileged Discord permissions no longer blocks the link
+   * (T-0189); it comes back as `discordRoleWarning` for the admin UI to surface
+   * and raises the audit row to `warn` so the ledger says what was accepted.
    */
   async linkDiscord(
     user: AuthenticatedUser,
@@ -231,11 +249,11 @@ export class RanksService {
     const before = this.snapshot(rank);
     const previousRoleId = rank.discordRoleId;
 
-    // Reject roles the bot must never assign — above/equal the bot, integration-
-    // managed, privileged, or not in the guild (LDA-H1). No-op while the bot is
-    // mocked (validation defers until a real bot runs); the DTO still enforces the
-    // snowflake format.
-    await this.rolePolicy.assertRoleLinkable(dto.discordRoleId);
+    // Reject roles the bot CANNOT assign — above/equal the bot, integration-
+    // managed, or not in the guild (LDA-H1). A privileged role is allowed through
+    // with an advisory instead (T-0189). No-op while the bot is mocked (validation
+    // defers until a real bot runs); the DTO still enforces the snowflake format.
+    const warning = await this.rolePolicy.checkRoleLinkable(dto.discordRoleId);
 
     rank.discordRoleId = dto.discordRoleId;
     if (dto.discordRoleName !== undefined) rank.discordRoleName = dto.discordRoleName;
@@ -250,12 +268,18 @@ export class RanksService {
       target: { type: 'rank', id: saved.id, label: saved.name },
       before,
       after: this.snapshot(saved),
-      detail: `Linked to Discord role ${saved.discordRoleId}.`,
+      // The warning is the whole reason this row matters after the fact: with the
+      // 400 gone, the ledger is where "someone linked a rank to an admin role"
+      // survives, so it says so in the detail AND wears the severity.
+      detail: warning
+        ? `Linked to Discord role ${saved.discordRoleId}. ${warning}`
+        : `Linked to Discord role ${saved.discordRoleId}.`,
+      severity: warning ? AuditSeverity.Warn : undefined,
     });
     const relinkBatchId = await this.fanOutRelink(user, saved, previousRoleId, ip);
 
     const holders = await this.holderCountFor(saved.id);
-    return RankDto.from(saved, holders, relinkBatchId);
+    return RankDto.from(saved, holders, relinkBatchId, warning);
   }
 
   /**
@@ -330,6 +354,25 @@ export class RanksService {
         `(batch ${batch.batchId}).`,
     });
     return batch.batchId;
+  }
+
+  /**
+   * Refuse a rename or a delete on a rank the server resolves BY NAME (T-0190).
+   *
+   * 403 rather than 409: this is not a state the admin can clear by reassigning
+   * holders or picking another value — the rule holds for every caller, including
+   * the Owner, for as long as the code behind it does. Deliberately NOT gated on
+   * a capability, for the same reason `MemberRole.Owner` cannot be assigned
+   * through the API: no permission grants it.
+   */
+  private assertNotProtected(rank: Rank, verb: 'renamed' | 'deleted'): void {
+    if (!isProtectedRankName(rank.name)) return;
+    throw new ForbiddenException(
+      `"${rank.name}" is required by the dashboard and cannot be ${verb}. ` +
+        'New enlistments are placed on it by name, so renaming or removing it ' +
+        'would break application approvals. Its position, insignia and Discord ' +
+        'role can still be changed.',
+    );
   }
 
   /** Load a regiment-scoped rank or throw 404. */

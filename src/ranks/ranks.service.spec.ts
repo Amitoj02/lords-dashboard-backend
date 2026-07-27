@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -7,10 +12,11 @@ import { DiscordRolePolicyService } from '../discord/discord-role-policy.service
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { StorageService } from '../storage/storage.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
-import { MemberRole } from '../common/enums';
+import { AuditSeverity, MemberRole } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { RanksService } from './ranks.service';
 import { Rank } from './entities/rank.entity';
+import { ENTRY_RANK_NAME } from './protected-ranks';
 
 const REGIMENT = 'regiment-1';
 
@@ -76,11 +82,15 @@ describe('RanksService', () => {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
   };
   const discordSync = { enqueueRoleRelink: jest.fn().mockResolvedValue(null) };
-  // LDA-H1: link validation. Default to "linkable" so the existing happy paths pass.
-  const rolePolicy = { assertRoleLinkable: jest.fn().mockResolvedValue(undefined) };
+  // LDA-H1 link validation. Default to "clean" (no advisory) so the existing
+  // happy paths pass; T-0189 made the privileged verdict a returned warning.
+  const rolePolicy = { checkRoleLinkable: jest.fn().mockResolvedValue(null) };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // clearAllMocks only clears CALLS, not implementations — a test that makes the
+    // policy warn or throw would otherwise poison every test after it.
+    rolePolicy.checkRoleLinkable.mockResolvedValue(null);
 
     rankQb = {
       select: jest.fn().mockReturnThis(),
@@ -275,6 +285,141 @@ describe('RanksService', () => {
     });
   });
 
+  /**
+   * T-0190. `ApplicationsService.approve` resolves the entry rank BY NAME, so the
+   * row's name is load-bearing and neither a rename nor a delete may touch it.
+   * Everything else about the rank stays editable — that is the half of this rule
+   * most easily broken by a blunter implementation.
+   */
+  describe('a protected rank (the entry rank the server resolves by name)', () => {
+    const recruit = (overrides: Partial<Rank> = {}) =>
+      buildRank({ id: 'rank-recruit', name: ENTRY_RANK_NAME, precedence: 10, ...overrides });
+
+    it('refuses a rename, before any uniqueness query runs', async () => {
+      rankRepo.findOne.mockResolvedValue(recruit());
+
+      await expect(
+        service.update(user(), 'rank-recruit', { name: 'Rookie' }, null),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      // findOne was consumed loading the rank; assertNameFree must not have run.
+      expect(rankRepo.findOne).toHaveBeenCalledTimes(1);
+      expect(rankRepo.save).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('refuses a rename that only changes the casing', async () => {
+      rankRepo.findOne.mockResolvedValue(recruit());
+
+      await expect(
+        service.update(user(), 'rank-recruit', { name: 'recruit' }, null),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(rankRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('protects a row already stored under a different casing', async () => {
+      // MySQL's collation is case-insensitive, so `WHERE name = 'Recruit'` still
+      // resolves a row stored as 'recruit' — protection has to agree with that.
+      rankRepo.findOne.mockResolvedValue(recruit({ name: 'recruit' }));
+
+      await expect(
+        service.update(user(), 'rank-recruit', { name: 'Rookie' }, null),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('still accepts an icon, precedence and Discord-role edit', async () => {
+      rankRepo.findOne
+        .mockResolvedValueOnce(recruit())
+        // assertPrecedenceFree: nothing else sits at 11.
+        .mockResolvedValueOnce(null);
+      memberRepo.count.mockResolvedValue(4);
+
+      const result = await service.update(
+        user(),
+        'rank-recruit',
+        { precedence: 11, imageKey: 'ranks/recruit.png', discordRoleName: '@Newblood' },
+        null,
+      );
+
+      expect(result.name).toBe(ENTRY_RANK_NAME);
+      expect(result.precedence).toBe(11);
+      expect(result.imageUrl).toBe('https://cdn.example/ranks/recruit.png');
+      expect(result.discordRoleName).toBe('@Newblood');
+      expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'rank.update' }));
+    });
+
+    it('accepts a save that posts the unchanged name alongside other edits', async () => {
+      // The admin console posts the whole rank body on every save, so an
+      // unchanged `name` arrives on an icon-only edit and must not be refused.
+      rankRepo.findOne.mockResolvedValue(recruit());
+      memberRepo.count.mockResolvedValue(4);
+
+      await expect(
+        service.update(
+          user(),
+          'rank-recruit',
+          { name: ENTRY_RANK_NAME, imageKey: 'ranks/recruit.png' },
+          null,
+        ),
+      ).resolves.toMatchObject({ name: ENTRY_RANK_NAME });
+      expect(rankRepo.save).toHaveBeenCalled();
+    });
+
+    it('refuses a delete even when nobody holds it — the FK would not have stopped it', async () => {
+      rankRepo.findOne.mockResolvedValue(recruit());
+      memberRepo.count.mockResolvedValue(0);
+
+      await expect(service.remove(user(), 'rank-recruit', null)).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      // Refused before the holder count is even consulted.
+      expect(memberRepo.count).not.toHaveBeenCalled();
+      expect(rankRepo.remove).not.toHaveBeenCalled();
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('reports itself as protected on the list projection, and other ranks as not', async () => {
+      rankRepo.find.mockResolvedValue([recruit(), buildRank({ id: 'rank-sgt' })]);
+
+      const result = await service.findAll(user());
+
+      expect(result.map((r) => [r.name, r.isProtected])).toEqual([
+        [ENTRY_RANK_NAME, true],
+        ['Sergeant', false],
+      ]);
+    });
+
+    it('does not block creating it back when the ladder has lost it', async () => {
+      // The repair path for a database whose entry rank was deleted before this
+      // rule existed. Protection freezes the row, it does not reserve the name.
+      rankRepo.findOne.mockResolvedValue(null);
+      rankQb.getRawOne.mockResolvedValue({ max: 11 });
+
+      const result = await service.create(user(), { name: ENTRY_RANK_NAME }, null);
+
+      expect(result.name).toBe(ENTRY_RANK_NAME);
+      expect(result.isProtected).toBe(true);
+      expect(result.precedence).toBe(12);
+    });
+
+    it('reorders with the rest of the ladder — position is not what is protected', async () => {
+      const ranks = [recruit(), buildRank({ id: 'rank-sgt' })];
+      rankRepo.find.mockResolvedValue(ranks);
+      const repo = { increment: jest.fn(), update: jest.fn() };
+      dataSource.transaction.mockImplementation(
+        async (cb: (m: { getRepository: () => typeof repo }) => Promise<void>) =>
+          cb({ getRepository: () => repo }),
+      );
+
+      await service.reorder(user(), { order: ['rank-sgt', 'rank-recruit'] }, null);
+
+      expect(repo.update).toHaveBeenCalledWith(
+        { id: 'rank-recruit', regimentId: REGIMENT },
+        { precedence: 2 },
+      );
+    });
+  });
+
   describe('reorder', () => {
     it('rejects an id set that does not match the regiment ranks exactly', async () => {
       rankRepo.find.mockResolvedValue([buildRank({ id: 'rank-1' }), buildRank({ id: 'rank-2' })]);
@@ -383,6 +528,74 @@ describe('RanksService', () => {
       expect(audit.record).not.toHaveBeenCalledWith(
         expect.objectContaining({ action: 'discord.role.relink' }),
       );
+    });
+
+    // T-0189: a privileged role used to be a 400. It now links, and the warning
+    // is what the admin (and the ledger) get instead of the rejection.
+    describe('a privileged Discord role (T-0189)', () => {
+      const WARNING = 'Heads up: this Discord role grants privileged permissions (…).';
+
+      it('links anyway and returns the advisory on the response', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        memberRepo.count.mockResolvedValue(0);
+        rolePolicy.checkRoleLinkable.mockResolvedValue(WARNING);
+
+        const dto = await service.linkDiscord(
+          user(),
+          'rank-1',
+          { discordRoleId: '112233445566778899' },
+          null,
+        );
+
+        const saved = rankRepo.save.mock.calls[0][0] as Rank;
+        expect(saved.discordRoleId).toBe('112233445566778899');
+        expect(saved.linked).toBe(true);
+        expect(dto.discordRoleWarning).toBe(WARNING);
+      });
+
+      it('raises the audit row to warn and states what was accepted', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        memberRepo.count.mockResolvedValue(0);
+        rolePolicy.checkRoleLinkable.mockResolvedValue(WARNING);
+
+        await service.linkDiscord(user(), 'rank-1', { discordRoleId: '1122' }, null);
+
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'rank.update',
+            severity: AuditSeverity.Warn,
+            detail: `Linked to Discord role 1122. ${WARNING}`,
+          }),
+        );
+      });
+
+      it('leaves a clean link at its default severity, with no warning field', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        memberRepo.count.mockResolvedValue(0);
+
+        const dto = await service.linkDiscord(user(), 'rank-1', { discordRoleId: '1122' }, null);
+
+        expect(dto.discordRoleWarning).toBeUndefined();
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'rank.update',
+            severity: undefined,
+            detail: 'Linked to Discord role 1122.',
+          }),
+        );
+      });
+
+      it('still refuses a role the bot cannot assign at all (policy throws)', async () => {
+        rankRepo.findOne.mockResolvedValue(buildRank());
+        rolePolicy.checkRoleLinkable.mockRejectedValue(
+          new BadRequestException('That role sits at or above the bot in the hierarchy'),
+        );
+
+        await expect(
+          service.linkDiscord(user(), 'rank-1', { discordRoleId: '1122' }, null),
+        ).rejects.toBeInstanceOf(BadRequestException);
+        expect(rankRepo.save).not.toHaveBeenCalled();
+      });
     });
   });
 
