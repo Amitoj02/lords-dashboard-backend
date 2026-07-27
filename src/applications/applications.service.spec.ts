@@ -12,7 +12,9 @@ import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { ApplicantType, ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
+import { DiscordRoleAdoptionService } from '../discord/discord-role-adoption.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
+import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -96,12 +98,15 @@ describe('ApplicationsService', () => {
     enqueueApplicantRole: jest.Mock;
     enqueueRoleSync: jest.Mock;
   };
+  // What the applicant's existing guild roles say they already are (T-0202).
+  let roleAdoption: { resolveFromGuild: jest.Mock };
+  let ranks: MockRepo<Rank>;
 
   // Per-test transaction manager repositories.
-  let txRanks: MockRepo<Rank>;
   let txMembers: MockRepo<Member>;
   let txApplications: MockRepo<Application>;
   let txServiceRecords: MockRepo<ServiceRecordEntry>;
+  let txMemberMedals: MockRepo<MemberMedal>;
   let dataSource: { transaction: jest.Mock };
 
   beforeEach(async () => {
@@ -147,8 +152,15 @@ describe('ApplicationsService', () => {
       enqueueApplicantRole: jest.fn().mockResolvedValue(null),
       enqueueRoleSync: jest.fn().mockResolvedValue(null),
     };
+    // Default: the applicant wears no rank/medal role worth carrying over, so
+    // every pre-T-0202 expectation (enlist at Recruit, award nothing) still holds.
+    roleAdoption = { resolveFromGuild: jest.fn().mockResolvedValue({ rank: null, medals: [] }) };
+    // The entry rank, now read outside the enlistment transaction so its
+    // precedence can floor what an approval adopts.
+    ranks = {
+      findOne: jest.fn().mockResolvedValue({ id: 'rank-recruit', name: 'Recruit', precedence: 10 }),
+    };
 
-    txRanks = { findOne: jest.fn() };
     txMembers = {
       create: jest.fn((x: unknown) => x),
       save: jest.fn((x: Member) => Promise.resolve({ ...x, id: 'member-new' })),
@@ -158,13 +170,17 @@ describe('ApplicationsService', () => {
       create: jest.fn((x: unknown) => x),
       save: jest.fn((x: unknown) => Promise.resolve(x)),
     };
+    txMemberMedals = {
+      create: jest.fn((x: unknown) => x),
+      save: jest.fn((x: unknown) => Promise.resolve(x)),
+    };
 
     const manager = {
       getRepository: jest.fn((entity: unknown) => {
-        if (entity === Rank) return txRanks;
         if (entity === Member) return txMembers;
         if (entity === Application) return txApplications;
         if (entity === ServiceRecordEntry) return txServiceRecords;
+        if (entity === MemberMedal) return txMemberMedals;
         throw new Error('unexpected repository');
       }),
     };
@@ -179,10 +195,12 @@ describe('ApplicationsService', () => {
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: getRepositoryToken(DiscordIdentity), useValue: identities },
         { provide: getRepositoryToken(Member), useValue: members },
+        { provide: getRepositoryToken(Rank), useValue: ranks },
         { provide: DataSource, useValue: dataSource },
         { provide: AuditService, useValue: audit },
         { provide: SessionContextService, useValue: sessionContext },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: DiscordRoleAdoptionService, useValue: roleAdoption },
       ],
     }).compile();
 
@@ -771,11 +789,10 @@ describe('ApplicationsService', () => {
 
     it('creates a Member at the Recruit rank for an Applicant and audits the approval', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       const result = await service.approve(STAFF, 'app-1', {}, '9.9.9.9');
 
-      expect(txRanks.findOne).toHaveBeenCalledWith({
+      expect(ranks.findOne).toHaveBeenCalledWith({
         where: { regimentId: 'regiment-1', name: 'Recruit' },
       });
       const createdMember = txMembers.create!.mock.calls[0][0] as Partial<Member>;
@@ -812,7 +829,6 @@ describe('ApplicationsService', () => {
 
     it('persists the promoted member on BOTH the FK and the relation', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -828,7 +844,6 @@ describe('ApplicationsService', () => {
       applications.findOne!.mockResolvedValue(
         baseApplication({ applicantType: ApplicantType.Mercenary }),
       );
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -857,7 +872,6 @@ describe('ApplicationsService', () => {
       // Regression guard: the new settings lookup must never reach Member approvals.
       applications.findOne!.mockResolvedValue(baseApplication());
       settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', allowMercenaries: false });
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       const result = await service.approve(STAFF, 'app-1', {}, null);
 
@@ -871,7 +885,6 @@ describe('ApplicationsService', () => {
         baseApplication({ applicantType: ApplicantType.Mercenary }),
       );
       settings.findOne!.mockResolvedValue(null);
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -885,7 +898,6 @@ describe('ApplicationsService', () => {
         baseApplication({ applicantType: ApplicantType.Mercenary }),
       );
       settings.findOne!.mockResolvedValue({ regimentId: 'regiment-1', openRecruitment: true });
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       await service.approve(STAFF, 'app-1', {}, null);
 
@@ -894,7 +906,6 @@ describe('ApplicationsService', () => {
 
     it('approves an application that was on hold', async () => {
       applications.findOne!.mockResolvedValue(baseApplication({ status: ApplicationStatus.Held }));
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
 
       const result = await service.approve(STAFF, 'app-1', {}, null);
       expect(result.status).toBe(ApplicationStatus.Approved);
@@ -905,7 +916,7 @@ describe('ApplicationsService', () => {
       // that lost it BEFORE the freeze still lands here — the officer needs to be
       // told which rank to recreate, not handed an EntityNotFoundError.
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue(null);
+      ranks.findOne!.mockResolvedValue(null);
 
       await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toThrow(/"Recruit"/);
       await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toBeInstanceOf(
@@ -960,7 +971,6 @@ describe('ApplicationsService', () => {
 
     it('APPROVE enqueues a role sync — the bug was that it enqueued nothing', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
       withSnowflake();
 
       await service.approve(STAFF, 'app-1', {}, null);
@@ -977,7 +987,6 @@ describe('ApplicationsService', () => {
 
     it('APPROVE takes the Applicant role back before reconciling the new roles', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
       withSnowflake();
 
       await service.approve(STAFF, 'app-1', {}, null);
@@ -1020,13 +1029,158 @@ describe('ApplicationsService', () => {
     it('an applicant with no linked Discord account approves normally', async () => {
       // The role is best-effort; a missing snowflake must not fail an enlistment.
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
       identities.findOne!.mockResolvedValue({ id: 'identity-applicant', discordUserId: null });
 
       const result = await service.approve(STAFF, 'app-1', {}, null);
 
       expect(result.status).toBe(ApplicationStatus.Approved);
       expect(discordSync.enqueueRoleSync).toHaveBeenCalledWith('regiment-1', 'member-new', null);
+    });
+  });
+
+  /**
+   * T-0202 — enlisting someone the guild already knows.
+   *
+   * The regiment ran on Discord for years before it ran on this dashboard, so a
+   * veteran's rank and medals exist ONLY as guild roles. The enlistment reconcile
+   * strips every managed role the roster cannot account for, which meant approval
+   * — the first reconcile of a member's life — wiped exactly that history off the
+   * person it had just admitted. These pin the carry-over that prevents it.
+   */
+  describe('carrying an existing Discord history onto the roster', () => {
+    const SERGEANT = { id: 'rank-sergeant', name: 'Sergeant', precedence: 6 };
+    const VALOUR = { id: 'medal-valour', title: 'Medal of Valour' };
+    const SERVICE = { id: 'medal-service', title: 'Long Service' };
+
+    /** The applicant already wears the Sergeant role and two medal roles. */
+    const decoratedVeteran = () =>
+      roleAdoption.resolveFromGuild.mockResolvedValue({
+        rank: SERGEANT,
+        medals: [VALOUR, SERVICE],
+      });
+
+    it('enlists them at the rank their Discord role already says they hold', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      decoratedVeteran();
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      const created = txMembers.create!.mock.calls[0][0] as Partial<Member>;
+      expect(created.rankId).toBe('rank-sergeant');
+    });
+
+    it('records every medal they already wear as a real award', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      decoratedVeteran();
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      const awards = txMemberMedals.create!.mock.calls.map(
+        (call) => call[0] as Partial<MemberMedal>,
+      );
+      expect(awards).toEqual([
+        expect.objectContaining({
+          memberId: 'member-new',
+          medalId: 'medal-valour',
+          awardedByMemberId: 'member-staff',
+        }),
+        expect.objectContaining({ memberId: 'member-new', medalId: 'medal-service' }),
+      ]);
+      // Every one of them says where it came from, so a carried-over decoration
+      // is never mistaken for one an officer sat down and awarded.
+      expect(awards.every((a) => a.detail?.includes('Discord'))).toBe(true);
+    });
+
+    it('writes the awards INSIDE the enlistment transaction', async () => {
+      // The reconcile enqueued after the commit reads member_medals to decide
+      // which medal roles are wanted, so an award that did not land is a medal
+      // the bot takes back off them seconds later.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      decoratedVeteran();
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      const commitAt = dataSource.transaction.mock.invocationCallOrder[0];
+      const syncAt = discordSync.enqueueRoleSync.mock.invocationCallOrder[0];
+      expect(txMemberMedals.save).toHaveBeenCalledTimes(2);
+      expect(commitAt).toBeLessThan(syncAt);
+    });
+
+    it('reads the guild BEFORE opening the transaction', async () => {
+      // Adoption talks to Discord. Holding an enlistment's transaction open across
+      // that round trip would let one slow gateway stall the roster.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      decoratedVeteran();
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      const adoptAt = roleAdoption.resolveFromGuild.mock.invocationCallOrder[0];
+      const txAt = dataSource.transaction.mock.invocationCallOrder[0];
+      expect(adoptAt).toBeLessThan(txAt);
+    });
+
+    it('floors the carry-over at the entry rank it resolved', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      expect(roleAdoption.resolveFromGuild).toHaveBeenCalledWith(
+        'regiment-1',
+        // The snowflake, not the identity id — the gateway cannot look up the latter.
+        null,
+        10,
+      );
+    });
+
+    it('names the carry-over in the audit trail and the service record', async () => {
+      applications.findOne!.mockResolvedValue(baseApplication());
+      decoratedVeteran();
+
+      await service.approve(STAFF, 'app-1', {}, '9.9.9.9');
+
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'application.approve',
+          detail: expect.stringContaining('the Sergeant rank and Medal of Valour, Long Service'),
+        }),
+      );
+      const entries = txServiceRecords.create!.mock.calls.map(
+        (call) => call[0] as Partial<ServiceRecordEntry>,
+      );
+      expect(entries[0]).toMatchObject({
+        type: 'enlistment',
+        event: 'Enlisted as Member at rank Sergeant',
+      });
+      // One award entry per medal, so the member's history reads as a history.
+      expect(entries.filter((e) => e.type === 'award').map((e) => e.event)).toEqual([
+        'Awarded Medal of Valour',
+        'Awarded Long Service',
+      ]);
+    });
+
+    it('still enlists at the entry rank, awarding nothing, when there is nothing to carry', async () => {
+      // The ordinary case: a genuinely new recruit. Unchanged by T-0202.
+      applications.findOne!.mockResolvedValue(baseApplication());
+
+      await service.approve(STAFF, 'app-1', {}, null);
+
+      const created = txMembers.create!.mock.calls[0][0] as Partial<Member>;
+      expect(created.rankId).toBe('rank-recruit');
+      expect(txMemberMedals.create).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: 'Approved application; promoted to Member (Recruit).' }),
+      );
+    });
+
+    it('never lets the carry-over run before the entry rank is known to exist', async () => {
+      // A ladder missing its entry rank is a 409, not a Discord round trip.
+      applications.findOne!.mockResolvedValue(baseApplication());
+      ranks.findOne!.mockResolvedValue(null);
+
+      await expect(service.approve(STAFF, 'app-1', {}, null)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(roleAdoption.resolveFromGuild).not.toHaveBeenCalled();
     });
   });
 
@@ -1115,7 +1269,6 @@ describe('ApplicationsService', () => {
   describe('decision text persistence (T-0153)', () => {
     it('stores the trimmed officer-written message on approve, decline and hold', async () => {
       applications.findOne!.mockResolvedValue(baseApplication());
-      txRanks.findOne!.mockResolvedValue({ id: 'rank-recruit', name: 'Recruit' });
       const approved = await service.approve(
         STAFF,
         'app-1',

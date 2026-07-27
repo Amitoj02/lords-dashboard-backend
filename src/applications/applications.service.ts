@@ -13,8 +13,13 @@ import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { SessionContextService } from '../auth/session-context.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import {
+  AdoptedRoleState,
+  DiscordRoleAdoptionService,
+} from '../discord/discord-role-adoption.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { ApplicantType, ApplicationStatus, MemberRole, MemberStatus } from '../common/enums';
+import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
 import { ServiceRecordEntry } from '../members/entities/service-record-entry.entity';
 import { Rank } from '../ranks/entities/rank.entity';
@@ -62,6 +67,24 @@ function givenText(value: string | null | undefined): string | null {
 }
 
 /**
+ * Recorded on every award and service-record entry an enlistment carries over,
+ * so nobody later mistakes a decoration the bot inferred for one an officer sat
+ * down and awarded.
+ */
+const CARRIED_OVER_DETAIL = 'Carried over from their existing Discord roles on enlistment';
+
+/** One human sentence naming what an approval adopted, or null when it adopted nothing. */
+function describeAdoption(adopted: AdoptedRoleState): string | null {
+  const parts: string[] = [];
+  if (adopted.rank) parts.push(`the ${adopted.rank.name} rank`);
+  if (adopted.medals.length) {
+    parts.push(adopted.medals.map((medal) => medal.title).join(', '));
+  }
+  if (!parts.length) return null;
+  return `Carried over from their existing Discord roles: ${parts.join(' and ')}.`;
+}
+
+/**
  * Recruitment applications: applicant self-submit + the staff review queue
  * (approve/decline/hold). Every query is scoped to the caller's regiment; the
  * single mutation that touches two tables (approve) runs in a transaction.
@@ -79,6 +102,10 @@ export class ApplicationsService {
     private readonly identities: Repository<DiscordIdentity>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
+    // The entry rank, read before the enlistment transaction so its precedence
+    // can floor what an approval adopts from Discord (T-0202).
+    @InjectRepository(Rank)
+    private readonly ranks: Repository<Rank>,
     private readonly dataSource: DataSource,
     private readonly audit: AuditService,
     // Drops the applicant's cached authorization context on approval so they
@@ -87,6 +114,9 @@ export class ApplicationsService {
     // Best-effort: cross-post new enlistments to the enlistments channel (T-0042).
     // Never fails intake — a disabled bot or enqueue error silently no-ops.
     private readonly discordSync: DiscordSyncService,
+    // Reads the rank/medal roles an approved applicant ALREADY wears in the guild
+    // so the enlistment records them instead of stripping them (T-0202).
+    private readonly roleAdoption: DiscordRoleAdoptionService,
   ) {}
 
   /**
@@ -408,8 +438,14 @@ export class ApplicationsService {
   }
 
   /**
-   * Approve an application: create the roster Member at the entry rank and mark
-   * the application approved, atomically. Audited on commit.
+   * Approve an application: create the roster Member and mark the application
+   * approved, atomically. Audited on commit.
+   *
+   * The new member enlists at the entry rank UNLESS their Discord roles already
+   * say otherwise (T-0202) — a regiment that ran on Discord before it ran on this
+   * dashboard has years of rank and medal history recorded nowhere else, and the
+   * enlistment reconcile that follows would otherwise strip every bit of it off
+   * the member it just created. See {@link DiscordRoleAdoptionService}.
    */
   async approve(
     user: AuthenticatedUser,
@@ -440,25 +476,48 @@ export class ApplicationsService {
     // unrelated read; the FK + relation it sets are persisted inside it.
     await this.stampDecider(user, application);
 
+    // ── Resolved BEFORE the transaction, both of them deliberately ───────────
+    //
+    // The entry rank moved out of the transaction because the adoption lookup
+    // needs its precedence as a floor, and adoption CANNOT run inside one: it
+    // talks to Discord, and holding an enlistment's transaction open across a
+    // network round trip would let one unreachable gateway stall the roster.
+    // Nothing is lost by reading it here — the row is frozen against rename and
+    // delete (T-0190), so there is no window for it to change underneath us.
+    const entryRank = await this.ranks.findOne({
+      where: { regimentId: user.regimentId, name: ENTRY_RANK_NAME },
+    });
+    // The ladder is admin-editable, so say what is wrong rather than letting a
+    // bare EntityNotFoundError surface as a 500. Reachable on a database whose
+    // entry rank was already renamed or deleted before T-0190 froze it.
+    if (!entryRank) {
+      throw new ConflictException(
+        `The "${ENTRY_RANK_NAME}" rank is missing from the ladder, so this applicant cannot ` +
+          `be enlisted. Recreate a rank named "${ENTRY_RANK_NAME}" under Ranks & Medals, then ` +
+          'approve again.',
+      );
+    }
+
+    const discordUserId = await this.discordUserIdFor(application.discordIdentityId);
+    const adopted = await this.roleAdoption.resolveFromGuild(
+      user.regimentId,
+      discordUserId,
+      entryRank.precedence,
+    );
+
+    const rank = adopted.rank ?? entryRank;
+    // Written into the approval's audit detail so the carry-over is visible to
+    // staff at the moment it happens, not only as a rank they have to notice.
+    const adoptionNote = describeAdoption(adopted);
+    if (adoptionNote) {
+      this.logger.log(`Enlisting ${application.inGameName} from Discord state — ${adoptionNote}`);
+    }
+
     const { savedApplication, member } = await this.dataSource.transaction(async (manager) => {
-      const rankRepo = manager.getRepository(Rank);
       const memberRepo = manager.getRepository(Member);
       const applicationRepo = manager.getRepository(Application);
 
       const role = enrolledRoleFor(application.applicantType);
-      const rank = await rankRepo.findOne({
-        where: { regimentId: user.regimentId, name: ENTRY_RANK_NAME },
-      });
-      // The ladder is admin-editable, so say what is wrong rather than letting a
-      // bare EntityNotFoundError surface as a 500. Reachable on a database whose
-      // entry rank was already renamed or deleted before T-0190 froze it.
-      if (!rank) {
-        throw new ConflictException(
-          `The "${ENTRY_RANK_NAME}" rank is missing from the ladder, so this applicant cannot ` +
-            `be enlisted. Recreate a rank named "${ENTRY_RANK_NAME}" under Ranks & Medals, then ` +
-            'approve again.',
-        );
-      }
 
       const now = new Date();
       const created = memberRepo.create({
@@ -483,9 +542,39 @@ export class ApplicationsService {
           occurredAt: now,
           type: 'enlistment',
           event: `Enlisted as ${role} at rank ${rank.name}`,
-          note: null,
+          note: adopted.rank ? CARRIED_OVER_DETAIL : null,
         }),
       );
+
+      // Credit every medal the applicant already wears in the guild, IN THE SAME
+      // TRANSACTION as the member row. The reconcile enqueued after this commits
+      // reads `member_medals` to decide which medal roles are wanted — so a medal
+      // that failed to land here is a medal the bot takes off them seconds later.
+      // Rolling the whole enlistment back is the right failure: an approval that
+      // half-adopted is worse than one the officer can simply retry.
+      const awardRepo = manager.getRepository(MemberMedal);
+      for (const medal of adopted.medals) {
+        await awardRepo.save(
+          awardRepo.create({
+            memberId: member.id,
+            medalId: medal.id,
+            detail: CARRIED_OVER_DETAIL,
+            // The approving officer owns this award: they are who decided this
+            // person's Discord history is the regiment's record of them.
+            awardedByMemberId: user.memberId,
+          }),
+        );
+        await serviceRepo.save(
+          serviceRepo.create({
+            memberId: member.id,
+            regimentId: user.regimentId,
+            occurredAt: now,
+            type: 'award',
+            event: `Awarded ${medal.title}`,
+            note: CARRIED_OVER_DETAIL,
+          }),
+        );
+      }
 
       application.status = ApplicationStatus.Approved;
       application.promotedMemberId = member.id;
@@ -512,7 +601,9 @@ export class ApplicationsService {
         memberId: member.id,
         label: savedApplication.applicantName,
       },
-      detail: `Approved application; promoted to ${member.role} (${ENTRY_RANK_NAME}).`,
+      detail: [`Approved application; promoted to ${member.role} (${rank.name}).`, adoptionNote]
+        .filter(Boolean)
+        .join(' '),
     });
 
     // ── The applicant becomes a member IN DISCORD too (T-0192/T-0194) ────────
@@ -526,12 +617,18 @@ export class ApplicationsService {
     // MembersService ends in `syncMemberRoles`.
     //
     // Ordering is the whole story: the Applicant marker comes OFF, then the
-    // reconcile puts on what the roster now says they are (entry-rank role plus
-    // the Membership role, which `holdsMembershipRole` withholds from a
-    // Mercenary). Both are enqueued AFTER the transaction has committed —
-    // `reconcileRoles` re-reads the member by id and silently returns if the row
-    // is not there yet, and the worker ticks every 3 seconds.
-    const discordUserId = await this.discordUserIdFor(application.discordIdentityId);
+    // reconcile puts on what the roster now says they are (rank role plus the
+    // Membership role, which `holdsMembershipRole` withholds from a Mercenary).
+    // Both are enqueued AFTER the transaction has committed — `reconcileRoles`
+    // re-reads the member by id and silently returns if the row is not there
+    // yet, and the worker ticks every 3 seconds.
+    //
+    // Since T-0202 that reconcile is also what makes the carry-over SAFE. It
+    // strips every managed role the roster does not account for, and the rows
+    // committed above are what account for them: the adopted rank role and medal
+    // roles are now `desired`, so the member keeps exactly the roles they walked
+    // in with. Anything the roster still cannot explain is a role nobody in the
+    // dashboard ever linked to anything, and that is the one the strip is for.
     await this.discordSync.enqueueApplicantRole(user.regimentId, discordUserId, 'remove');
     await this.discordSync.enqueueRoleSync(user.regimentId, member.id, discordUserId);
 
