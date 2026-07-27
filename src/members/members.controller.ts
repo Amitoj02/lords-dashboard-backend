@@ -197,7 +197,9 @@ export class MembersController {
     summary: "Change a member's role",
     description:
       'Forbidden against the regiment owner, the caller themselves, and any member ' +
-      'whose role equals or outranks the caller (T-0176).',
+      'whose role equals or outranks the caller (T-0176). The role granted is capped ' +
+      "at the caller's own tier — an Admin holding manage_roles may appoint another " +
+      'Admin, but never a superior (T-0203). Owner is never assignable here.',
   })
   @ApiOkResponse({ type: MemberDto })
   changeRole(

@@ -554,9 +554,10 @@ describe('MembersService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('changeRole forbids granting a role at or above the caller’s own tier (LDA-M4)', async () => {
-      // A Moderator (tier 30) may act on a Member (30 > 20), but must not be able to
-      // mint a superior (Admin) or a peer (Moderator) — only a role strictly below.
+    it('changeRole forbids granting a role ABOVE the caller’s own tier (LDA-M4)', async () => {
+      // A Moderator (tier 30) may act on a Member (30 > 20), but must not be able
+      // to mint a superior. The ceiling is what stops manage_roles from being a
+      // self-service promotion to Admin via a second account.
       const mod = user({ memberId: 'mod-1', role: MemberRole.Moderator });
       memberRepo.findOne.mockResolvedValue(
         buildMember({ id: 'member-9', role: MemberRole.Member }),
@@ -564,8 +565,45 @@ describe('MembersService', () => {
       await expect(
         service.changeRole('member-9', { role: MemberRole.Admin }, mod, null),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(memberRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('changeRole lets a manage_roles holder appoint their own tier (T-0203)', async () => {
+      // The point of the relaxation: an Admin can add another Admin, a Moderator
+      // another Moderator. Only the capability gate (the controller) and the
+      // target hierarchy stand in the way — the ceiling no longer does.
+      memberRepo.findOne.mockResolvedValue(
+        buildMember({ id: 'member-9', role: MemberRole.Member }),
+      );
+
+      const dto = await service.changeRole(
+        'member-9',
+        { role: MemberRole.Admin },
+        admin(),
+        '1.2.3.4',
+      );
+
+      expect(dto.role).toBe(MemberRole.Admin);
+      expect(memberRepo.save).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'member.role.change',
+          after: { role: MemberRole.Admin },
+        }),
+      );
+      expect(sessionContext.invalidate).toHaveBeenCalledTimes(1);
+      expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('changeRole peer appointment is one-way: the new peer is then untouchable (T-0203)', async () => {
+      // Appointing a peer is additive; moderating one is not. An Admin who has
+      // just raised somebody to Admin cannot demote them back — only the Owner
+      // can — so the grant widens the command without letting one seat holder
+      // hollow it out.
+      memberRepo.findOne.mockResolvedValue(buildMember({ id: 'member-9', role: MemberRole.Admin }));
+
       await expect(
-        service.changeRole('member-9', { role: MemberRole.Moderator }, mod, null),
+        service.changeRole('member-9', { role: MemberRole.Member }, admin(), null),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(memberRepo.save).not.toHaveBeenCalled();
     });
