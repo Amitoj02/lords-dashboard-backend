@@ -130,6 +130,9 @@ describe('Member role hierarchy (e2e)', () => {
       (await request(server()).post(`/api/members/${id}/ban`).set(bearer(token)).send({})).status,
     unban: async (id, token) =>
       (await request(server()).post(`/api/members/${id}/unban`).set(bearer(token))).status,
+    deriveFromDiscord: async (id, token) =>
+      (await request(server()).post(`/api/members/${id}/derive-from-discord`).set(bearer(token)))
+        .status,
   };
 
   async function createMember(

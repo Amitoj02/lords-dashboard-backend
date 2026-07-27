@@ -21,9 +21,10 @@ export const MEMBER_ADMIN_ACTIONS = [
   'unsuspend',
   'ban',
   'unban',
+  'deriveFromDiscord',
 ] as const;
 
-/** One of the eight target-scoped member admin actions. */
+/** One of the target-scoped member admin actions. */
 export type MemberAdminAction = (typeof MEMBER_ADMIN_ACTIONS)[number];
 
 /** Which admin actions a caller may perform against one specific member. */
@@ -44,12 +45,15 @@ export const ACTION_CAPABILITY: Record<MemberAdminAction, Capability> = {
   unsuspend: Capability.ManageRoles,
   ban: Capability.ManageRoles,
   unban: Capability.ManageRoles,
+  // Deriving writes a rank and medal awards, so it draws on the capability that
+  // gates writing them by hand — no third capability for the same effect.
+  deriveFromDiscord: Capability.EditRanksMedals,
 };
 
 /**
- * The distinct capabilities the eight actions draw on, so a caller resolving
- * the flags for a whole roster page asks the authz matrix twice rather than
- * once per row per action (T-0177: no extra query on the list endpoint).
+ * The distinct capabilities the actions draw on, so a caller resolving the flags
+ * for a whole roster page asks the authz matrix twice rather than once per row
+ * per action (T-0177: no extra query on the list endpoint).
  */
 export const MEMBER_ADMIN_CAPABILITIES: readonly Capability[] = [
   Capability.ManageRoles,
@@ -174,6 +178,15 @@ const ACTION_LABELS: Record<MemberAdminAction, { self: string; target: string }>
   unsuspend: { self: 'lift your own suspension', target: "lift the regiment owner's suspension" },
   ban: { self: 'ban your own account', target: 'ban the regiment owner' },
   unban: { self: 'lift your own ban', target: "lift the regiment owner's ban" },
+  // ⚠️ The SELF refusal is the load-bearing one here (LDA-H1). A derive hands
+  // out whatever rank and medals the target's Discord roles say they have
+  // earned — so on your own record it is a self-promotion, available to anyone
+  // who can get a role added to their own account in the guild. Nobody derives
+  // themselves, the Owner included; another admin does it for them.
+  deriveFromDiscord: {
+    self: 'derive your own rank and medals from Discord',
+    target: "derive the regiment owner's rank and medals from Discord",
+  },
 };
 
 /**

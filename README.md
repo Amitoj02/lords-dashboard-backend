@@ -265,11 +265,14 @@ Legal documents are stored as Markdown and are **not sanitised server-side** —
 | GET    | `/members/:id/command-info`                                        | `view_audit_log`                |
 | PATCH  | `/members/:id`                                                     | self-service                    |
 | POST   | `/members/:id/rank`, `/:id/medals` · DELETE `/:id/medals/:medalId` | `edit_ranks_medals`             |
+| POST   | `/members/:id/derive-from-discord`                                 | `edit_ranks_medals`             |
 | POST   | `/members/:id/role`, `/suspend`, `/ban`, `/unban`, `/unsuspend`    | `manage_roles`                  |
 | GET    | `/members/me/export`                                               | self-service (data export)      |
 | POST   | `/members/me/deletion-request`, `/confirm`, `/execute`, `/cancel`  | self-service (account deletion) |
 
 Admin actions on a _specific_ member are additionally gated on a server-computed `permittedActions` block, so the client's action menu cannot drift from what the API will accept.
+
+`derive-from-discord` credits a member with the rank and medals their existing Discord roles already say they earned — the manual counterpart to the carry-over an enlistment performs. Promotion-only (their current rank is the floor), additive-only on medals, and safe to press twice. Never permitted on your own record: a derive hands out whatever the target's roles say, so on yourself it would be a self-promotion.
 
 </details>
 
