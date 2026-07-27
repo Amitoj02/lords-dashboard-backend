@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "348f0aeb27f72821c912a5d3bde110e9d63801ff",
-  "lastSyncedAt": "2026-07-27T10:45:00Z",
-  "notesForNextSession": "LATEST SESSION (T-0202): one follow-up to the T-0191..T-0201 enlistment work, from a user question that turned into a bug. Branch feat/adopt-existing-discord-roles-on-enlistment; PR open against dev. BACKEND ONLY \u2014 no frontend change, no new API surface, no migration. *** THE HEADLINE: the T-0194 sync was WIPING existing members as they enlisted. *** The regiment ran on Discord for years before this dashboard, so a veteran's rank and medals live ONLY as guild roles; reconcileRoles strips every managed role the roster cannot account for, and a fresh member row accounts for nothing. Approval is the FIRST reconcile of a member's life, so it took years of decorations off the person it had just admitted. Sign-in and submit were never implicated (AuthService touches Discord not at all; submit only ADDS the Applicant marker) \u2014 worth remembering, because that is where the symptom looks like it lives. THE FIX: DiscordRoleAdoptionService reads the applicant's guild roles before the transaction and approve() writes the adopted rank + medal awards inside it, so the reconcile that follows finds them DESIRED. Bounded by the protected-rank exclusions and an entry-rank precedence floor. The entry-rank lookup MOVED OUT of the enlistment transaction to supply that floor. WATCH ON DEPLOY: this is inert until the real bot runs (DISCORD_BOT_MOCK=true in production, and the mock only knows members it has already touched) \u2014 but so is the strip, so the two stay in step. THE MOMENT DISCORD_BOT_MOCK GOES FALSE, both switch on together, and that is the first time either has ever run against the live guild. NOT DONE: members approved BEFORE this ships cannot be recovered \u2014 their roles are already gone and /discord/resync only replays roster state, which is exactly what is missing. If any veterans have already been stripped, the guild audit log is the only record of what they held.",
-  "nextIdCounter": 203,
+  "lastSyncedCommit": "fc9bd335990e0466f7260d8d71600e746d2b9370",
+  "lastSyncedAt": "2026-07-27T15:30:00Z",
+  "notesForNextSession": "LATEST SESSION (T-0203): a one-rule change to the member role grant ceiling, straight from the owner. \"Manage roles\" in the permission matrix now means what it reads like: a role that holds it can appoint its OWN tier - an Admin can add another Admin, a Moderator another Moderator. Before, the ceiling was strictly-below (LDA-M4), so enabling the capability for Admin bought them everything EXCEPT the thing an owner would enable it for. *** WHAT DID NOT CHANGE, AND MUST NOT DRIFT: *** the TARGET hierarchy. Appointing a peer is additive; moderating one is not. So the Admin who just promoted somebody to Admin cannot demote, suspend or ban them - permittedActions reports every action false and the endpoints 403. The promotion is ONE-WAY for everyone but the Owner, which is the intended trade and is pinned by tests in both repos. Escalation is still shut: canGrantRole caps at the caller's own tier, and because every appointee inherits the same cap, no chain of appointments climbs - a Moderator cannot produce an Admin by any route. Owner is refused before the ceiling is even consulted (no API path assigns ownership). CROSS-REPO: the frontend mirrors the ceiling in assignableRolesFor(), so the backend alone would have been invisible in the UI - lords-regiment-dashboard T-0283 ships the dropdown half on a branch of the same name. Merge order does not matter (the server is authoritative; a client that offers too little just under-offers). INERT ON DEPLOY: the seeded matrix grants manage_roles to Owner ONLY and is insert-only, so nothing changes until an owner ticks the box in Settings -> Permissions. When they do, note the open regression risk on T-0203: enabling manage_roles is now a bigger delegation than it was, and the settings copy does not say so.",
+  "nextIdCounter": 204,
   "connections": [],
   "tasks": [
     {
@@ -14048,6 +14048,75 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/adopt-existing-discord-roles-on-enlistment; unit + e2e green, e2e verified to fail without the fix"
+        }
+      ]
+    },
+    {
+      "id": "T-0203",
+      "title": "Let manage_roles appoint its own tier",
+      "summary": "The grant ceiling on POST /members/:id/role capped the role handed out at STRICTLY below the caller (LDA-M4), so an Admin holding manage_roles could not appoint another Admin and a Moderator could not appoint another Moderator - the whole point of enabling \"Manage roles\" for a role in the permission matrix. Relaxed to at-or-below via a named canGrantRole() in member-hierarchy, mirrored client-side by assignableRolesFor(). ESCALATION STAYS SHUT: nobody mints a role above their own, and no chain of appointments can either, because every appointee is capped by the same ceiling - so a Moderator still cannot produce an Admin by any route. The TARGET hierarchy is untouched on purpose: appointing a peer is additive, moderating one is not, so the Admin who just promoted somebody to Admin can no longer demote, suspend or ban them - only the Owner can. Inert until an owner grants manage_roles to Admin/Moderator, which the seeded matrix (Owner-only, insert-only) does not do.",
+      "status": "review",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "role-hierarchy",
+      "repo": "",
+      "paths": [
+        "src/members/member-hierarchy.ts",
+        "src/members/member-hierarchy.spec.ts",
+        "src/members/members.service.ts",
+        "src/members/members.service.spec.ts",
+        "src/members/members.controller.ts",
+        "test/member-hierarchy.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0176"
+      ],
+      "blocks": [
+        "lords-regiment-dashboard:T-0283"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "an Admin holding manage_roles may appoint another Admin, a Moderator another Moderator",
+          "status": "passed"
+        },
+        {
+          "desc": "a tier ABOVE the caller is still 403 (Moderator -> Admin), and Owner is refused outright",
+          "status": "passed"
+        },
+        {
+          "desc": "the appointment is one-way: the new peer reports every permittedAction false to the appointer, and the demotion 403s",
+          "status": "passed"
+        },
+        {
+          "desc": "canGrantRole is exactly !outranks(granted, actor) across the full role matrix, so the two rules cannot drift",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Granting manage_roles to a role is now a strictly larger delegation than it was: that role can multiply itself, and the peers it creates are beyond its own reach (only the Owner can demote them). An owner who enabled the capability under the old rule did not consent to this one - worth restating in the settings UI copy before the matrix is widened.",
+          "status": "open",
+          "notedAt": "2026-07-27T15:30:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Left the TARGET hierarchy strict - a peer still cannot be demoted, suspended or banned by a peer. Only promotion parity was asked for, and relaxing moderation would let two Admins remove each other (the T-0176 hollowing-out guard).",
+        "Did not add a settings-page warning about what enabling manage_roles now implies; recorded as the regression risk above instead."
+      ],
+      "lastTouchedCommit": "fc9bd335990e0466f7260d8d71600e746d2b9370",
+      "createdAt": "2026-07-27T15:30:00Z",
+      "updatedAt": "2026-07-27T15:30:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T15:30:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner request: \"Manage roles\" should let a role promote others to its own level. Implemented on feat/manage-roles-grant-own-tier; local CI green (886 unit, 126 e2e); PR opened against dev."
         }
       ]
     }

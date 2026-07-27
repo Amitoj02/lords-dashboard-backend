@@ -87,6 +87,27 @@ export function outranks(actorRole: MemberRole, targetRole: MemberRole): boolean
   return ROLE_PRECEDENCE[actorRole] > ROLE_PRECEDENCE[targetRole];
 }
 
+/**
+ * True when `actorRole` may hand out `grantedRole` — at or below their own tier
+ * (T-0203).
+ *
+ * NOT strict, unlike {@link outranks}: holding `manage_roles` is exactly what
+ * makes a role able to appoint its own kind, so an Admin who holds it may
+ * appoint another Admin and a Moderator who holds it may appoint another
+ * Moderator. What stays shut is ESCALATION — nobody mints a role above their
+ * own, and no chain of appointments can either, because every appointee is
+ * capped by this same ceiling. (Owner never reaches here: `changeRole` refuses
+ * it outright, since no API path assigns ownership.)
+ *
+ * The asymmetry with {@link canActOn} is deliberate. Appointing a peer is
+ * additive; moderating one is not. So an Admin may raise a Member to Admin, but
+ * still cannot demote, suspend or ban that Admin afterwards — only the Owner
+ * can. A seat holder can widen the command, never hollow it out.
+ */
+export function canGrantRole(actorRole: MemberRole, grantedRole: MemberRole): boolean {
+  return ROLE_PRECEDENCE[grantedRole] <= ROLE_PRECEDENCE[actorRole];
+}
+
 /** The minimum a moderation target must expose for the hierarchy check. */
 export interface HierarchyTarget {
   id: string;

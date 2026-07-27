@@ -36,7 +36,7 @@ import {
   MEMBER_ADMIN_CAPABILITIES,
   MemberAdminAction,
   assertCanActOn,
-  outranks,
+  canGrantRole,
   permittedActions,
 } from './member-hierarchy';
 import {
@@ -261,10 +261,15 @@ export class MembersService {
   }
 
   /**
-   * Change a member's role. Ownership is protected: the regiment owner's role
-   * cannot be changed here, and this endpoint cannot grant the Owner role at
-   * all — there is no API path that assigns it (the ownership-transfer endpoint
-   * was removed in T-0170), so the role is only ever set by provisioning.
+   * Change a member's role. Two independent ceilings apply: the caller must
+   * outrank the target's CURRENT role (the hierarchy guard), and the role they
+   * hand out may not exceed their OWN tier — equal is allowed, so a manage_roles
+   * holder may appoint their own kind (T-0203).
+   *
+   * Ownership is protected on both: the regiment owner's role cannot be changed
+   * here, and this endpoint cannot grant the Owner role at all — there is no API
+   * path that assigns it (the ownership-transfer endpoint was removed in
+   * T-0170), so the role is only ever set by provisioning.
    */
   async changeRole(
     id: string,
@@ -281,12 +286,14 @@ export class MembersService {
     // and the same holds for the owner/hierarchy refusals (T-0176).
     const ownerMemberId = await this.assertMayModerate(member, user, 'changeRole');
 
-    // Cap the GRANTED role at strictly below the caller's own tier (LDA-M4).
-    // assertMayModerate only checks that the caller outranks the target's CURRENT
-    // role; without this a manage_roles holder could mint a peer or a superior
-    // (e.g. a Moderator promoting a Member straight to Admin).
-    if (!outranks(user.role, dto.role)) {
-      throw new ForbiddenException('You cannot grant a role equal to or above your own');
+    // Cap the GRANTED role at the caller's own tier (LDA-M4, relaxed to include
+    // that tier in T-0203). assertMayModerate only checks that the caller
+    // outranks the target's CURRENT role; without this a manage_roles holder
+    // could mint a SUPERIOR — a Moderator promoting a Member straight to Admin.
+    // Their own tier is deliberately allowed: appointing a peer is what holding
+    // manage_roles buys, and the appointee is capped by the same ceiling.
+    if (!canGrantRole(user.role, dto.role)) {
+      throw new ForbiddenException('You cannot grant a role above your own');
     }
 
     // A no-op change (same role) records nothing — no service-record entry, no
