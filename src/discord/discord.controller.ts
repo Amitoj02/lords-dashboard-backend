@@ -17,6 +17,7 @@ import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { RequireRole } from '../auth/decorators/require-role.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
+import { RequireAnyCapability } from '../authz/decorators/require-any-capability.decorator';
 import { RequireCapability } from '../authz/decorators/require-capability.decorator';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { Capability, MemberRole } from '../common/enums';
@@ -82,9 +83,16 @@ export class DiscordController {
   }
 
   @Get('roles')
-  @RequireCapability(Capability.EditRanksMedals)
+  // EITHER capability, not both (T-0206). This list feeds two different screens:
+  // the rank/medal link pickers (edit_ranks_medals) and the event authoring
+  // form's ping-role picker (manage_events). The defaults do not overlap — a
+  // Moderator holds manage_events but not edit_ranks_medals — so gating on one
+  // would 403 an event author on a form they are allowed to open, and requiring
+  // both would lock out more people still.
+  @RequireAnyCapability(Capability.EditRanksMedals, Capability.ManageEvents)
   @ApiOperation({
-    summary: 'List the guild roles for the rank/medal link pickers (empty when disconnected)',
+    summary:
+      'List the guild roles for the rank/medal + event ping pickers (empty when disconnected)',
   })
   @ApiOkResponse({ type: [DiscordRoleDto] })
   listRoles(): Promise<DiscordRoleDto[]> {
