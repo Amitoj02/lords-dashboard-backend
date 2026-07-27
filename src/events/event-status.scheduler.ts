@@ -2,6 +2,8 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { EventStatus } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
+import { EventAnnouncement } from './entities/event-announcement.entity';
 import { RegimentEvent } from './entities/event.entity';
 
 /** How often the sweep runs. */
@@ -9,6 +11,9 @@ const TICK_INTERVAL_MS = 60_000;
 
 /** An open-ended event (no `endsAt`) is considered over this long after it starts. */
 const OPEN_ENDED_DURATION_MS = 6 * 60 * 60 * 1000; // 6h
+
+/** Upper bound on announcements retired per tick (keeps a tick cheap and bounded). */
+const CLOSE_BATCH_SIZE = 25;
 
 /**
  * Background sweep that advances event lifecycle statuses on the clock, so the
@@ -26,6 +31,9 @@ export class EventStatusScheduler implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(RegimentEvent)
     private readonly events: Repository<RegimentEvent>,
+    @InjectRepository(EventAnnouncement)
+    private readonly announcements: Repository<EventAnnouncement>,
+    private readonly discordSync: DiscordSyncService,
   ) {}
 
   onModuleInit(): void {
@@ -50,6 +58,16 @@ export class EventStatusScheduler implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       this.logger.error(`Event status sweep failed: ${(error as Error).message}`);
+    }
+    // Guarded SEPARATELY, so a Discord-side problem can never stop the statuses
+    // advancing — the calendar is the thing members actually depend on.
+    try {
+      const closed = await this.closeEndedAnnouncements();
+      if (closed > 0) {
+        this.logger.log(`Retired the RSVP buttons on ${closed} ended event announcement(s).`);
+      }
+    } catch (error) {
+      this.logger.error(`Event announcement close sweep failed: ${(error as Error).message}`);
     }
   }
 
@@ -92,5 +110,47 @@ export class EventStatusScheduler implements OnModuleInit, OnModuleDestroy {
       .execute();
 
     return (toOngoing.affected ?? 0) + (toPrevious.affected ?? 0);
+  }
+
+  /**
+   * Disable the RSVP buttons on every announcement whose event has ENDED
+   * (T-0205). Returns how many close jobs were enqueued.
+   *
+   * ── WHY IT HANGS OFF THIS SWEEP ─────────────────────────────────────────────
+   * "The event is over" is already this scheduler's judgement, made one pass
+   * earlier in the same tick. Asking the question a second time somewhere else
+   * would be a second definition of over — and the two would disagree the first
+   * time anyone touched `OPEN_ENDED_DURATION_MS`.
+   *
+   * The `closedAt IS NULL` filter is what keeps this from being a rediscovery of
+   * every event the regiment has ever run: an announcement is retired once, the
+   * worker stamps it, and it never appears here again. Bounded per tick on top
+   * of that, so a backlog (the first tick after this ships sees every past
+   * event) drains steadily instead of flooding the outbox in one go.
+   */
+  async closeEndedAnnouncements(): Promise<number> {
+    const due = await this.announcements
+      .createQueryBuilder('announcement')
+      .innerJoin(RegimentEvent, 'event', 'event.id = announcement.eventId')
+      .select('announcement.eventId', 'eventId')
+      .addSelect('event.regimentId', 'regimentId')
+      .where('announcement.closedAt IS NULL')
+      // A DELETED event counts as ended too. It never reaches `previous` — the
+      // status pass above skips soft-deleted rows — so without this clause its
+      // announcement would keep live buttons on a channel message forever, for
+      // an event nothing can render.
+      .andWhere('(event.status = :previous OR event.deletedAt IS NOT NULL)', {
+        previous: EventStatus.Previous,
+      })
+      .orderBy('announcement.createdAt', 'ASC')
+      .limit(CLOSE_BATCH_SIZE)
+      .getRawMany<{ eventId: string; regimentId: string }>();
+
+    let enqueued = 0;
+    for (const row of due) {
+      const job = await this.discordSync.enqueueEventAnnouncementClose(row.regimentId, row.eventId);
+      if (job) enqueued++;
+    }
+    return enqueued;
   }
 }

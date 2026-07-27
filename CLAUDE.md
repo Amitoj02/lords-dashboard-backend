@@ -7,7 +7,7 @@ NestJS 11 + TypeORM + MySQL 8 REST API for the **Lords Regiment Dashboard** (Hol
 
 - `CONTRIBUTING.md` — the developer flow: local setup, testing (incl. the isolated e2e database), migrations, **the two-tier seeding rule**, cross-repo changes, and how code reaches production.
 - `README.md` — tech stack, local setup (`npm run db:setup`, `start:dev`), auth flow, and route table.
-- `SCHEMA.md` — the complete normalized (3NF) schema: 28 tables, enums, junctions, soft-deletes, the authorization matrix, and the auth/identity model.
+- `SCHEMA.md` — the complete normalized (3NF) schema: 30 tables, enums, junctions, soft-deletes, the authorization matrix, and the auth/identity model.
 - `docs/INFRASTRUCTURE.md` — what runs where, request/upload/deploy/backup paths, the credential inventory, and what survives `down -v`.
 - `deploy/README.md` — the production runbook: deploy, roll back, restore, troubleshoot.
 

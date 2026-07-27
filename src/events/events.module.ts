@@ -7,6 +7,7 @@ import { StorageModule } from '../storage/storage.module';
 import { EventRecurrenceScheduler } from './event-recurrence.scheduler';
 import { EventReminderScheduler } from './event-reminder.scheduler';
 import { EventStatusScheduler } from './event-status.scheduler';
+import { EventAnnouncement } from './entities/event-announcement.entity';
 import { EventAttendee } from './entities/event-attendee.entity';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
 import { EventPlatform } from './entities/event-platform.entity';
@@ -32,6 +33,9 @@ import { EventsService } from './events.service';
       EventPlatform,
       EventTag,
       EventNotifyOffset,
+      // Where each event's Discord announcement landed — read by the sweep that
+      // retires an ended event's RSVP buttons (T-0205).
+      EventAnnouncement,
       Member,
       RegimentSettings,
     ]),

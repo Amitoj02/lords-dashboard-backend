@@ -151,6 +151,32 @@ export enum DiscordSyncJobType {
    * about to start".
    */
   EventReminder = 'event.reminder',
+  /**
+   * Re-render an event announcement in place (T-0205), so the embed's
+   * Attending/Tentative/Declined sections match the RSVPs as they stand.
+   *
+   * Its payload carries ONLY the event id: the roster is recomposed at DRAIN
+   * time, not at enqueue. That is the opposite of every other message producer
+   * here and is deliberate — the refresh is coalesced (one pending job per
+   * event, however many people are pressing buttons), so a payload composed at
+   * enqueue would deliver the FIRST presser's roster and silently drop everyone
+   * who clicked after it.
+   */
+  EventAnnouncementRefresh = 'event.announce.refresh',
+  /**
+   * Open a thread on the event announcement and ping everyone who said they are
+   * coming (T-0205). Fired by the reminder scheduler at the event's configured
+   * lead time, and the reason the app does not DM attendees: Discord's policy
+   * treats unsolicited mass DMs as abuse, while one thread message reaches the
+   * same people.
+   */
+  EventThreadPing = 'event.thread.ping',
+  /**
+   * Retire an ended event's RSVP buttons (T-0205) by re-rendering the
+   * announcement with them disabled. The message stays as the historical record;
+   * only the controls go dead.
+   */
+  EventAnnouncementClose = 'event.announce.close',
   Welcome = 'welcome',
   /** Post a new enlistment application to the enlistments channel (T-0042). */
   ApplicationSubmitted = 'application.submitted',

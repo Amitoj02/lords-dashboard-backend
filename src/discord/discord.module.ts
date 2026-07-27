@@ -2,7 +2,11 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditLogEntry } from '../audit/entities/audit-log-entry.entity';
+import { DiscordIdentity } from '../auth/entities/discord-identity.entity';
 import { AppConfig } from '../config/configuration';
+import { EventAnnouncement } from '../events/entities/event-announcement.entity';
+import { EventRsvp } from '../events/entities/event-rsvp.entity';
+import { RegimentEvent } from '../events/entities/event.entity';
 import { Medal } from '../medals/entities/medal.entity';
 import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Member } from '../members/entities/member.entity';
@@ -15,6 +19,8 @@ import { DiscordRolePolicyService } from './discord-role-policy.service';
 import { DiscordService } from './discord.service';
 import { DiscordSyncService } from './discord-sync.service';
 import { DiscordSyncWorker } from './discord-sync.worker';
+import { EventAnnouncementService } from './event-announcement.service';
+import { EventRsvpInteractionService } from './event-rsvp-interaction.service';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
@@ -25,9 +31,12 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
 
 /**
  * The "Lord Adjutant" Discord bot: an outbox that syncs roles + posts
- * announcements (NO slash commands — members use the webapp). The in-process
- * gateway is swapped for MockDiscordGateway when `discord.botMock` is set, so the
- * whole pipeline runs with no real bot (mirrors the OAuth mock/real seam).
+ * announcements (still NO slash commands — members use the webapp). Since
+ * T-0205 it also has ONE inbound path: the RSVP buttons under an event
+ * announcement, handled by {@link EventRsvpInteractionService}, which runs the
+ * same authorization the HTTP route does. The in-process gateway is swapped for
+ * MockDiscordGateway when `discord.botMock` is set, so the whole pipeline runs
+ * with no real bot (mirrors the OAuth mock/real seam).
  * Exports DiscordSyncService so feature modules can enqueue syncs on
  * rank/role/medal changes and the ban→Ban-role action — without importing this
  * module's guts.
@@ -49,6 +58,16 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
       MemberMedal,
       // Audit-mirror sync-status write-back (synced/failed) onto the source row.
       AuditLogEntry,
+      // Event announcements are RE-RENDERED after they are posted (T-0205), so
+      // the bot reads the event + its RSVP roster at drain time and owns the
+      // delivery record of where each announcement landed. These are entity
+      // registrations, not a module edge — EventsModule imports this one, and
+      // the reverse would close a cycle.
+      RegimentEvent,
+      EventRsvp,
+      EventAnnouncement,
+      // A button press arrives as a Discord user id and has to become a member.
+      DiscordIdentity,
     ]),
   ],
   controllers: [DiscordController],
@@ -59,6 +78,8 @@ import { RealDiscordGateway } from './gateway/real-discord-gateway';
     DiscordOnboardingService,
     DiscordRolePolicyService,
     DiscordRoleAdoptionService,
+    EventAnnouncementService,
+    EventRsvpInteractionService,
     {
       // Swap the real discord.js gateway for the in-process mock when botMock is
       // set. Consumers depend on the DiscordGateway abstract class token, so

@@ -40,7 +40,6 @@ import {
   resolveEventInstant,
   storedWallClock,
 } from './event-time';
-import { toEventSummary } from './event-summary';
 
 /** New arrays of child rows to REPLACE on an event (undefined = leave untouched). */
 interface ChildCollections {
@@ -300,6 +299,7 @@ export class EventsService {
         recurrenceCadence: cadence,
         recurrenceActive: cadence !== null,
         recurrenceTemplateId: null,
+        announceRoleId: blankToNull(dto.announceRoleId),
         serverName: blankToNull(dto.serverName),
         serverPassword: blankToNull(dto.serverPassword),
         serverRegion: blankToNull(dto.serverRegion),
@@ -330,11 +330,11 @@ export class EventsService {
 
     // Best-effort: announce the newly published event to the dedicated
     // event-announcements channel (T-0044). No-ops when the bot is disabled.
-    // What the announcement LOOKS like is no longer decided here (T-0174) — this
-    // hands over a projection and DiscordSyncService composes the embed, so the
-    // create path and the reminder sweep cannot drift apart. A brand-new event
-    // has no RSVPs yet, hence the literal 0 rather than a count query.
-    await this.discordSync.enqueueEventAnnounce(user.regimentId, toEventSummary(saved, 0));
+    // What the announcement LOOKS like is not decided here (T-0174/T-0205) —
+    // this hands over an id and the Discord module reads the event, composes the
+    // embed and attaches the RSVP buttons, so the create path, the recurrence
+    // sweep and every later re-render cannot drift apart.
+    await this.discordSync.enqueueEventAnnounce(user.regimentId, saved.id);
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
   }
@@ -393,6 +393,13 @@ export class EventsService {
         }
       }
       if (dto.recurrenceActive !== undefined) event.recurrenceActive = dto.recurrenceActive;
+      // Editable, but it changes only what a FUTURE announcement pings — the
+      // announcement that already went out is not re-posted, and re-pinging is
+      // exactly what the once-only rule forbids. On a recurring template it is
+      // the occurrences generated from here on that inherit the new role.
+      if (dto.announceRoleId !== undefined) {
+        event.announceRoleId = blankToNull(dto.announceRoleId);
+      }
       if (dto.serverName !== undefined) event.serverName = blankToNull(dto.serverName);
       // Written as plaintext; the column transformer encrypts it at rest. Note the
       // transformer only nulls an empty password on the way OUT — collapsing here
@@ -706,6 +713,14 @@ export class EventsService {
     }
     await this.rsvps.save(rsvp);
 
+    // Keep the Discord announcement's Attending/Tentative/Declined sections
+    // honest (T-0205). An RSVP made on the WEBSITE has to move the embed just
+    // like a button press does — the announcement is one view of one roster, and
+    // a channel that only reflected half the RSVPs would be worse than one that
+    // showed none. Best-effort by contract: no-ops when the bot is off or the
+    // event was never announced, and never throws into the request.
+    await this.discordSync.enqueueEventAnnouncementRefresh(user.regimentId, event.id);
+
     return this.serializeOne(event, { includeServer: true, memberId: user.memberId });
   }
 
@@ -714,6 +729,7 @@ export class EventsService {
     const event = await this.loadEvent(id, user.regimentId, { withDrafts: true });
     if (user.memberId) {
       await this.rsvps.delete({ eventId: event.id, memberId: user.memberId });
+      await this.discordSync.enqueueEventAnnouncementRefresh(user.regimentId, event.id);
     }
   }
 
@@ -1095,6 +1111,7 @@ export class EventsService {
       status: event.status,
       recurrenceCadence: event.recurrenceCadence,
       recurrenceActive: event.recurrenceActive,
+      announceRoleId: event.announceRoleId,
       serverName: event.serverName,
       serverRegion: event.serverRegion,
       expectedAttendance: event.expectedAttendance,

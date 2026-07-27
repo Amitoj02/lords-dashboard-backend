@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DateTime } from 'luxon';
 import { DataSource } from 'typeorm';
 import { RecurrenceCadence } from '../common/enums';
+import { DiscordSyncService } from '../discord/discord-sync.service';
 import { RegimentEvent } from './entities/event.entity';
 import { computeOccurrenceStarts, EventRecurrenceScheduler } from './event-recurrence.scheduler';
 
@@ -166,6 +167,7 @@ describe('EventRecurrenceScheduler.generate', () => {
     getRepository: jest.fn(() => childRepo),
     transaction: jest.fn(),
   };
+  const discordSync = { enqueueEventAnnounce: jest.fn().mockResolvedValue(null) };
 
   const template = (overrides: Partial<RegimentEvent> = {}): RegimentEvent =>
     ({
@@ -214,6 +216,7 @@ describe('EventRecurrenceScheduler.generate', () => {
         EventRecurrenceScheduler,
         { provide: getRepositoryToken(RegimentEvent), useValue: events },
         { provide: DataSource, useValue: dataSource },
+        { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
     scheduler = module.get(EventRecurrenceScheduler);
@@ -248,5 +251,51 @@ describe('EventRecurrenceScheduler.generate', () => {
     const created = await scheduler.generate(new Date('2026-07-01T19:00:00.000Z'));
     expect(created).toBe(0);
     expect(eventTxRepo.save).not.toHaveBeenCalled();
+  });
+
+  describe('announcing a materialised occurrence (T-0205)', () => {
+    beforeEach(() => {
+      events.find.mockImplementation((opts: { where: Record<string, unknown> }) =>
+        'recurrenceTemplateId' in opts.where && opts.where.recurrenceTemplateId === 'tmpl-1'
+          ? Promise.resolve([])
+          : Promise.resolve([template({ announceRoleId: '777000000000000001' })]),
+      );
+    });
+
+    it('announces EVERY occurrence, so the guild hears about each muster', async () => {
+      // Before this the sweep materialised rows in silence and the guild only
+      // ever saw the template's own announcement.
+      const created = await scheduler.generate(new Date('2026-07-01T19:00:00.000Z'));
+
+      expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledTimes(created);
+      expect(discordSync.enqueueEventAnnounce).toHaveBeenCalledWith('reg-1', expect.any(String));
+    });
+
+    it("clones the template's ping role onto each occurrence", async () => {
+      await scheduler.generate(new Date('2026-07-01T19:00:00.000Z'));
+
+      const occurrence = eventTxRepo.create.mock.calls[0][0];
+      expect(occurrence.announceRoleId).toBe('777000000000000001');
+    });
+
+    it('announces AFTER the transaction commits, never inside it', async () => {
+      // The enqueue reads the occurrence back by id, so it has to be visible to
+      // another connection first — and a Discord problem must never be able to
+      // roll back a materialised occurrence.
+      const order: string[] = [];
+      dataSource.transaction.mockImplementation(async (cb: (m: unknown) => unknown) => {
+        const result = await cb({ getRepository: () => eventTxRepo });
+        order.push('commit');
+        return result;
+      });
+      discordSync.enqueueEventAnnounce.mockImplementation(() => {
+        order.push('announce');
+        return Promise.resolve(null);
+      });
+
+      await scheduler.generate(new Date('2026-07-01T19:00:00.000Z'));
+
+      expect(order.slice(0, 2)).toEqual(['commit', 'announce']);
+    });
   });
 });

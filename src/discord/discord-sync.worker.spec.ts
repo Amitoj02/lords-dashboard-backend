@@ -14,6 +14,7 @@ import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { DiscordSyncService } from './discord-sync.service';
 import { DiscordSyncWorker } from './discord-sync.worker';
+import { EventAnnouncementService } from './event-announcement.service';
 import { BotOperation } from './entities/bot-operation.entity';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordConnection } from './entities/discord-connection.entity';
@@ -79,13 +80,51 @@ describe('DiscordSyncWorker', () => {
     listChannels: jest.fn(),
     sendChannelMessage: jest.fn(),
     sendDirectMessage: jest.fn(),
+    editChannelMessage: jest.fn(),
+    createMessageThread: jest.fn(),
   };
   const audit = { record: jest.fn() };
-  const sync = { expandRelinkPage: jest.fn().mockResolvedValue(0) };
+  const sync = {
+    expandRelinkPage: jest.fn().mockResolvedValue(0),
+    resolveBrand: jest.fn(),
+  };
+  /** The event-announcement reader the drain-time composers use (T-0205). */
+  const announcements = {
+    loadEvent: jest.fn(),
+    summaryFor: jest.fn(),
+    findDelivery: jest.fn(),
+    pingTargets: jest.fn(),
+    recordDelivery: jest.fn(),
+    recordThread: jest.fn(),
+    markClosed: jest.fn(),
+  };
+  const eventSummary = {
+    title: 'Line Battle',
+    description: null,
+    startsAt: '2026-08-01T19:00:00.000Z',
+    endsAt: null,
+    timezone: 'UTC',
+    bannerUrl: null,
+    eventType: 'One-off',
+    roster: { attending: ['<@1>'], tentative: [], declined: [] },
+  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
     connectionsRepo.findOne.mockResolvedValue({ id: 'conn-1' });
+    sync.resolveBrand.mockResolvedValue({
+      name: 'The Lords',
+      accentTone: 'brass',
+      bannerUrl: null,
+      crestUrl: null,
+    });
+    announcements.loadEvent.mockResolvedValue({ id: 'evt-1', title: 'Line Battle' });
+    announcements.summaryFor.mockResolvedValue(eventSummary);
+    announcements.findDelivery.mockResolvedValue(null);
+    announcements.pingTargets.mockResolvedValue([]);
+    announcements.recordDelivery.mockResolvedValue(undefined);
+    announcements.recordThread.mockResolvedValue(undefined);
+    announcements.markClosed.mockResolvedValue(undefined);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DiscordSyncWorker,
@@ -101,6 +140,7 @@ describe('DiscordSyncWorker', () => {
         { provide: DiscordGateway, useValue: gateway },
         { provide: AuditService, useValue: audit },
         { provide: DiscordSyncService, useValue: sync },
+        { provide: EventAnnouncementService, useValue: announcements },
       ],
     }).compile();
     worker = module.get(DiscordSyncWorker);
@@ -632,6 +672,217 @@ describe('DiscordSyncWorker', () => {
       // The announcement queued LAST still went out in this very tick.
       expect(gateway.sendChannelMessage).toHaveBeenCalledWith('c1', 'hello');
       expect(announce.status).toBe(DiscordSyncJobStatus.Succeeded);
+    });
+  });
+
+  describe('event announcements (T-0205)', () => {
+    const announceJob = (payload: Record<string, unknown>) =>
+      job({ id: 'ann-1', jobType: DiscordSyncJobType.Announce, payload });
+
+    it('records WHERE the announcement landed, so later RSVPs re-render that message', async () => {
+      const j = announceJob({
+        channelId: 'c1',
+        content: '<@&role-1>',
+        embed: { title: '📅 New event: Line Battle' },
+        eventId: 'evt-1',
+        components: [{ buttons: [{ customId: 'event-rsvp:interested:evt-1' }] }],
+        mentions: { roles: ['role-1'] },
+      });
+      queue([j]);
+      gateway.sendChannelMessage.mockResolvedValue({ messageId: 'msg-9' });
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).toHaveBeenCalledWith(
+        'c1',
+        '<@&role-1>',
+        [{ title: '📅 New event: Line Battle' }],
+        expect.objectContaining({ mentions: { roles: ['role-1'] } }),
+      );
+      expect(announcements.recordDelivery).toHaveBeenCalledWith('evt-1', 'c1', 'msg-9');
+      expect(j.status).toBe(DiscordSyncJobStatus.Succeeded);
+    });
+
+    it('does NOT re-open the job when the write-back fails, or it would post twice', async () => {
+      // A throw after a successful send would retry the job and produce a second
+      // announcement — complete with a second role ping.
+      queue([announceJob({ channelId: 'c1', content: '', eventId: 'evt-1', mentions: {} })]);
+      gateway.sendChannelMessage.mockResolvedValue({ messageId: 'msg-9' });
+      announcements.recordDelivery.mockRejectedValue(new Error('db down'));
+
+      const processed = await worker.drain();
+
+      expect(processed).toBe(1);
+      expect(gateway.sendChannelMessage).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-renders from the CURRENT roster and pings nobody', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.EventAnnouncementRefresh,
+          payload: { eventId: 'evt-1' },
+        }),
+      ]);
+      announcements.findDelivery.mockResolvedValue({
+        eventId: 'evt-1',
+        channelId: 'c1',
+        messageId: 'msg-9',
+        threadId: null,
+        closedAt: null,
+      });
+
+      await worker.drain();
+
+      // Composed at DRAIN time — the roster comes from the reader, not a frozen
+      // payload — and the edit path accepts no mention allow-list at all.
+      expect(announcements.summaryFor).toHaveBeenCalled();
+      const [channelId, messageId, update] = gateway.editChannelMessage.mock.calls[0];
+      expect([channelId, messageId]).toEqual(['c1', 'msg-9']);
+      expect(update.embeds[0].fields).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: '✅ Attending — 1' })]),
+      );
+      expect(update.components[0].buttons.every((b: { disabled: boolean }) => !b.disabled)).toBe(
+        true,
+      );
+    });
+
+    it('refuses to re-render an announcement that was already retired', async () => {
+      // Otherwise a late press would resurrect the buttons on an ended event.
+      queue([
+        job({
+          jobType: DiscordSyncJobType.EventAnnouncementRefresh,
+          payload: { eventId: 'evt-1' },
+        }),
+      ]);
+      announcements.findDelivery.mockResolvedValue({
+        eventId: 'evt-1',
+        channelId: 'c1',
+        messageId: 'msg-9',
+        closedAt: new Date(),
+      });
+
+      await worker.drain();
+
+      expect(gateway.editChannelMessage).not.toHaveBeenCalled();
+    });
+
+    it('opens ONE thread, records it BEFORE pinging, and pings only the attendees', async () => {
+      queue([
+        job({
+          jobType: DiscordSyncJobType.EventThreadPing,
+          payload: { eventId: 'evt-1', minutesBefore: 15 },
+        }),
+      ]);
+      announcements.findDelivery.mockResolvedValue({
+        eventId: 'evt-1',
+        channelId: 'c1',
+        messageId: 'msg-9',
+        threadId: null,
+        closedAt: null,
+      });
+      announcements.pingTargets.mockResolvedValue(['u1', 'u2']);
+      gateway.createMessageThread.mockResolvedValue({ threadId: 'thread-7' });
+      gateway.sendChannelMessage.mockResolvedValue({ messageId: 'msg-10' });
+
+      await worker.drain();
+
+      expect(gateway.createMessageThread).toHaveBeenCalledWith('c1', 'msg-9', 'Line Battle');
+      // Recorded first: a crash between the two costs a missing ping, while the
+      // other order costs a SECOND thread — which Discord refuses outright.
+      expect(announcements.recordThread.mock.invocationCallOrder[0]).toBeLessThan(
+        gateway.sendChannelMessage.mock.invocationCallOrder[0],
+      );
+      const [target, content, embeds, extras] = gateway.sendChannelMessage.mock.calls[0];
+      expect(target).toBe('thread-7');
+      expect(content).toBe('<@u1> <@u2>');
+      // The ping is in the CONTENT (an embed never notifies) and the ids are
+      // named explicitly, which is the only thing that makes it notify.
+      expect(extras).toEqual({ mentions: { users: ['u1', 'u2'] } });
+      expect(embeds[0].title).toContain('Reminder');
+    });
+
+    it('never re-opens a thread on an announcement that already has one', async () => {
+      queue([job({ jobType: DiscordSyncJobType.EventThreadPing, payload: { eventId: 'evt-1' } })]);
+      announcements.findDelivery.mockResolvedValue({
+        eventId: 'evt-1',
+        channelId: 'c1',
+        messageId: 'msg-9',
+        threadId: 'thread-7',
+      });
+
+      await worker.drain();
+
+      expect(gateway.createMessageThread).not.toHaveBeenCalled();
+      expect(gateway.sendChannelMessage).not.toHaveBeenCalled();
+    });
+
+    it('disables the buttons on an ended event and stamps it closed AFTER the edit', async () => {
+      queue([
+        job({ jobType: DiscordSyncJobType.EventAnnouncementClose, payload: { eventId: 'evt-1' } }),
+      ]);
+      announcements.findDelivery.mockResolvedValue({
+        eventId: 'evt-1',
+        channelId: 'c1',
+        messageId: 'msg-9',
+        closedAt: null,
+      });
+
+      await worker.drain();
+
+      const update = gateway.editChannelMessage.mock.calls[0][2];
+      expect(update.components[0].buttons.every((b: { disabled: boolean }) => b.disabled)).toBe(
+        true,
+      );
+      // The roster survives — the announcement is the record of who turned out.
+      expect(update.embeds[0].fields).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: '✅ Attending — 1' })]),
+      );
+      // Stamped only once the edit landed, so a failed edit is retried rather
+      // than silently marked done.
+      expect(announcements.markClosed.mock.invocationCallOrder[0]).toBeGreaterThan(
+        gateway.editChannelMessage.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('still kills the buttons when the event itself is gone', async () => {
+      // A live control on an orphaned message is the one state that would let a
+      // press hit an event nothing can render.
+      queue([
+        job({ jobType: DiscordSyncJobType.EventAnnouncementClose, payload: { eventId: 'evt-1' } }),
+      ]);
+      announcements.findDelivery.mockResolvedValue({
+        eventId: 'evt-1',
+        channelId: 'c1',
+        messageId: 'msg-9',
+        closedAt: null,
+      });
+      announcements.loadEvent.mockResolvedValue(null);
+
+      await worker.drain();
+
+      const update = gateway.editChannelMessage.mock.calls[0][2];
+      expect(update.embeds).toBeUndefined();
+      expect(update.components[0].buttons.every((b: { disabled: boolean }) => b.disabled)).toBe(
+        true,
+      );
+      expect(announcements.markClosed).toHaveBeenCalledWith('evt-1');
+    });
+
+    it('re-runs a refresh or a close after an orphaned restart, but never a thread ping', async () => {
+      // Both edits recompose from the database and notify nobody, so re-running
+      // them converges. Opening a thread and pinging the attendees does not.
+      jobsRepo.find.mockResolvedValue([
+        job({ id: 'r1', jobType: DiscordSyncJobType.EventAnnouncementRefresh }),
+        job({ id: 'c1', jobType: DiscordSyncJobType.EventAnnouncementClose }),
+        job({ id: 't1', jobType: DiscordSyncJobType.EventThreadPing }),
+      ]);
+
+      await (worker as unknown as { reapOrphanedJobs(): Promise<void> }).reapOrphanedJobs();
+
+      const saved = jobsRepo.save.mock.calls.map(([j]) => j as DiscordSyncJob);
+      expect(saved.find((j) => j.id === 'r1')?.status).toBe(DiscordSyncJobStatus.Pending);
+      expect(saved.find((j) => j.id === 'c1')?.status).toBe(DiscordSyncJobStatus.Pending);
+      expect(saved.find((j) => j.id === 't1')?.status).toBe(DiscordSyncJobStatus.Failed);
     });
   });
 

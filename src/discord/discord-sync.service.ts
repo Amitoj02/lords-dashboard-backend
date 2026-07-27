@@ -9,12 +9,17 @@ import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { APPLICANT_RANK_NAME } from '../ranks/protected-ranks';
 import { Regiment } from '../regiments/entities/regiment.entity';
-import { RoleRelinkExpandPayload, RoleRelinkSubject } from './discord-job-payloads';
+import {
+  EventAnnouncePayload,
+  RoleRelinkExpandPayload,
+  RoleRelinkSubject,
+} from './discord-job-payloads';
+import { buildEventRsvpButtons } from './embeds/event-components';
+import { EventAnnouncementService } from './event-announcement.service';
 import {
   ApplicationDecisionOutcome,
   AuditSummary,
   EnlistmentSummary,
-  EventSummary,
   GallerySummary,
   RegimentBrand,
   buildAuditEmbed,
@@ -109,6 +114,10 @@ export class DiscordSyncService {
     // The regiment's name/crest/banner/accent tone brand every embed (T-0173).
     @InjectRepository(Regiment)
     private readonly regiments: Repository<Regiment>,
+    // The live state of an event announcement — its roster, and where the
+    // message that shows it lives (T-0205). Deliberately a one-way dependency:
+    // that service never calls back here, so the module graph stays acyclic.
+    private readonly announcements: EventAnnouncementService,
   ) {}
 
   /** Load (materialising defaults) the regiment's bot settings. */
@@ -126,8 +135,12 @@ export class DiscordSyncService {
    * Degrades rather than throws: a missing regiment row yields a neutral brand,
    * because a notification with a generic name is strictly better than a
    * notification that never goes out.
+   *
+   * Public since T-0205: the event-announcement jobs compose at DRAIN time, so
+   * the worker needs the same brand the enqueue side would have used. Sharing
+   * this one reader is what stops the two paths branding differently.
    */
-  private async resolveBrand(regimentId: string): Promise<RegimentBrand> {
+  async resolveBrand(regimentId: string): Promise<RegimentBrand> {
     const regiment = await this.regiments.findOne({ where: { id: regimentId } });
     return {
       name: regiment?.name ?? 'the regiment',
@@ -174,49 +187,136 @@ export class DiscordSyncService {
   }
 
   /**
-   * Enqueue an EVENT announcement (T-0044/T-0174): routes to the dedicated
-   * event-announcements channel. No-ops when that channel is unset (the general
-   * ad-hoc announcement path + its fallback channel were retired in T-0103).
+   * Enqueue an EVENT announcement (T-0044/T-0174/T-0205): routes to the
+   * dedicated event-announcements channel. No-ops when that channel is unset
+   * (the general ad-hoc announcement path + its fallback channel were retired in
+   * T-0103), and when the event is gone, drafted or archived.
    *
-   * ⚠️ The caller passes an {@link EventSummary}, which has NO field for the
-   * event's server password — so no code path can put one in a channel embed.
+   * ⚠️ The composer is handed an {@link EventSummary}, which has NO field for
+   * the event's server password — so no code path can put one in a channel
+   * embed.
+   *
+   * ── THE ONLY PLACE A ROLE IS EVER PINGED ────────────────────────────────────
+   * The event's `announceRoleId` becomes an `<@&id>` in the message CONTENT plus
+   * a matching allow-list entry. Neither the pre-event thread nor any re-render
+   * carries either, so an event produces exactly one role ping, at creation —
+   * whether it was created by hand or materialised by the recurrence sweep.
    */
-  async enqueueEventAnnounce(
-    regimentId: string,
-    event: EventSummary,
-  ): Promise<DiscordSyncJob | null> {
+  async enqueueEventAnnounce(regimentId: string, eventId: string): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
       const target = s.eventAnnouncementChannelId;
       if (!target) return null;
+      const event = await this.announcements.loadEvent(regimentId, eventId);
+      if (!event) return null;
       const brand = await this.resolveBrand(regimentId);
-      return this.insertJob(regimentId, DiscordSyncJobType.Announce, {
+      const summary = await this.announcements.summaryFor(event);
+      const payload: EventAnnouncePayload = {
+        channelId: target,
+        content: event.announceRoleId ? `<@&${event.announceRoleId}>` : '',
+        embed: buildEventEmbed(summary, brand),
+        eventId: event.id,
+        components: buildEventRsvpButtons(event.id),
+        mentions: event.announceRoleId ? { roles: [event.announceRoleId] } : null,
+      };
+      return this.insertJob(regimentId, DiscordSyncJobType.Announce, { ...payload });
+    });
+  }
+
+  /**
+   * Re-render an event announcement so its RSVP sections match reality (T-0205).
+   *
+   * ── COALESCED ON PURPOSE ────────────────────────────────────────────────────
+   * Button presses arrive in bursts — an announcement lands and twenty people
+   * answer within a minute — and each one would otherwise queue its own message
+   * edit. Discord rate-limits edits per channel, so that burst turns into 429s,
+   * retries and a visibly stale embed. Since the job recomposes from the
+   * DATABASE at drain time rather than from a frozen payload, one pending job
+   * already reflects every press made before it drains: a second is not merely
+   * wasteful, it is redundant by construction.
+   *
+   * The dedupe reads the payload's `eventId` out of the JSON column. There is no
+   * index for that, and there does not need to be one — the scan is over PENDING
+   * jobs of this one type, which is a handful of rows at any moment.
+   */
+  async enqueueEventAnnouncementRefresh(
+    regimentId: string,
+    eventId: string,
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async () => {
+      const pending = await this.jobs
+        .createQueryBuilder('job')
+        .where('job.regimentId = :regimentId', { regimentId })
+        .andWhere('job.jobType = :jobType', {
+          jobType: DiscordSyncJobType.EventAnnouncementRefresh,
+        })
+        .andWhere('job.status = :status', { status: DiscordSyncJobStatus.Pending })
+        .andWhere("JSON_UNQUOTE(JSON_EXTRACT(job.payload, '$.eventId')) = :eventId", { eventId })
+        .getCount();
+      if (pending > 0) return null;
+      return this.insertJob(regimentId, DiscordSyncJobType.EventAnnouncementRefresh, { eventId });
+    });
+  }
+
+  /**
+   * Enqueue the pre-event notification (T-0174/T-0205). Fired by the reminder
+   * scheduler from an `event_notify_offsets` row rather than by an authoring
+   * action, which is why it is a separate producer.
+   *
+   * ── TWO SHAPES, AND WHICH ONE YOU GET IS NOT A PREFERENCE ───────────────────
+   * When the event HAS a live announcement, this becomes a thread on that
+   * message which pings everyone who said they were coming. That is the whole
+   * point of the feature: it reaches the attendees without a single DM, and
+   * Discord treats unsolicited mass DMs as abuse.
+   *
+   * When it does NOT — the bot was off at creation, the channel was unset, the
+   * message failed to post — there is nothing to hang a thread on. It falls back
+   * to the plain reminder embed the channel has always received, and pings
+   * NOBODY: a list of forty mentions in the main channel is the noise the thread
+   * exists to contain, so degrading into it would be worse than degrading
+   * quietly.
+   */
+  async enqueueEventReminder(
+    regimentId: string,
+    eventId: string,
+    minutesBefore: number,
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      const event = await this.announcements.loadEvent(regimentId, eventId);
+      if (!event) return null;
+
+      const delivery = await this.announcements.findDelivery(eventId);
+      if (delivery && !delivery.threadId) {
+        return this.insertJob(regimentId, DiscordSyncJobType.EventThreadPing, {
+          eventId,
+          minutesBefore,
+        });
+      }
+
+      const target = s.eventAnnouncementChannelId;
+      if (!target) return null;
+      const brand = await this.resolveBrand(regimentId);
+      const summary = await this.announcements.summaryFor(event);
+      return this.insertJob(regimentId, DiscordSyncJobType.EventReminder, {
         channelId: target,
         content: '',
-        embed: buildEventEmbed(event, brand),
+        embed: buildEventEmbed(summary, brand, { minutesBefore }),
       });
     });
   }
 
   /**
-   * Enqueue an event REMINDER (T-0174) — the same event, a distinct message.
-   * Fired by the reminder scheduler from an `event_notify_offsets` row rather
-   * than by an authoring action, which is why it is a separate producer and a
-   * separate job type.
+   * Retire an ended event's RSVP buttons (T-0205). No-ops when the event was
+   * never announced or its announcement is already closed — the sweep that calls
+   * this runs every minute forever, so "already done" has to be cheap and silent.
    */
-  async enqueueEventReminder(
+  async enqueueEventAnnouncementClose(
     regimentId: string,
-    event: EventSummary,
-    minutesBefore: number,
+    eventId: string,
   ): Promise<DiscordSyncJob | null> {
-    return this.guarded(regimentId, async (s) => {
-      const target = s.eventAnnouncementChannelId;
-      if (!target) return null;
-      const brand = await this.resolveBrand(regimentId);
-      return this.insertJob(regimentId, DiscordSyncJobType.EventReminder, {
-        channelId: target,
-        content: '',
-        embed: buildEventEmbed(event, brand, { minutesBefore }),
-      });
+    return this.guarded(regimentId, async () => {
+      const delivery = await this.announcements.findDelivery(eventId);
+      if (!delivery || delivery.closedAt) return null;
+      return this.insertJob(regimentId, DiscordSyncJobType.EventAnnouncementClose, { eventId });
     });
   }
 

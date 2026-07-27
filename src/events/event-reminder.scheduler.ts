@@ -1,11 +1,8 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Repository } from 'typeorm';
-import { RsvpStatus } from '../common/enums';
+import { IsNull, Repository } from 'typeorm';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
-import { EventRsvp } from './entities/event-rsvp.entity';
-import { toEventSummary } from './event-summary';
 
 /** How often the reminder sweep runs. One minute is the offsets' own resolution. */
 const TICK_INTERVAL_MS = 60_000;
@@ -51,6 +48,14 @@ const BATCH_SIZE = 50;
  *
  * Retired offsets are stamped with the same `sent_at`, so they are resolved for
  * good rather than re-evaluated on the next tick.
+ *
+ * ── WHAT A REMINDER ACTUALLY IS NOW (T-0205) ────────────────────────────────
+ * This sweep still decides WHEN; it no longer decides WHAT. When the event has a
+ * live announcement, the enqueue turns into a thread opened on that message,
+ * pinging only the members who said they were coming — which is how the app
+ * reaches attendees without DM'ing them, something Discord's policy treats as
+ * abuse at any useful scale. The announcement's own ping role is NOT re-pinged;
+ * it fired once, at creation, and this is not creation.
  */
 @Injectable()
 export class EventReminderScheduler implements OnModuleInit, OnModuleDestroy {
@@ -60,8 +65,6 @@ export class EventReminderScheduler implements OnModuleInit, OnModuleDestroy {
   constructor(
     @InjectRepository(EventNotifyOffset)
     private readonly offsets: Repository<EventNotifyOffset>,
-    @InjectRepository(EventRsvp)
-    private readonly rsvps: Repository<EventRsvp>,
     private readonly discordSync: DiscordSyncService,
   ) {}
 
@@ -127,12 +130,7 @@ export class EventReminderScheduler implements OnModuleInit, OnModuleDestroy {
         );
         continue;
       }
-      const rsvpCount = await this.countRsvps(eventId);
-      await this.discordSync.enqueueEventReminder(
-        event.regimentId,
-        toEventSummary(event, rsvpCount),
-        nearest.minutes,
-      );
+      await this.discordSync.enqueueEventReminder(event.regimentId, eventId, nearest.minutes);
       enqueued++;
     }
     return enqueued;
@@ -178,12 +176,5 @@ export class EventReminderScheduler implements OnModuleInit, OnModuleDestroy {
       { sentAt: now },
     );
     return (result.affected ?? 0) === 1;
-  }
-
-  /** How many members have said they are coming (interested or tentative). */
-  private countRsvps(eventId: string): Promise<number> {
-    return this.rsvps.count({
-      where: { eventId, status: In([RsvpStatus.Interested, RsvpStatus.Tentative]) },
-    });
   }
 }

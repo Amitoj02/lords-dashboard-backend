@@ -450,6 +450,7 @@ Collapses the stub's split `date` + `HH:mm` + tz into UTC datetimes; multi-value
 | `timezone` | varchar(40) NOT NULL DEFAULT `'UTC'` | display tz |
 | `is_recurring` | boolean NOT NULL DEFAULT false | resolves model(string) vs form(boolean) conflict |
 | `recurrence_rule` | varchar(120) NULL | `None`/`Weekly`/`Monthly` or RRULE |
+| `announce_role_id` | varchar(20) NULL | Discord role pinged **once**, when the announcement is posted (T-0205). Cloned onto every generated recurrence occurrence, so each occurrence pings once |
 | `server_name` | varchar(120) NULL | |
 | `server_password` | text NULL | **AES-256-GCM encrypted; never in public/unauth responses; reveal is audited** |
 | `server_region` | varchar(40) NULL | |
@@ -526,6 +527,29 @@ PK: `(event_id, minutes)`.
 > produces one honest "starts soon" rather than a burst of stale reminders. An author re-saving the
 > same lead times mid-event carries `sent_at` across the wipe-and-rewrite rather than resurrecting a
 > spent offset.
+
+#### `event_announcements` (1—1 with `events`, PK = FK)
+Where an event's Discord announcement actually **landed** (T-0205). Written by the outbox worker
+after the post succeeds, so a row's *presence* is the answer to "has this been announced?".
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `event_id` | char(12) PK | FK → `events.id`, `ON DELETE CASCADE` |
+| `channel_id` | varchar(20) NOT NULL | the channel **at post time** — an admin may re-point the setting later, but the message does not move |
+| `message_id` | varchar(20) NOT NULL | the announcement itself: the anchor for every re-render and for the thread |
+| `thread_id` | varchar(20) NULL | the pre-event thread, once opened. Also the once-only guard on the ping |
+| `closed_at` | datetime(6) NULL | when the RSVP buttons were disabled because the event ended |
+| `created_at` | datetime(6) NOT NULL | |
+
+> This is **delivery state, not event state**, which is why it is a table and not four nullable
+> columns on `events`: it exists only once a message has really been posted, it is written by the
+> bot rather than by an author, and an event created while the bot was off has none of it.
+>
+> The announcement is the RSVP surface. Its embed carries three sections — **Attending / Tentative /
+> Declined** — rendered from `event_rsvps`, and three buttons that write back to the same table. A
+> press is authorised through `SessionContextService` + the `rsvp_to_events` capability, exactly as
+> the HTTP route is, so a banned member cannot RSVP by pressing a button. Buttons stay **live** until
+> the event ends; `closed_at` is what stops the retirement sweep revisiting an announcement forever.
 
 ---
 
@@ -784,6 +808,7 @@ members ─1:*─ account_deletion_requests
 events ─1:*─ event_rsvps ─*:1─ members
 events ─*:*─ members            (via event_attendees)
 events ─1:*─ {event_platforms, event_tags, event_notify_offsets}
+events ─1:0..1─ event_announcements  (delivery state: where the Discord post landed)
 events ─1:*─ gallery_items (optional link)
 
 gallery_items ─1:*─ gallery_files
