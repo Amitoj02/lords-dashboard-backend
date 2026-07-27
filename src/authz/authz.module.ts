@@ -6,6 +6,7 @@ import { Member } from '../members/entities/member.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { AuthzService } from './authz.service';
 import { RolePermission } from './entities/role-permission.entity';
+import { AnyCapabilityGuard } from './guards/any-capability.guard';
 import { CapabilitiesGuard } from './guards/capabilities.guard';
 
 /**
@@ -22,7 +23,7 @@ import { CapabilitiesGuard } from './guards/capabilities.guard';
 @Global()
 @Module({
   imports: [TypeOrmModule.forFeature([RolePermission, DiscordIdentity, Member, Regiment])],
-  providers: [AuthzService, CapabilitiesGuard, SessionContextService],
-  exports: [AuthzService, CapabilitiesGuard, SessionContextService],
+  providers: [AuthzService, CapabilitiesGuard, AnyCapabilityGuard, SessionContextService],
+  exports: [AuthzService, CapabilitiesGuard, AnyCapabilityGuard, SessionContextService],
 })
 export class AuthzModule {}
