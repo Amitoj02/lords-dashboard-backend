@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "fc9bd335990e0466f7260d8d71600e746d2b9370",
-  "lastSyncedAt": "2026-07-27T15:30:00Z",
-  "notesForNextSession": "LATEST SESSION (T-0203): a one-rule change to the member role grant ceiling, straight from the owner. \"Manage roles\" in the permission matrix now means what it reads like: a role that holds it can appoint its OWN tier - an Admin can add another Admin, a Moderator another Moderator. Before, the ceiling was strictly-below (LDA-M4), so enabling the capability for Admin bought them everything EXCEPT the thing an owner would enable it for. *** WHAT DID NOT CHANGE, AND MUST NOT DRIFT: *** the TARGET hierarchy. Appointing a peer is additive; moderating one is not. So the Admin who just promoted somebody to Admin cannot demote, suspend or ban them - permittedActions reports every action false and the endpoints 403. The promotion is ONE-WAY for everyone but the Owner, which is the intended trade and is pinned by tests in both repos. Escalation is still shut: canGrantRole caps at the caller's own tier, and because every appointee inherits the same cap, no chain of appointments climbs - a Moderator cannot produce an Admin by any route. Owner is refused before the ceiling is even consulted (no API path assigns ownership). CROSS-REPO: the frontend mirrors the ceiling in assignableRolesFor(), so the backend alone would have been invisible in the UI - lords-regiment-dashboard T-0283 ships the dropdown half on a branch of the same name. Merge order does not matter (the server is authoritative; a client that offers too little just under-offers). INERT ON DEPLOY: the seeded matrix grants manage_roles to Owner ONLY and is insert-only, so nothing changes until an owner ticks the box in Settings -> Permissions. When they do, note the open regression risk on T-0203: enabling manage_roles is now a bigger delegation than it was, and the settings copy does not say so.",
-  "nextIdCounter": 204,
+  "lastSyncedCommit": "409720bd2db148f136b704916eda5cd6e5ce3348",
+  "lastSyncedAt": "2026-07-27T16:40:00Z",
+  "notesForNextSession": "LATEST SESSION (T-0204): the repair for what T-0202 was too late for. T-0202 made ENLISTMENT learn from Discord; every member approved before that (or while the gateway was down, or before the rank/medal role links existed) is still sitting at the entry rank with none of their decorations, and the reconcile already ate the roles that recorded them. POST /members/:id/derive-from-discord is the manual repair, and the rules that keep it safe ARE the design: PROMOTION-ONLY (the member's current rank precedence is the floor), ADDITIVE-ONLY on medals, IDEMPOTENT (awards diffed against member_medals), and NEVER ON YOURSELF. *** THE SELF-REFUSAL IS THE LOAD-BEARING ONE. *** A derive grants whatever the target's guild roles say, so on your own record it is a self-promotion available to anyone who can get a role onto their own account - the same LDA-H1 shape as the re-link actor exclusion. It comes for free ONLY because the action was added to MEMBER_ADMIN_ACTIONS rather than given its own bespoke guard; keep it there. Adding it also made the exhaustive Record<MemberAdminAction, ...> matrices in members.service.spec and member-hierarchy.e2e-spec fail to COMPILE until they covered it, which is that mechanism working as designed - do not weaken those types. DiscordRoleAdoptionService now has TWO readers: resolveFromGuild() (swallows everything, for enlistment) and readGuildState() (states the reason, for the button). Do not collapse them - the enlistment must never fail on a gateway hiccup, and the admin must never be told 'nothing to derive' when the bot is simply switched off. CROSS-REPO: the button, its hint and the success snackbars are lords-regiment-dashboard T-0284 on a branch of the same name; permittedActions grew a ninth flag, so the two ship together. OPEN RISK worth reading before the next deploy: the derive enqueues a reconcile, which will strip a managed role the roster deliberately did NOT adopt - a button named 'derive from Discord' also writes to Discord, and its hint does not say so.",
+  "nextIdCounter": 205,
   "connections": [],
   "tasks": [
     {
@@ -14119,7 +14119,119 @@
           "note": "owner request: \"Manage roles\" should let a role promote others to its own level. Implemented on feat/manage-roles-grant-own-tier; local CI green (886 unit, 126 e2e); PR opened against dev."
         }
       ]
+    },
+    {
+      "id": "T-0204",
+      "title": "Derive an existing member's rank and medals from their Discord roles",
+      "summary": "*** T-0202 FIXED ENLISTMENT GOING FORWARD AND NOTHING FOR THE PEOPLE ALREADY ON THE ROSTER. *** Anyone approved before it shipped - or while the gateway was unreachable, or before an admin had linked the rank/medal roles at all - was enlisted at the entry rank with no decorations, and the reconcile then stripped the guild roles that were the only record of them. This is the repair, run one member at a time by someone who can see the result: POST /members/:id/derive-from-discord reads that member's CURRENT guild roles through the same DiscordRoleAdoptionService the enlistment uses, and writes what it finds onto their record. PROMOTION-ONLY (their current rank is the floor, so a drifted guild can never demote), ADDITIVE-ONLY on medals (a missing role is not a retraction), and IDEMPOTENT (awards are diffed against member_medals, so a second press credits nothing twice and says so). NEVER ON YOURSELF: it is a ninth MEMBER_ADMIN_ACTION, so the shared hierarchy guard refuses self/owner/peer for free - which matters here because a derive hands out whatever the target's roles say, making a self-derive a self-promotion available to anyone who can get a role onto their own account (LDA-H1). The adoption service gained readGuildState(), a strict sibling of resolveFromGuild() that SAYS WHY it came back empty (not-linked / bot-disabled / not-in-guild / unreachable) - an enlistment is right to shrug a failed read off, but an admin pressing a button must not read a switched-off bot as \"this member earned nothing\". Finding nothing is a 200 with an empty result and a summary saying so; the reasons are 409 (fixable state) and 503 (Discord did not answer). The server authors one human sentence that is written to the audit detail AND returned for the client to show.",
+      "status": "review",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "discord-history-carry-over",
+      "repo": "",
+      "paths": [
+        "src/discord/discord-role-adoption.service.ts",
+        "src/discord/discord-role-adoption.service.spec.ts",
+        "src/members/member-hierarchy.ts",
+        "src/members/members.service.ts",
+        "src/members/members.service.spec.ts",
+        "src/members/members.controller.ts",
+        "src/members/dto/member-admin.dto.ts",
+        "src/members/dto/member.dto.ts",
+        "src/database/seeds/audit-actions.seed.ts",
+        "test/discord.e2e-spec.ts",
+        "test/member-hierarchy.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0202",
+        "T-0176",
+        "T-0177"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "adopts the rank + awards only the medals the roster is missing, with service entries, audit row and a role sync",
+          "status": "passed"
+        },
+        {
+          "desc": "the member's current rank precedence is passed as the floor; a rankless member gets Infinity",
+          "status": "passed"
+        },
+        {
+          "desc": "a second press finds nothing, writes nothing, and enqueues no sync",
+          "status": "passed"
+        },
+        {
+          "desc": "each failed read has its own status and sentence, and writes nothing",
+          "status": "passed"
+        },
+        {
+          "desc": "the hierarchy guard runs BEFORE Discord is read, so a refused derive asks the guild nothing",
+          "status": "passed"
+        },
+        {
+          "desc": "readGuildState distinguishes 'in the guild wearing nothing' (ok) from 'not in the guild' (failure), without catalogue queries",
+          "status": "passed"
+        },
+        {
+          "desc": "the whole T-0176/T-0177 matrix now covers the new action for free (self/owner/peer refusals, flag-matches-guard walk)",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e against real MySQL: approve with nothing linked, link afterwards, derive, and the roles survive a full drain",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: derive on your own record 403s; with the bot off it 409s",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "MEMBER_ADMIN_ACTIONS gained a ninth entry, so PermittedActionsDto grew a field and every consumer of the block sees it. The exhaustive Record<> types in the unit + e2e hierarchy matrices forced both to cover it (they failed to compile until they did), and the frontend mirror was updated in the same change - but any other reader of permittedActions that enumerates keys should be checked.",
+          "status": "open",
+          "notedAt": "2026-07-27T16:40:00Z"
+        },
+        {
+          "desc": "A rank/medal role granted in Discord by mistake becomes real roster state the moment an admin presses this. The precedence floor, the protected-rank exclusions and the self-refusal bound it, but the button trusts the guild's role assignments by design - and unlike the enlistment carry-over, it can be aimed at any member at any time.",
+          "status": "open",
+          "notedAt": "2026-07-27T16:40:00Z"
+        },
+        {
+          "desc": "The derive enqueues a reconcile, which will STRIP a managed role the roster deliberately did not adopt (a protected-rank role, or a rank role below the member's current one). That is the same reconcile any rank change already triggers, but a button labelled 'derive FROM Discord' also writing TO Discord is not obvious from its name or its hint.",
+          "status": "open",
+          "notedAt": "2026-07-27T16:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "No bulk/whole-roster derive - it is deliberately one member at a time, so an admin sees each result before the next.",
+        "Medals are still one award per medal: a role is a boolean and cannot say a medal was earned three times.",
+        "Did not add a roster-row-specific affordance; both mount points render the same modal, so the button is in the ... menu too, but nothing was added there.",
+        "Did not add a way to derive a member who has left the guild or never linked Discord - both are reported as refusals, because there is genuinely nothing to read."
+      ],
+      "lastTouchedCommit": "409720bd2db148f136b704916eda5cd6e5ce3348",
+      "createdAt": "2026-07-27T16:40:00Z",
+      "updatedAt": "2026-07-27T16:40:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T16:40:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner report: members missed ranks and medals because of earlier bugs. Implemented on feat/derive-member-data-from-discord; local CI green (909 unit, 133 e2e); verified in the running dev app (button, hint, refusal snackbar). PR opened against dev."
+        }
+      ]
     }
   ],
-  "history": []
+  "history": [
+    {
+      "at": "2026-07-27T16:40:00Z",
+      "by": "claude",
+      "note": "T-0204 created and implemented in one session (owner-reported bug); state synced at PR time."
+    }
+  ]
 }
