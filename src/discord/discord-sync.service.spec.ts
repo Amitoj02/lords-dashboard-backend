@@ -4,13 +4,17 @@ import { DiscordSyncJobStatus, DiscordSyncJobType } from '../common/enums';
 import { Member } from '../members/entities/member.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
+import { RegimentEvent } from '../events/entities/event.entity';
+import { EventAnnouncePayload } from './discord-job-payloads';
 import { DiscordSyncService, EventSummary, RoleRelinkPayload } from './discord-sync.service';
+import { EventAnnouncementService } from './event-announcement.service';
 import { DiscordEmbed } from './gateway/discord-gateway';
 import { DiscordBotSettings } from './entities/discord-bot-settings.entity';
 import { DiscordSyncJob } from './entities/discord-sync-job.entity';
 
 const REGIMENT = 'regiment-1';
 const USER_ID = '900900900900900900';
+const EVENT_ID = 'evt000000001';
 
 const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettings => ({
   regimentId: REGIMENT,
@@ -69,9 +73,34 @@ describe('DiscordSyncService', () => {
     timezone: 'America/Toronto',
     bannerUrl: 'https://cdn.example.com/banner.png',
     eventType: 'One-off',
-    rsvpCount: 12,
+    roster: { attending: ['<@1>', 'Nolt'], tentative: ['<@2>'], declined: [] },
     ...overrides,
   });
+
+  /** The event ROW the producer reads back before composing (T-0205). */
+  const eventRow = (overrides: Partial<RegimentEvent> = {}) =>
+    ({
+      id: EVENT_ID,
+      regimentId: REGIMENT,
+      title: 'Line Battle',
+      announceRoleId: null,
+      ...overrides,
+    }) as RegimentEvent;
+
+  /**
+   * The announcement reader, stubbed. The producer no longer takes a projection
+   * — it takes an id and asks this service what the event looks like RIGHT NOW,
+   * which is what lets a re-render see RSVPs made after the job was queued.
+   */
+  const announcements = {
+    loadEvent: jest.fn(),
+    summaryFor: jest.fn(),
+    findDelivery: jest.fn(),
+    pingTargets: jest.fn(),
+    recordDelivery: jest.fn(),
+    recordThread: jest.fn(),
+    markClosed: jest.fn(),
+  };
 
   /** The re-link holder query: a chainable builder over a fixed holder list. */
   let holdersQb: Record<string, jest.Mock>;
@@ -102,8 +131,13 @@ describe('DiscordSyncService', () => {
       select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
+      getCount: jest.fn().mockResolvedValue(0),
       getRawMany: jest.fn().mockResolvedValue([]),
     });
+    announcements.loadEvent.mockResolvedValue(eventRow());
+    announcements.summaryFor.mockResolvedValue(event());
+    announcements.findDelivery.mockResolvedValue(null);
+    announcements.pingTargets.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         DiscordSyncService,
@@ -112,6 +146,7 @@ describe('DiscordSyncService', () => {
         { provide: getRepositoryToken(Member), useValue: membersRepo },
         { provide: getRepositoryToken(Rank), useValue: ranksRepo },
         { provide: getRepositoryToken(Regiment), useValue: regimentsRepo },
+        { provide: EventAnnouncementService, useValue: announcements },
       ],
     }).compile();
     service = module.get(DiscordSyncService);
@@ -123,7 +158,7 @@ describe('DiscordSyncService', () => {
         settings({ botEnabled: false, eventAnnouncementChannelId: 'evt-1' }),
       );
       expect(await service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).toBeNull();
-      expect(await service.enqueueEventAnnounce(REGIMENT, event())).toBeNull();
+      expect(await service.enqueueEventAnnounce(REGIMENT, EVENT_ID)).toBeNull();
       expect(jobsRepo.save).not.toHaveBeenCalled();
     });
   });
@@ -355,15 +390,84 @@ describe('DiscordSyncService', () => {
 
     it('routes an event announce to the event channel, and no-ops when it is unset', async () => {
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
-      await service.enqueueEventAnnounce(REGIMENT, event());
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
       expect(jobsRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({ payload: expect.objectContaining({ channelId: 'evt-1' }) }),
       );
 
       jest.clearAllMocks();
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: null }));
-      expect(await service.enqueueEventAnnounce(REGIMENT, event())).toBeNull();
+      expect(await service.enqueueEventAnnounce(REGIMENT, EVENT_ID)).toBeNull();
       expect(jobsRepo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('announcement re-render + close (T-0205)', () => {
+    /** The coalescing probe: how many matching PENDING refresh jobs exist. */
+    const pendingRefreshes = (count: number) => {
+      jobsRepo.createQueryBuilder.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getCount: jest.fn().mockResolvedValue(count),
+        getRawMany: jest.fn().mockResolvedValue([]),
+      });
+    };
+
+    it('carries ONLY the event id, so the roster is read at drain time', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      pendingRefreshes(0);
+
+      await service.enqueueEventAnnouncementRefresh(REGIMENT, EVENT_ID);
+
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.EventAnnouncementRefresh,
+          payload: { eventId: EVENT_ID },
+        }),
+      );
+    });
+
+    it('COALESCES: a second refresh while one is still pending is dropped', async () => {
+      // Twenty people answering an announcement in a minute would otherwise queue
+      // twenty message edits into Discord's per-channel rate limit. One pending
+      // job already reflects every press before it drains, because it recomposes
+      // from the database rather than from a frozen payload.
+      settingsRepo.findOne.mockResolvedValue(settings());
+      pendingRefreshes(1);
+
+      expect(await service.enqueueEventAnnouncementRefresh(REGIMENT, EVENT_ID)).toBeNull();
+      expect(jobsRepo.create).not.toHaveBeenCalled();
+    });
+
+    it('closes an announcement once, and never one that was never posted', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      announcements.findDelivery.mockResolvedValue(null);
+      expect(await service.enqueueEventAnnouncementClose(REGIMENT, EVENT_ID)).toBeNull();
+
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, closedAt: new Date() });
+      expect(await service.enqueueEventAnnouncementClose(REGIMENT, EVENT_ID)).toBeNull();
+      expect(jobsRepo.create).not.toHaveBeenCalled();
+
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, closedAt: null });
+      expect(await service.enqueueEventAnnouncementClose(REGIMENT, EVENT_ID)).not.toBeNull();
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ jobType: DiscordSyncJobType.EventAnnouncementClose }),
+      );
+    });
+
+    it('does not re-open a thread for an event that already has one', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, threadId: 'thread-1' });
+
+      await service.enqueueEventReminder(REGIMENT, EVENT_ID, 15);
+
+      // Falls through to the plain channel reminder rather than queuing a second
+      // thread — Discord refuses one, and the retry would fail permanently.
+      expect((jobsRepo.create.mock.calls[0][0] as { jobType: DiscordSyncJobType }).jobType).toBe(
+        DiscordSyncJobType.EventReminder,
+      );
     });
   });
 
@@ -657,10 +761,10 @@ describe('DiscordSyncService', () => {
       expect(embed.fields?.[0]).toEqual(expect.objectContaining({ value: 'Off-topic' }));
     });
 
-    it('announces an event with a relative timestamp, the banner and the RSVP count', async () => {
+    it('announces an event with a relative timestamp, the banner and the RSVP sections', async () => {
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
 
-      await service.enqueueEventAnnounce(REGIMENT, event());
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
 
       const embed = savedEmbed();
       expect(embed.title).toBe('📅 New event: Line Battle');
@@ -671,13 +775,66 @@ describe('DiscordSyncService', () => {
       // The wall clock is rendered in the EVENT's zone, never the process zone.
       expect(fields.Starts).toContain('15:00');
       expect(fields.Duration).toBe('2h');
-      expect(fields.RSVPs).toBe('12');
+      expect(fields['✅ Attending — 2']).toBe('<@1>, Nolt');
+      expect(fields['❔ Tentative — 1']).toBe('<@2>');
+      // Rendered even when empty: a section that vanished would make the embed's
+      // shape jump on the first press.
+      expect(fields['❌ Declined — 0']).toBe('—');
+    });
+
+    it('attaches the three RSVP buttons, live, to the announcement', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
+
+      const payload = (
+        jobsRepo.create.mock.calls[0][0] as unknown as { payload: EventAnnouncePayload }
+      ).payload;
+      expect(payload.components?.[0].buttons.map((b) => b.label)).toEqual([
+        'Attending',
+        'Tentative',
+        'Declined',
+      ]);
+      // Live, always: changing your mind is the normal case, so a press must not
+      // be the last word.
+      expect(payload.components?.[0].buttons.every((b) => b.disabled === false)).toBe(true);
+      expect(payload.components?.[0].buttons.map((b) => b.customId)).toEqual([
+        `event-rsvp:interested:${EVENT_ID}`,
+        `event-rsvp:tentative:${EVENT_ID}`,
+        `event-rsvp:declined:${EVENT_ID}`,
+      ]);
+    });
+
+    it('pings the announce role EXACTLY ONCE — on the announcement, never the reminder', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+      announcements.loadEvent.mockResolvedValue(eventRow({ announceRoleId: '777000000000000001' }));
+
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
+      const announce = (
+        jobsRepo.create.mock.calls[0][0] as unknown as { payload: EventAnnouncePayload }
+      ).payload;
+      // The mention text is in the CONTENT (an embed never pings) and the role is
+      // named in the allow-list, which is the only thing that makes it notify.
+      expect(announce.content).toBe('<@&777000000000000001>');
+      expect(announce.mentions).toEqual({ roles: ['777000000000000001'] });
+
+      // The lead-time notification is a THREAD ping (there is a live
+      // announcement), and it must not re-ping the role.
+      announcements.findDelivery.mockResolvedValue({ eventId: EVENT_ID, threadId: null });
+      await service.enqueueEventReminder(REGIMENT, EVENT_ID, 60);
+      const reminder = jobsRepo.create.mock.calls[1][0] as {
+        jobType: DiscordSyncJobType;
+        payload: Record<string, unknown>;
+      };
+      expect(reminder.jobType).toBe(DiscordSyncJobType.EventThreadPing);
+      expect(JSON.stringify(reminder.payload)).not.toContain('777000000000000001');
     });
 
     it('posts a valid embed with no image when the event has no banner', async () => {
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+      announcements.summaryFor.mockResolvedValue(event({ bannerUrl: null }));
 
-      await service.enqueueEventAnnounce(REGIMENT, event({ bannerUrl: null }));
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
 
       expect(savedEmbed().imageUrl).toBeUndefined();
       expect(savedEmbed().title).toBe('📅 New event: Line Battle');
@@ -689,23 +846,28 @@ describe('DiscordSyncService', () => {
       // gate. EventSummary structurally cannot carry it — this pins that even if
       // a caller tries to smuggle one through.
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
-
-      await service.enqueueEventAnnounce(REGIMENT, {
+      announcements.summaryFor.mockResolvedValue({
         ...event({ description: 'Muster at the bridge.' }),
         serverPassword: 'hunter2',
         serverName: 'Lords Official',
-      } as unknown as EventSummary);
+      });
+
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
 
       const serialised = JSON.stringify(jobsRepo.create.mock.calls[0][0]);
       expect(serialised).not.toContain('hunter2');
       expect(serialised).not.toContain('serverPassword');
     });
 
-    it('makes a reminder visually distinct from the original announcement', async () => {
+    it('falls back to a plain reminder embed when the event was never announced', async () => {
+      // No announcement means no message to hang a thread on. Degrading into a
+      // channel-wide list of mentions would be the noise the thread exists to
+      // contain, so it degrades to the reminder the channel always got instead.
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: 'evt-1' }));
+      announcements.findDelivery.mockResolvedValue(null);
 
-      await service.enqueueEventAnnounce(REGIMENT, event());
-      await service.enqueueEventReminder(REGIMENT, event(), 60);
+      await service.enqueueEventAnnounce(REGIMENT, EVENT_ID);
+      await service.enqueueEventReminder(REGIMENT, EVENT_ID, 60);
 
       const announce = savedEmbed(0);
       const reminder = savedEmbed(1);

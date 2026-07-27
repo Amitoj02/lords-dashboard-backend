@@ -26,6 +26,7 @@ import {
   ChangeRoleDto,
   ConfirmDeletionDto,
   DeletionRequestDto,
+  DeriveFromDiscordResultDto,
   SuspendMemberDto,
 } from './dto/member-admin.dto';
 import { EventDto } from '../events/dto/event.dto';
@@ -197,7 +198,9 @@ export class MembersController {
     summary: "Change a member's role",
     description:
       'Forbidden against the regiment owner, the caller themselves, and any member ' +
-      'whose role equals or outranks the caller (T-0176).',
+      'whose role equals or outranks the caller (T-0176). The role granted is capped ' +
+      "at the caller's own tier — an Admin holding manage_roles may appoint another " +
+      'Admin, but never a superior (T-0203). Owner is never assignable here.',
   })
   @ApiOkResponse({ type: MemberDto })
   changeRole(
@@ -235,6 +238,32 @@ export class MembersController {
     @Req() req: Request,
   ): Promise<MemberDto> {
     return this.membersService.removeMedal(id, medalId, user, req.ip ?? null);
+  }
+
+  @Post(':id/derive-from-discord')
+  @HttpCode(HttpStatus.OK)
+  @RequireCapability(Capability.EditRanksMedals)
+  @ApiOperation({
+    summary: "Derive a member's rank and medals from the Discord roles they already hold",
+    description:
+      'The repair for members whose history only ever existed as Discord roles (T-0204). ' +
+      'Promotion-only (their current rank is the floor) and additive-only on medals, ' +
+      'diffed against what they already hold so it is safe to press twice. Refused on ' +
+      "your own record — a derive hands out whatever the target's roles say, so on " +
+      'yourself it is a self-promotion. 409 when there is nothing to read from ' +
+      '(no linked account, bot switched off, not in the guild); 503 when Discord did ' +
+      'not answer. Finding nothing to derive is a 200.',
+  })
+  @ApiOkResponse({
+    description: 'What was derived, plus the member as they now stand',
+    type: DeriveFromDiscordResultDto,
+  })
+  deriveFromDiscord(
+    @Param('id', ParseShortIdPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ): Promise<DeriveFromDiscordResultDto> {
+    return this.membersService.deriveFromDiscord(id, user, req.ip ?? null);
   }
 
   @Post(':id/suspend')

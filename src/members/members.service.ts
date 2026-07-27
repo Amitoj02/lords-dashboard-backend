@@ -3,8 +3,10 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -15,6 +17,10 @@ import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { AuthzService } from '../authz/authz.service';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { DiscordSyncService } from '../discord/discord-sync.service';
+import {
+  AdoptionUnavailableReason,
+  DiscordRoleAdoptionService,
+} from '../discord/discord-role-adoption.service';
 import {
   AccountDeletionStatus,
   Capability,
@@ -36,7 +42,7 @@ import {
   MEMBER_ADMIN_CAPABILITIES,
   MemberAdminAction,
   assertCanActOn,
-  outranks,
+  canGrantRole,
   permittedActions,
 } from './member-hierarchy';
 import {
@@ -46,6 +52,7 @@ import {
   ChangeRoleDto,
   ConfirmDeletionDto,
   DeletionRequestDto,
+  DeriveFromDiscordResultDto,
   SuspendMemberDto,
 } from './dto/member-admin.dto';
 import { CommandInfoDto, ServiceRecordEntryDto } from './dto/member-detail.dto';
@@ -53,6 +60,53 @@ import { UpdateMemberDto } from './dto/update-member.dto';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { Member } from './entities/member.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
+
+/**
+ * Written onto every award and service-record entry a derive creates (T-0204),
+ * so nobody later mistakes a decoration inferred from a Discord role for one an
+ * officer sat down and awarded. Deliberately worded like the enlistment
+ * carry-over's own marker — same provenance, different moment.
+ */
+const DERIVED_DETAIL = 'Derived from their existing Discord roles';
+
+/** One human sentence naming what a derive applied — audited AND shown to the admin. */
+function describeDerived(name: string, rank: Rank | null, medals: Medal[]): string {
+  const parts: string[] = [];
+  if (rank) parts.push(`promoted to ${rank.name}`);
+  // Named rather than counted: the admin pressed a button without knowing what
+  // it would do, so the answer has to be specific enough to check.
+  if (medals.length) parts.push(`awarded ${medals.map((medal) => medal.title).join(', ')}`);
+  return `Derived from Discord: ${name} ${parts.join(' and ')}.`;
+}
+
+/**
+ * Turn a failed guild read into the answer the admin gets. Each reason is a
+ * different thing for them to go and do, so each gets its own sentence and its
+ * own status — 409 for a state they can fix (link an account, switch the bot on),
+ * 503 for a Discord that simply did not answer and may on the next press.
+ */
+function deriveUnavailable(reason: AdoptionUnavailableReason, name: string): HttpException {
+  switch (reason) {
+    case 'not-linked':
+      return new ConflictException(
+        `${name} has not linked a Discord account, so there are no roles to read. ` +
+          'They need to sign in with Discord first.',
+      );
+    case 'bot-disabled':
+      return new ConflictException(
+        'The Discord bot is switched off for this regiment, so its roles are not being ' +
+          'maintained. Enable it under Settings → Discord, then try again.',
+      );
+    case 'not-in-guild':
+      return new ConflictException(
+        `${name} is not in the regiment's Discord server, so there are no roles to read.`,
+      );
+    case 'unreachable':
+      return new ServiceUnavailableException(
+        'Could not reach Discord to read their roles. Try again in a moment.',
+      );
+  }
+}
 
 /**
  * Roster read/profile + admin actions. Every query is scoped to the caller's
@@ -85,6 +139,10 @@ export class MembersService {
     // Best-effort Discord side effects (role sync / ban role). Every call no-ops
     // unless the bot is enabled and the relevant switch is on; never throws.
     private readonly discordSync: DiscordSyncService,
+    // Reads a member's CURRENT guild roles so an admin can pull the rank and
+    // medals they already wear onto the roster (T-0204) — the same reader an
+    // enlistment uses, asked for its failure reasons instead of its shrug.
+    private readonly roleAdoption: DiscordRoleAdoptionService,
     // Drops/rotates the caller-resolution cache so role/ban changes take effect
     // on the member's next request without a re-login (T-0046/48).
     private readonly sessionContext: SessionContextService,
@@ -261,10 +319,15 @@ export class MembersService {
   }
 
   /**
-   * Change a member's role. Ownership is protected: the regiment owner's role
-   * cannot be changed here, and this endpoint cannot grant the Owner role at
-   * all — there is no API path that assigns it (the ownership-transfer endpoint
-   * was removed in T-0170), so the role is only ever set by provisioning.
+   * Change a member's role. Two independent ceilings apply: the caller must
+   * outrank the target's CURRENT role (the hierarchy guard), and the role they
+   * hand out may not exceed their OWN tier — equal is allowed, so a manage_roles
+   * holder may appoint their own kind (T-0203).
+   *
+   * Ownership is protected on both: the regiment owner's role cannot be changed
+   * here, and this endpoint cannot grant the Owner role at all — there is no API
+   * path that assigns it (the ownership-transfer endpoint was removed in
+   * T-0170), so the role is only ever set by provisioning.
    */
   async changeRole(
     id: string,
@@ -281,12 +344,14 @@ export class MembersService {
     // and the same holds for the owner/hierarchy refusals (T-0176).
     const ownerMemberId = await this.assertMayModerate(member, user, 'changeRole');
 
-    // Cap the GRANTED role at strictly below the caller's own tier (LDA-M4).
-    // assertMayModerate only checks that the caller outranks the target's CURRENT
-    // role; without this a manage_roles holder could mint a peer or a superior
-    // (e.g. a Moderator promoting a Member straight to Admin).
-    if (!outranks(user.role, dto.role)) {
-      throw new ForbiddenException('You cannot grant a role equal to or above your own');
+    // Cap the GRANTED role at the caller's own tier (LDA-M4, relaxed to include
+    // that tier in T-0203). assertMayModerate only checks that the caller
+    // outranks the target's CURRENT role; without this a manage_roles holder
+    // could mint a SUPERIOR — a Moderator promoting a Member straight to Admin.
+    // Their own tier is deliberately allowed: appointing a peer is what holding
+    // manage_roles buys, and the appointee is capped by the same ceiling.
+    if (!canGrantRole(user.role, dto.role)) {
+      throw new ForbiddenException('You cannot grant a role above your own');
     }
 
     // A no-op change (same role) records nothing — no service-record entry, no
@@ -387,6 +452,160 @@ export class MembersService {
 
     await this.syncMemberRoles(member);
     return this.project(member, user, ownerMemberId);
+  }
+
+  /**
+   * Credit a member with the rank and medals their Discord roles say they have
+   * already earned (T-0204) — the manual counterpart to the carry-over an
+   * enlistment performs, for the members who never got one.
+   *
+   * ── WHY THIS BUTTON EXISTS ───────────────────────────────────────────────────
+   * The roster is meant to be the record and Discord the mirror, and for a
+   * regiment that lived on Discord first that only works if the roster starts by
+   * LEARNING what the guild already knows. Enlistment does that now (T-0202) —
+   * but every approval taken before it did, and any taken while the gateway was
+   * unreachable, enlisted a veteran at the entry rank with none of their
+   * decorations. The reconcile that follows then strips the roles that were the
+   * only place that history was written down. This is the repair, run one member
+   * at a time by someone who can see the result.
+   *
+   * ── WHAT IT WILL AND WILL NOT DO ────────────────────────────────────────────
+   *  - PROMOTION ONLY. The member's current rank is the floor, so a derive can
+   *    raise a rank and can never lower one. A guild whose roles have drifted
+   *    below the roster is not evidence of a demotion nobody recorded.
+   *  - ADDITIVE ONLY on medals: it credits medals whose role the member wears and
+   *    the roster does not have, and never removes an award the guild has no role
+   *    for. A medal is a record of something that happened; a missing role is not
+   *    a retraction.
+   *  - IDEMPOTENT. Awards are diffed against what the member already holds, so
+   *    pressing it twice credits nothing twice — the second press reports that
+   *    there was nothing left to derive.
+   *  - NEVER ON YOURSELF. Enforced by the shared hierarchy guard: a derive hands
+   *    out whatever the target's roles say, so on your own record it is a
+   *    self-promotion (see ACTION_LABELS.deriveFromDiscord).
+   *
+   * A failed READ is reported, not swallowed (unlike the enlistment path): an
+   * admin who pressed a button and got "nothing to derive" must not be looking at
+   * a disabled bot or an unreachable gateway.
+   */
+  async deriveFromDiscord(
+    id: string,
+    user: AuthenticatedUser,
+    ip: string | null,
+  ): Promise<DeriveFromDiscordResultDto> {
+    const member = await this.loadMember(id, user.regimentId);
+    const ownerMemberId = await this.assertMayModerate(member, user, 'deriveFromDiscord');
+
+    // ⚠️ Reads Discord — deliberately BEFORE any transaction is opened, so an
+    // unreachable gateway can never hold the roster's locks open.
+    const read = await this.roleAdoption.readGuildState(
+      user.regimentId,
+      member.discordIdentity?.discordUserId ?? null,
+      // A member with no rank at all has no floor, so any linked rank qualifies.
+      member.rank?.precedence ?? Number.POSITIVE_INFINITY,
+    );
+    if (!read.ok) throw deriveUnavailable(read.reason, member.inGameName);
+
+    // The adoption read knows Discord, not `member_medals`: keep only the medals
+    // the roster is actually missing, or a second press double-awards every one.
+    const existing = await this.memberMedals.find({ where: { memberId: member.id } });
+    const alreadyHeld = new Set(existing.map((award) => award.medalId));
+    const medals = read.state.medals.filter((medal) => !alreadyHeld.has(medal.id));
+    const rank = read.state.rank;
+
+    // Nothing to do is a SUCCESS, and a common one — an admin sweeping a roster
+    // will hit it on most members. Say so and write nothing: no service-record
+    // entry, no audit row, no sync job for a no-op.
+    if (!rank && medals.length === 0) {
+      return {
+        member: await this.project(member, user, ownerMemberId),
+        rank: null,
+        medals: [],
+        summary: `Nothing to derive — ${member.inGameName}'s Discord roles are already reflected on their record.`,
+      };
+    }
+
+    const previousRank = member.rank ?? null;
+    const type = rank ? this.rankChangeType(previousRank, rank) : null;
+    const now = new Date();
+
+    // All of it or none of it. A reconcile is enqueued once this commits and it
+    // reads the roster to decide which roles are WANTED — so a medal that failed
+    // to land here is a medal the bot takes off the member seconds later. A
+    // half-applied derive is worse than one the admin can simply press again.
+    await this.members.manager.transaction(async (manager) => {
+      const records = manager.getRepository(ServiceRecordEntry);
+      if (rank && type) {
+        await manager.getRepository(Member).update({ id: member.id }, { rankId: rank.id });
+        await records.save(
+          records.create({
+            memberId: member.id,
+            regimentId: member.regimentId,
+            occurredAt: now,
+            type,
+            event: `Rank set to ${rank.name}`,
+            note: DERIVED_DETAIL,
+          }),
+        );
+      }
+
+      const awards = manager.getRepository(MemberMedal);
+      for (const medal of medals) {
+        await awards.save(
+          awards.create({
+            memberId: member.id,
+            medalId: medal.id,
+            detail: DERIVED_DETAIL,
+            // The admin who pressed the button owns these awards: they are who
+            // decided this member's Discord history is the regiment's record.
+            awardedByMemberId: user.memberId,
+          }),
+        );
+        await records.save(
+          records.create({
+            memberId: member.id,
+            regimentId: member.regimentId,
+            occurredAt: now,
+            type: 'award',
+            event: `Awarded ${medal.title}`,
+            note: DERIVED_DETAIL,
+          }),
+        );
+      }
+    });
+
+    // Reflect the committed rank on the loaded entity so the projection and the
+    // role sync below both see the member as they now are.
+    if (rank) {
+      member.rankId = rank.id;
+      member.rank = rank;
+    }
+
+    const summary = describeDerived(member.inGameName, rank, medals);
+    await this.audit.record({
+      regimentId: user.regimentId,
+      action: 'member.derive_from_discord',
+      actor: AuditService.actorFromUser(user, ip),
+      target: { type: 'member', id: member.id, memberId: member.id, label: member.inGameName },
+      before: { rank: previousRank?.name ?? null, medalCount: alreadyHeld.size },
+      after: {
+        rank: member.rank?.name ?? null,
+        medalCount: alreadyHeld.size + medals.length,
+      },
+      detail: summary,
+    });
+
+    // Push the derived state back out to Discord. Mostly a no-op by construction
+    // (these roles came FROM the guild), but a rank change leaves the member
+    // wearing their old rank role, and that is the reconcile's job to strip.
+    await this.syncMemberRoles(member);
+
+    return {
+      member: await this.project(member, user, ownerMemberId),
+      rank: rank?.name ?? null,
+      medals: medals.map((medal) => medal.title),
+      summary,
+    };
   }
 
   /** Suspend a member until a future timestamp. */

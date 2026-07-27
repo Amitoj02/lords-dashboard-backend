@@ -8,12 +8,21 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   Min,
   Validate,
 } from 'class-validator';
 import { Platform, RecurrenceCadence } from '../../common/enums';
 import { IsIanaTimezone } from './is-iana-timezone.validator';
+
+/**
+ * A Discord snowflake (17–20 digits) OR an empty string, matching the bot
+ * settings DTO. Empty is how the authoring form CLEARS the ping role; a
+ * non-empty value must still be well formed, so a typo cannot be persisted and
+ * then rendered into a live channel as a broken `<@&nonsense>` chip.
+ */
+const DISCORD_SNOWFLAKE_OR_EMPTY = /^(\d{17,20})?$/;
 
 /**
  * Body for POST /api/events. The regiment and creator are taken from the JWT,
@@ -93,6 +102,22 @@ export class CreateEventDto {
   @IsOptional()
   @IsEnum(RecurrenceCadence)
   recurrenceCadence?: RecurrenceCadence;
+
+  @ApiPropertyOptional({
+    maxLength: 20,
+    description:
+      'Discord role to ping when this event is announced. Pinged EXACTLY ONCE, when the ' +
+      'announcement is posted — never on the pre-event reminder and never when the ' +
+      "announcement's RSVP list is re-rendered. Send '' to clear it. A recurring template " +
+      'passes it to every occurrence, each of which pings once.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  @Matches(DISCORD_SNOWFLAKE_OR_EMPTY, {
+    message: 'announceRoleId must be a Discord snowflake (17–20 digits)',
+  })
+  announceRoleId?: string;
 
   @ApiPropertyOptional({ maxLength: 120 })
   @IsOptional()

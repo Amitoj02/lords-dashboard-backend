@@ -6,6 +6,7 @@ import {
   ROLE_PRECEDENCE,
   assertCanActOn,
   canActOn,
+  canGrantRole,
   outranks,
   permittedActions,
 } from './member-hierarchy';
@@ -59,6 +60,44 @@ describe('member hierarchy (T-0176)', () => {
     it('covers every role in the enum (a new role cannot be left off the ladder)', () => {
       for (const role of Object.values(MemberRole)) {
         expect(typeof ROLE_PRECEDENCE[role]).toBe('number');
+      }
+    });
+  });
+
+  describe('canGrantRole (T-0203)', () => {
+    it('lets a manage_roles holder appoint their own kind', () => {
+      expect(canGrantRole(MemberRole.Admin, MemberRole.Admin)).toBe(true);
+      expect(canGrantRole(MemberRole.Moderator, MemberRole.Moderator)).toBe(true);
+    });
+
+    it('still refuses a role above the caller’s own', () => {
+      expect(canGrantRole(MemberRole.Moderator, MemberRole.Admin)).toBe(false);
+      expect(canGrantRole(MemberRole.Admin, MemberRole.Owner)).toBe(false);
+      expect(canGrantRole(MemberRole.Member, MemberRole.Moderator)).toBe(false);
+    });
+
+    it('permits everything below', () => {
+      expect(canGrantRole(MemberRole.Admin, MemberRole.Moderator)).toBe(true);
+      expect(canGrantRole(MemberRole.Admin, MemberRole.Applicant)).toBe(true);
+      expect(canGrantRole(MemberRole.Owner, MemberRole.Admin)).toBe(true);
+    });
+
+    it('is a ceiling no chain of appointments can climb', () => {
+      // The property that makes the peer grant safe: an appointee is capped by
+      // the same rule, so collusion only ever widens a tier, never raises one.
+      for (const actor of Object.values(MemberRole)) {
+        for (const granted of Object.values(MemberRole)) {
+          if (!canGrantRole(actor, granted)) continue;
+          expect(ROLE_PRECEDENCE[granted]).toBeLessThanOrEqual(ROLE_PRECEDENCE[actor]);
+        }
+      }
+    });
+
+    it('is the complement of outranks, so the two can never disagree', () => {
+      for (const actor of Object.values(MemberRole)) {
+        for (const granted of Object.values(MemberRole)) {
+          expect(canGrantRole(actor, granted)).toBe(!outranks(granted, actor));
+        }
       }
     });
   });

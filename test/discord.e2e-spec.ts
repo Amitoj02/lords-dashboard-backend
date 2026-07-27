@@ -7,14 +7,25 @@ import { AppModule } from '../src/app.module';
 import { DiscordOAuthService } from '../src/auth/discord-oauth.service';
 import { DiscordIdentity } from '../src/auth/entities/discord-identity.entity';
 import { Application } from '../src/applications/entities/application.entity';
-import { DiscordSyncJobStatus, DiscordSyncJobType } from '../src/common/enums';
+import {
+  DiscordSyncJobStatus,
+  DiscordSyncJobType,
+  EventStatus,
+  RsvpStatus,
+} from '../src/common/enums';
 import { DiscordSyncWorker } from '../src/discord/discord-sync.worker';
+import { rsvpCustomId } from '../src/discord/embeds/event-components';
 import { DiscordGateway } from '../src/discord/gateway/discord-gateway';
 import { MockDiscordGateway } from '../src/discord/gateway/mock-discord-gateway';
 import { BotOperation } from '../src/discord/entities/bot-operation.entity';
 import { DiscordBotSettings } from '../src/discord/entities/discord-bot-settings.entity';
 import { DiscordConnection } from '../src/discord/entities/discord-connection.entity';
 import { DiscordSyncJob } from '../src/discord/entities/discord-sync-job.entity';
+import { EventAnnouncement } from '../src/events/entities/event-announcement.entity';
+import { EventRsvp } from '../src/events/entities/event-rsvp.entity';
+import { RegimentEvent } from '../src/events/entities/event.entity';
+import { EventReminderScheduler } from '../src/events/event-reminder.scheduler';
+import { EventStatusScheduler } from '../src/events/event-status.scheduler';
 import { Medal } from '../src/medals/entities/medal.entity';
 import { MemberMedal } from '../src/medals/entities/member-medal.entity';
 import { Member } from '../src/members/entities/member.entity';
@@ -972,6 +983,398 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       // And the role the dashboard manages nothing for is still untouched — the
       // carry-over did not widen what the bot considers its business.
       expect(ref!.roles).toContain(UNLINKED_ROLE);
+    });
+  });
+
+  /**
+   * T-0204 — the same carry-over, for the members it came too late for.
+   *
+   * T-0202 fixed enlistment going forward. It did nothing for the people already
+   * on the roster: anyone approved before it shipped (or while the gateway was
+   * unreachable, or before an admin had linked the rank and medal roles at all)
+   * was enlisted at the entry rank with no decorations, and their Discord roles
+   * were the only record of the truth. "Derive data from Discord" is the repair,
+   * and this suite stages the failure exactly as it happened — approve FIRST,
+   * link the roles AFTERWARDS — so the button is tested against the mess it
+   * exists for rather than a tidy fixture.
+   */
+  describe("deriving an existing member's rank + medals from Discord (T-0204)", () => {
+    const STRAGGLER = '900900900900900909';
+    const CAPTAIN_ROLE = '900000000000000071';
+    const CROSS_ROLE = '900000000000000072';
+    let captainRankId: string;
+    let recruitRankId: string;
+    let crossMedalId: string;
+    let crossMedalTitle: string;
+    let stragglerId: string;
+    let ownerMemberId: string;
+
+    const stragglerProfile = {
+      id: STRAGGLER,
+      username: 'e2e_straggler',
+      global_name: 'Missed Out',
+      discriminator: '0',
+      avatar: null,
+      email: 'straggler@example.com',
+    };
+
+    beforeAll(async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true })
+        .expect(200);
+
+      const ranks = await dataSource
+        .getRepository(Rank)
+        .find({ where: { regimentId: REGIMENT_ID } });
+      captainRankId = ranks.find((r) => r.name === 'Captain')!.id;
+      recruitRankId = ranks.find((r) => r.name === 'Recruit')!.id;
+      const medals = await dataSource
+        .getRepository(Medal)
+        .find({ where: { regimentId: REGIMENT_ID } });
+      crossMedalId = medals[1].id;
+      crossMedalTitle = medals[1].title;
+
+      // The straggler is a decorated veteran in the guild...
+      await mockGateway.assignRole(STRAGGLER, CAPTAIN_ROLE);
+      await mockGateway.assignRole(STRAGGLER, CROSS_ROLE);
+
+      // ...and is approved while NOTHING is linked, so the carry-over has nothing
+      // to see and enlists them bare. This is the bug, reproduced.
+      const straggler = await signIn(stragglerProfile);
+      const created = await request(server())
+        .post('/api/applications')
+        .set(bearer(straggler.token))
+        .send({
+          applicantName: 'Missed Out',
+          inGameName: 'MissedOut',
+          currentRegiment: 'None',
+          howFound: 'Was already here',
+          preferredClasses: 'Line Infantry',
+          skillsToImprove: 'Nothing',
+          interestConfirmed: true,
+        })
+        .expect(201);
+      ownerToken = (await signIn(ownerProfile)).token;
+      const approved = await request(server())
+        .post(`/api/applications/${created.body.id}/approve`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      stragglerId = approved.body.promotedMemberId as string;
+
+      // Only NOW does an admin link the roles — the state the regiment is in when
+      // somebody finally notices the ranks and medals never came across.
+      await dataSource
+        .getRepository(Rank)
+        .update({ id: captainRankId }, { discordRoleId: CAPTAIN_ROLE });
+      await dataSource
+        .getRepository(Medal)
+        .update({ id: crossMedalId }, { discordRoleId: CROSS_ROLE });
+
+      const ownerIdentity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: ownerProfile.id } });
+      ownerMemberId = (await dataSource
+        .getRepository(Member)
+        .findOne({ where: { discordIdentityId: ownerIdentity!.id } }))!.id;
+    });
+
+    afterAll(async () => {
+      await dataSource.getRepository(Rank).update({ id: captainRankId }, { discordRoleId: null });
+      await dataSource.getRepository(Medal).update({ id: crossMedalId }, { discordRoleId: null });
+      const identity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: STRAGGLER } });
+      if (identity) {
+        const member = await dataSource
+          .getRepository(Member)
+          .findOne({ where: { discordIdentityId: identity.id } });
+        if (member) await dataSource.getRepository(MemberMedal).delete({ memberId: member.id });
+        await dataSource.getRepository(Member).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(Application).delete({ discordIdentityId: identity.id });
+        await dataSource.getRepository(DiscordIdentity).delete({ id: identity.id });
+      }
+      ownerToken = (await signIn(ownerProfile)).token;
+    });
+
+    const derive = (memberId: string) =>
+      request(server())
+        .post(`/api/members/${memberId}/derive-from-discord`)
+        .set(bearer(ownerToken));
+
+    it('starts from the broken state: enlisted at the entry rank with nothing', async () => {
+      const member = await dataSource.getRepository(Member).findOne({ where: { id: stragglerId } });
+      expect(member!.rankId).toBe(recruitRankId);
+      expect(
+        await dataSource.getRepository(MemberMedal).count({ where: { memberId: stragglerId } }),
+      ).toBe(0);
+    });
+
+    it('pulls the rank and the medal across, and says what it did', async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+
+      const res = await derive(stragglerId).expect(200);
+
+      expect(res.body.rank).toBe('Captain');
+      expect(res.body.medals).toEqual([crossMedalTitle]);
+      expect(res.body.summary).toBe(
+        `Derived from Discord: MissedOut promoted to Captain and awarded ${crossMedalTitle}.`,
+      );
+      // The member projection in the same response is already up to date, so the
+      // client does not have to refetch to show the result.
+      expect(res.body.member.rank).toBe('Captain');
+      expect(res.body.member.medals.map((m: { title: string }) => m.title)).toEqual([
+        crossMedalTitle,
+      ]);
+
+      // Persisted, not merely projected.
+      const member = await dataSource.getRepository(Member).findOne({ where: { id: stragglerId } });
+      expect(member!.rankId).toBe(captainRankId);
+      const awards = await dataSource
+        .getRepository(MemberMedal)
+        .find({ where: { memberId: stragglerId } });
+      expect(awards.map((a) => a.medalId)).toEqual([crossMedalId]);
+      // Marked as inferred from a role, so nobody later reads it as an award an
+      // officer sat down and made.
+      expect(awards[0].detail).toContain('Derived from');
+
+      // The member's own timeline records both, which is where staff will look.
+      const record = await request(server())
+        .get(`/api/members/${stragglerId}/service-record`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      expect(record.body.map((e: { event: string }) => e.event)).toEqual(
+        expect.arrayContaining(['Rank set to Captain', `Awarded ${crossMedalTitle}`]),
+      );
+
+      // *** THE ONE THAT MATTERS. *** Drain the reconcile the derive queued: the
+      // roster now agrees with the guild, so the roles it learned from must still
+      // be there. If the diff were wrong this is where they would come off.
+      await drainAll();
+      const ref = await mockGateway.fetchMember(STRAGGLER);
+      expect(ref!.roles).toEqual(expect.arrayContaining([CAPTAIN_ROLE, CROSS_ROLE]));
+    });
+
+    it('is safe to press twice: the second run finds nothing and writes nothing', async () => {
+      const res = await derive(stragglerId).expect(200);
+
+      expect(res.body).toMatchObject({ rank: null, medals: [] });
+      expect(res.body.summary).toContain('Nothing to derive');
+      // Still ONE award. A medal role is a boolean; pressing the button again is
+      // not new evidence of anything.
+      expect(
+        await dataSource.getRepository(MemberMedal).count({ where: { memberId: stragglerId } }),
+      ).toBe(1);
+    });
+
+    it('refuses your OWN record, where a derive would be a self-promotion', async () => {
+      await derive(ownerMemberId).expect(403);
+    });
+
+    it('says the bot is switched off rather than reporting nothing to derive', async () => {
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: false })
+        .expect(200);
+
+      const res = await derive(stragglerId).expect(409);
+      expect(res.body.message).toContain('switched off');
+
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true })
+        .expect(200);
+    });
+  });
+
+  describe('the event announcement is the RSVP surface (T-0205)', () => {
+    const EVENT_CHANNEL = '910000000000000004';
+    const PING_ROLE = '900000000000000003';
+    let eventId: string;
+
+    /** The announcement message the bot posted for this event. */
+    const announcement = () =>
+      dataSource.getRepository(EventAnnouncement).findOne({ where: { eventId } });
+
+    /** The member's stored RSVP, or null. */
+    const storedRsvp = () =>
+      dataSource.getRepository(EventRsvp).findOne({ where: { eventId, memberId } });
+
+    /** Press one of the announcement's buttons as the enrolled member. */
+    const pressButton = async (status: RsvpStatus) => {
+      const delivered = await announcement();
+      return mockGateway.simulateButtonPress({
+        customId: rsvpCustomId(eventId, status),
+        discordUserId: APPLICANT_DISCORD_ID,
+        channelId: delivered!.channelId,
+        messageId: delivered!.messageId,
+      });
+    };
+
+    /** The roster sections of the announcement, as `name → value`. */
+    const rosterFields = async (): Promise<Record<string, string>> => {
+      const delivered = await announcement();
+      const message = mockGateway.sentMessages.find((m) => m.messageId === delivered!.messageId);
+      return Object.fromEntries((message?.embeds[0]?.fields ?? []).map((f) => [f.name, f.value]));
+    };
+
+    beforeAll(async () => {
+      mockGateway.resetSentMessages();
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ botEnabled: true, eventAnnouncementChannelId: EVENT_CHANNEL })
+        .expect(200);
+
+      const created = await request(server())
+        .post('/api/events')
+        .set(bearer(ownerToken))
+        .send({
+          title: 'Line Battle',
+          // Far enough out that the status sweep leaves it `upcoming`, and that
+          // the 60-minute offset is NOT yet due — the reminder case fires the
+          // sweep at an explicit instant instead of waiting for one.
+          startsAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          announceRoleId: PING_ROLE,
+          notifyOffsets: [60],
+        })
+        .expect(201);
+      eventId = created.body.id as string;
+      await drainAll();
+    });
+
+    afterAll(async () => {
+      await dataSource.getRepository(RegimentEvent).delete({ id: eventId });
+      await request(server())
+        .patch('/api/discord/settings')
+        .set(bearer(ownerToken))
+        .send({ eventAnnouncementChannelId: null })
+        .expect(200);
+    });
+
+    it('announces with the role ping, the RSVP sections and three live buttons', async () => {
+      const post = mockGateway.sentMessages.find((m) => m.target === EVENT_CHANNEL);
+
+      // The ping is in the CONTENT — an embed never notifies — and the role is
+      // named in the allow-list, which is the only thing that makes it notify.
+      expect(post?.content).toBe(`<@&${PING_ROLE}>`);
+      expect(post?.mentions).toEqual({ roles: [PING_ROLE] });
+      expect(post?.components[0].buttons.map((b) => b.label)).toEqual([
+        'Attending',
+        'Tentative',
+        'Declined',
+      ]);
+      expect(post?.components[0].buttons.every((b) => b.disabled)).toBe(false);
+      // Where it landed is recorded, which is what makes it re-renderable later.
+      await expect(announcement()).resolves.toMatchObject({
+        channelId: EVENT_CHANNEL,
+        messageId: post!.messageId,
+        threadId: null,
+        closedAt: null,
+      });
+    });
+
+    it('turns a button press into a real RSVP and moves the embed', async () => {
+      const reply = await pressButton(RsvpStatus.Interested);
+      expect(reply?.content).toContain('Attending');
+
+      await expect(storedRsvp()).resolves.toMatchObject({ status: RsvpStatus.Interested });
+
+      await drainAll();
+      const fields = await rosterFields();
+      expect(fields['✅ Attending — 1']).toBe(`<@${APPLICANT_DISCORD_ID}>`);
+      expect(fields['❔ Tentative — 0']).toBe('—');
+      expect(fields['❌ Declined — 0']).toBe('—');
+    });
+
+    it('lets the member reconsider — the buttons stay live after a press', async () => {
+      await pressButton(RsvpStatus.Declined);
+      await drainAll();
+
+      await expect(storedRsvp()).resolves.toMatchObject({ status: RsvpStatus.Declined });
+      const fields = await rosterFields();
+      expect(fields['✅ Attending — 0']).toBe('—');
+      expect(fields['❌ Declined — 1']).toBe(`<@${APPLICANT_DISCORD_ID}>`);
+
+      const delivered = await announcement();
+      const message = mockGateway.sentMessages.find((m) => m.messageId === delivered!.messageId);
+      expect(message?.components[0].buttons.every((b) => b.disabled)).toBe(false);
+      // And a re-render pings NOBODY, or one event would notify the role once
+      // per RSVP.
+      const edit = mockGateway.editedMessages.get(delivered!.messageId);
+      expect(edit).toBeDefined();
+      expect(JSON.stringify(edit)).not.toContain(PING_ROLE);
+
+      // Put the member back on Attending for the thread-ping case below.
+      await pressButton(RsvpStatus.Interested);
+      await drainAll();
+    });
+
+    it('refuses a Discord account that is not a member, without creating one', async () => {
+      const reply = await mockGateway.simulateButtonPress({
+        customId: rsvpCustomId(eventId, RsvpStatus.Interested),
+        discordUserId: '555000000000000009',
+        channelId: EVENT_CHANNEL,
+        messageId: (await announcement())!.messageId,
+      });
+
+      expect(reply?.content).toContain('Only enrolled members can RSVP');
+      await expect(dataSource.getRepository(EventRsvp).count({ where: { eventId } })).resolves.toBe(
+        1,
+      );
+    });
+
+    it('opens a thread on the announcement at the lead time and pings only the attendees', async () => {
+      // The whole point of the thread: it reaches the people who said they were
+      // coming without a single DM, which Discord's policy treats as abuse.
+      mockGateway.resetSentMessages();
+      const event = await dataSource.getRepository(RegimentEvent).findOneOrFail({
+        where: { id: eventId },
+      });
+      // 30 minutes past the 60-minute offset's fire time, so the sweep sees it
+      // as due while the event itself is still ahead.
+      const sweepAt = new Date(event.startsAt.getTime() - 30 * 60 * 1000);
+      expect(await app.get(EventReminderScheduler).sweep(sweepAt)).toBe(1);
+      await drainAll();
+
+      const threadId = (await announcement())!.threadId;
+      expect(threadId).toEqual(expect.any(String));
+      const threadPost = mockGateway.sentMessages.find((m) => m.target === threadId);
+      expect(threadPost?.content).toBe(`<@${APPLICANT_DISCORD_ID}>`);
+      expect(threadPost?.mentions).toEqual({ users: [APPLICANT_DISCORD_ID] });
+      expect(threadPost?.embeds[0]?.title).toContain('Reminder');
+      // The role is NOT re-pinged: it fired once, at creation.
+      expect(JSON.stringify(threadPost)).not.toContain(PING_ROLE);
+      // And nothing was DM'd.
+      expect(mockGateway.sentMessages.filter((m) => m.kind === 'dm')).toHaveLength(0);
+    });
+
+    it('retires the buttons once the event has ended, keeping the roster', async () => {
+      await dataSource
+        .getRepository(RegimentEvent)
+        .update({ id: eventId }, { status: EventStatus.Previous });
+
+      expect(await app.get(EventStatusScheduler).closeEndedAnnouncements()).toBe(1);
+      await drainAll();
+
+      const delivered = await announcement();
+      expect(delivered?.closedAt).toBeInstanceOf(Date);
+      const edit = mockGateway.editedMessages.get(delivered!.messageId);
+      expect(edit?.components?.[0].buttons.every((b) => b.disabled)).toBe(true);
+      // The announcement stays the historical record of who turned out.
+      expect(edit?.embeds?.[0].fields).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: '✅ Attending — 1' })]),
+      );
+
+      // A press after the close is refused rather than silently applied.
+      const reply = await pressButton(RsvpStatus.Declined);
+      expect(reply?.content).toContain('already finished');
+
+      // And the sweep does not rediscover a retired announcement next tick.
+      expect(await app.get(EventStatusScheduler).closeEndedAnnouncements()).toBe(0);
     });
   });
 

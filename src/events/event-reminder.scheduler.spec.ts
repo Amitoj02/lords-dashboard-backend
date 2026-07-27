@@ -2,7 +2,6 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DiscordSyncService } from '../discord/discord-sync.service';
 import { EventNotifyOffset } from './entities/event-notify-offset.entity';
-import { EventRsvp } from './entities/event-rsvp.entity';
 import { RegimentEvent } from './entities/event.entity';
 import { EventReminderScheduler } from './event-reminder.scheduler';
 
@@ -50,7 +49,6 @@ describe('EventReminderScheduler (T-0174)', () => {
     createQueryBuilder: jest.fn(() => qb),
     update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
-  const rsvpsRepo = { count: jest.fn().mockResolvedValue(4) };
   const discordSync = { enqueueEventReminder: jest.fn().mockResolvedValue(null) };
 
   beforeEach(async () => {
@@ -61,33 +59,31 @@ describe('EventReminderScheduler (T-0174)', () => {
       providers: [
         EventReminderScheduler,
         { provide: getRepositoryToken(EventNotifyOffset), useValue: offsetsRepo },
-        { provide: getRepositoryToken(EventRsvp), useValue: rsvpsRepo },
         { provide: DiscordSyncService, useValue: discordSync },
       ],
     }).compile();
     scheduler = module.get(EventReminderScheduler);
   });
 
-  it('fires a due offset once, with its lead time and the live RSVP count', async () => {
+  it('fires a due offset once, naming the event and its lead time', async () => {
     qb.getMany.mockResolvedValue([offset(60)]);
 
     expect(await scheduler.sweep(NOW)).toBe(1);
 
-    expect(discordSync.enqueueEventReminder).toHaveBeenCalledWith(
-      REGIMENT,
-      expect.objectContaining({ title: 'Line Battle', rsvpCount: 4, timezone: 'America/Toronto' }),
-      60,
-    );
+    expect(discordSync.enqueueEventReminder).toHaveBeenCalledWith(REGIMENT, 'evt-1', 60);
   });
 
-  it('NEVER puts the event server password in the reminder', async () => {
+  it('hands over an ID, so nothing it reads can leak the server password', async () => {
+    // This sweep decides WHEN, never WHAT (T-0205). It used to compose a
+    // projection, which is a place a password could be added by accident; the
+    // enqueue now reads the event itself, behind a projection that structurally
+    // has no field for one.
     qb.getMany.mockResolvedValue([offset(60)]);
 
     await scheduler.sweep(NOW);
 
-    const summary = discordSync.enqueueEventReminder.mock.calls[0][1] as Record<string, unknown>;
-    expect(JSON.stringify(summary)).not.toContain('hunter2');
-    expect(summary).not.toHaveProperty('serverPassword');
+    const args = discordSync.enqueueEventReminder.mock.calls[0];
+    expect(JSON.stringify(args)).not.toContain('hunter2');
   });
 
   it('CLAIMS the offset before sending, so a restart can never re-fire it', async () => {

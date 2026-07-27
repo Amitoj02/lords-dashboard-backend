@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
@@ -10,6 +11,7 @@ import { AuditService } from '../audit/audit.service';
 import { SessionContextService } from '../auth/session-context.service';
 import { StorageService } from '../storage/storage.service';
 import { DiscordSyncService } from '../discord/discord-sync.service';
+import { DiscordRoleAdoptionService } from '../discord/discord-role-adoption.service';
 import { AuthzService } from '../authz/authz.service';
 import { EventsService } from '../events/events.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -82,7 +84,9 @@ describe('MembersService', () => {
   };
   // Shared per-transaction repo mock so tests can assert save/softRemove/delete.
   const txRepo = {
+    create: jest.fn((x: unknown) => x),
     save: jest.fn((x: unknown) => Promise.resolve(x)),
+    update: jest.fn(() => Promise.resolve({ affected: 1 })),
     softRemove: jest.fn((x: unknown) => Promise.resolve(x)),
     delete: jest.fn(() => Promise.resolve({ affected: 1 })),
   };
@@ -135,6 +139,12 @@ describe('MembersService', () => {
   const discordSync = {
     enqueueRoleSync: jest.fn().mockResolvedValue(null),
     enqueueMemberBanRole: jest.fn().mockResolvedValue(null),
+  };
+  // The guild read behind "Derive data from Discord" (T-0204). Defaults to a
+  // SUCCESSFUL read that found nothing, so the shared hierarchy matrix exercises
+  // the guard without any test having to stub Discord.
+  const roleAdoption = {
+    readGuildState: jest.fn().mockResolvedValue({ ok: true, state: { rank: null, medals: [] } }),
   };
   // Caller-context cache hooks (T-0046/48) — assert invalidation without a DB.
   const sessionContext = {
@@ -194,6 +204,7 @@ describe('MembersService', () => {
         { provide: getRepositoryToken(Regiment), useValue: regimentRepo },
         { provide: AuditService, useValue: audit },
         { provide: DiscordSyncService, useValue: discordSync },
+        { provide: DiscordRoleAdoptionService, useValue: roleAdoption },
         { provide: SessionContextService, useValue: sessionContext },
         { provide: StorageService, useValue: storage },
         { provide: AuthzService, useValue: authz },
@@ -225,6 +236,7 @@ describe('MembersService', () => {
     unsuspend: (actor, id) => service.unsuspend(id, actor, null),
     ban: (actor, id) => service.ban(id, {}, actor, null),
     unban: (actor, id) => service.unban(id, actor, null),
+    deriveFromDiscord: (actor, id) => service.deriveFromDiscord(id, actor, null),
   };
 
   /**
@@ -554,9 +566,10 @@ describe('MembersService', () => {
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
 
-    it('changeRole forbids granting a role at or above the caller’s own tier (LDA-M4)', async () => {
-      // A Moderator (tier 30) may act on a Member (30 > 20), but must not be able to
-      // mint a superior (Admin) or a peer (Moderator) — only a role strictly below.
+    it('changeRole forbids granting a role ABOVE the caller’s own tier (LDA-M4)', async () => {
+      // A Moderator (tier 30) may act on a Member (30 > 20), but must not be able
+      // to mint a superior. The ceiling is what stops manage_roles from being a
+      // self-service promotion to Admin via a second account.
       const mod = user({ memberId: 'mod-1', role: MemberRole.Moderator });
       memberRepo.findOne.mockResolvedValue(
         buildMember({ id: 'member-9', role: MemberRole.Member }),
@@ -564,8 +577,45 @@ describe('MembersService', () => {
       await expect(
         service.changeRole('member-9', { role: MemberRole.Admin }, mod, null),
       ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(memberRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('changeRole lets a manage_roles holder appoint their own tier (T-0203)', async () => {
+      // The point of the relaxation: an Admin can add another Admin, a Moderator
+      // another Moderator. Only the capability gate (the controller) and the
+      // target hierarchy stand in the way — the ceiling no longer does.
+      memberRepo.findOne.mockResolvedValue(
+        buildMember({ id: 'member-9', role: MemberRole.Member }),
+      );
+
+      const dto = await service.changeRole(
+        'member-9',
+        { role: MemberRole.Admin },
+        admin(),
+        '1.2.3.4',
+      );
+
+      expect(dto.role).toBe(MemberRole.Admin);
+      expect(memberRepo.save).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'member.role.change',
+          after: { role: MemberRole.Admin },
+        }),
+      );
+      expect(sessionContext.invalidate).toHaveBeenCalledTimes(1);
+      expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+    });
+
+    it('changeRole peer appointment is one-way: the new peer is then untouchable (T-0203)', async () => {
+      // Appointing a peer is additive; moderating one is not. An Admin who has
+      // just raised somebody to Admin cannot demote them back — only the Owner
+      // can — so the grant widens the command without letting one seat holder
+      // hollow it out.
+      memberRepo.findOne.mockResolvedValue(buildMember({ id: 'member-9', role: MemberRole.Admin }));
+
       await expect(
-        service.changeRole('member-9', { role: MemberRole.Moderator }, mod, null),
+        service.changeRole('member-9', { role: MemberRole.Member }, admin(), null),
       ).rejects.toBeInstanceOf(ForbiddenException);
       expect(memberRepo.save).not.toHaveBeenCalled();
     });
@@ -620,6 +670,153 @@ describe('MembersService', () => {
 
       expect(memberMedalRepo.save).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(expect.objectContaining({ action: 'medal.award' }));
+    });
+
+    /**
+     * T-0204 — the repair button. What matters is not that it writes, but WHAT
+     * IT REFUSES TO WRITE: it may raise a rank and never lower one, it may add a
+     * medal and never take one away, and pressing it twice must cost nothing.
+     */
+    describe('deriveFromDiscord (T-0204)', () => {
+      /** A guild read that found `rank` and `medals`. */
+      const found = (rank: Partial<Rank> | null, medals: Partial<Medal>[] = []) =>
+        roleAdoption.readGuildState.mockResolvedValue({ ok: true, state: { rank, medals } });
+
+      /** A linked member — the only kind there is anything to read for. */
+      const linked = (overrides: Partial<Member> = {}): Member =>
+        buildMember({
+          discordIdentity: { discordTag: '@commander', discordUserId: 'discord-9' },
+          ...overrides,
+        } as Partial<Member>);
+
+      it('adopts the rank and awards the medals, recording service entries + audit + sync', async () => {
+        memberRepo.findOne.mockResolvedValue(
+          buildMember({ rank: { id: 'rank-1', name: 'Corporal', precedence: 7 } as Rank }),
+        );
+        found({ id: 'rank-9', name: 'Sergeant', precedence: 6 }, [
+          { id: 'medal-1', title: 'Medal of Valor' },
+          { id: 'medal-2', title: "Marksman's Cross" },
+        ]);
+
+        const result = await service.deriveFromDiscord('member-1', admin(), '1.2.3.4');
+
+        expect(result.rank).toBe('Sergeant');
+        expect(result.medals).toEqual(['Medal of Valor', "Marksman's Cross"]);
+        // The projection reports the member as they now stand, not as they were.
+        expect(result.member.rank).toBe('Sergeant');
+        expect(result.summary).toBe(
+          "Derived from Discord: LC promoted to Sergeant and awarded Medal of Valor, Marksman's Cross.",
+        );
+        // Every write goes through the transaction manager's repo — one rank
+        // update, two awards, and a service-record entry for each of the three.
+        expect(txRepo.update).toHaveBeenCalledWith({ id: 'member-1' }, { rankId: 'rank-9' });
+        expect(txRepo.save).toHaveBeenCalledTimes(5);
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            action: 'member.derive_from_discord',
+            before: { rank: 'Corporal', medalCount: 0 },
+            after: { rank: 'Sergeant', medalCount: 2 },
+          }),
+        );
+        // The member wears their OLD rank role in the guild; the reconcile strips it.
+        expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+      });
+
+      it("uses the member's CURRENT rank as the floor, so a derive can never demote", async () => {
+        memberRepo.findOne.mockResolvedValue(
+          linked({ rank: { id: 'rank-1', name: 'Major', precedence: 3 } as Rank }),
+        );
+
+        await service.deriveFromDiscord('member-1', admin(), null);
+
+        // The floor is passed to the reader, which is where the comparison lives
+        // (a rank must STRICTLY outrank it — precedence 1 is the top).
+        expect(roleAdoption.readGuildState).toHaveBeenCalledWith(REGIMENT, 'discord-9', 3);
+      });
+
+      it('gives a rankless member no floor at all, so any linked rank qualifies', async () => {
+        memberRepo.findOne.mockResolvedValue(linked({ rank: null as unknown as Rank }));
+
+        await service.deriveFromDiscord('member-1', admin(), null);
+
+        expect(roleAdoption.readGuildState).toHaveBeenCalledWith(
+          REGIMENT,
+          'discord-9',
+          Number.POSITIVE_INFINITY,
+        );
+      });
+
+      it('skips medals the member already holds, so a second press awards nothing twice', async () => {
+        memberRepo.findOne.mockResolvedValue(buildMember());
+        memberMedalRepo.find.mockResolvedValue([{ medalId: 'medal-1' }]);
+        found(null, [
+          { id: 'medal-1', title: 'Medal of Valor' },
+          { id: 'medal-2', title: "Marksman's Cross" },
+        ]);
+
+        const result = await service.deriveFromDiscord('member-1', admin(), null);
+
+        expect(result.medals).toEqual(["Marksman's Cross"]);
+        // One award + its service-record entry. The medal they already had is
+        // not re-awarded, and its role is not treated as new evidence.
+        expect(txRepo.save).toHaveBeenCalledTimes(2);
+      });
+
+      it('reports finding nothing as a success that writes nothing at all', async () => {
+        memberRepo.findOne.mockResolvedValue(buildMember());
+        memberMedalRepo.find.mockResolvedValue([{ medalId: 'medal-1' }]);
+        found(null, [{ id: 'medal-1', title: 'Medal of Valor' }]);
+
+        const result = await service.deriveFromDiscord('member-1', admin(), null);
+
+        expect(result.rank).toBeNull();
+        expect(result.medals).toEqual([]);
+        expect(result.summary).toContain('Nothing to derive');
+        // A no-op leaves no trace: no transaction writes, no timeline entry, no
+        // audit row, and no sync job for a member whose state did not change.
+        expect(txRepo.update).not.toHaveBeenCalled();
+        expect(txRepo.save).not.toHaveBeenCalled();
+        expect(audit.record).not.toHaveBeenCalled();
+        expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+      });
+
+      /**
+       * A failed READ is not "they had nothing" — each reason is a different
+       * thing for the admin to go and do, and none of them may write.
+       */
+      it.each([
+        ['not-linked', ConflictException, 'has not linked a Discord account'],
+        ['bot-disabled', ConflictException, 'Discord bot is switched off'],
+        ['not-in-guild', ConflictException, "is not in the regiment's Discord server"],
+        ['unreachable', ServiceUnavailableException, 'Could not reach Discord'],
+      ] as const)(
+        'reports a %s read rather than writing nothing quietly',
+        async (reason, expected, message) => {
+          memberRepo.findOne.mockResolvedValue(buildMember());
+          roleAdoption.readGuildState.mockResolvedValue({ ok: false, reason });
+
+          await expect(service.deriveFromDiscord('member-1', admin(), null)).rejects.toMatchObject({
+            constructor: expected,
+            message: expect.stringContaining(message),
+          });
+
+          expect(txRepo.save).not.toHaveBeenCalled();
+          expect(audit.record).not.toHaveBeenCalled();
+          expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+        },
+      );
+
+      it('reads Discord only AFTER the hierarchy guard has cleared the caller', async () => {
+        // Own record: refused. The guild must not be touched on the way to a 403 —
+        // a refused derive is not an excuse to go asking Discord about somebody.
+        memberRepo.findOne.mockResolvedValue(buildMember({ id: 'admin-1' }));
+
+        await expect(service.deriveFromDiscord('admin-1', admin(), null)).rejects.toBeInstanceOf(
+          ForbiddenException,
+        );
+
+        expect(roleAdoption.readGuildState).not.toHaveBeenCalled();
+      });
     });
 
     it('removeMedal 404s when the member holds no such medal', async () => {

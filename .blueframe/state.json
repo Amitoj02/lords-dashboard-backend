@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "348f0aeb27f72821c912a5d3bde110e9d63801ff",
-  "lastSyncedAt": "2026-07-27T10:45:00Z",
-  "notesForNextSession": "LATEST SESSION (T-0202): one follow-up to the T-0191..T-0201 enlistment work, from a user question that turned into a bug. Branch feat/adopt-existing-discord-roles-on-enlistment; PR open against dev. BACKEND ONLY \u2014 no frontend change, no new API surface, no migration. *** THE HEADLINE: the T-0194 sync was WIPING existing members as they enlisted. *** The regiment ran on Discord for years before this dashboard, so a veteran's rank and medals live ONLY as guild roles; reconcileRoles strips every managed role the roster cannot account for, and a fresh member row accounts for nothing. Approval is the FIRST reconcile of a member's life, so it took years of decorations off the person it had just admitted. Sign-in and submit were never implicated (AuthService touches Discord not at all; submit only ADDS the Applicant marker) \u2014 worth remembering, because that is where the symptom looks like it lives. THE FIX: DiscordRoleAdoptionService reads the applicant's guild roles before the transaction and approve() writes the adopted rank + medal awards inside it, so the reconcile that follows finds them DESIRED. Bounded by the protected-rank exclusions and an entry-rank precedence floor. The entry-rank lookup MOVED OUT of the enlistment transaction to supply that floor. WATCH ON DEPLOY: this is inert until the real bot runs (DISCORD_BOT_MOCK=true in production, and the mock only knows members it has already touched) \u2014 but so is the strip, so the two stay in step. THE MOMENT DISCORD_BOT_MOCK GOES FALSE, both switch on together, and that is the first time either has ever run against the live guild. NOT DONE: members approved BEFORE this ships cannot be recovered \u2014 their roles are already gone and /discord/resync only replays roster state, which is exactly what is missing. If any veterans have already been stripped, the guild audit log is the only record of what they held.",
-  "nextIdCounter": 203,
+  "lastSyncedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
+  "lastSyncedAt": "2026-07-27T18:20:00Z",
+  "notesForNextSession": "LATEST SESSION (T-0205): the Discord event announcement is now the RSVP surface, and the bot has its FIRST INBOUND PATH. Read that sentence twice before touching src/discord: everything before this was outbound, and a button press is a Discord account writing roster state. The handler (EventRsvpInteractionService) deliberately does NOT re-derive authorization - it calls SessionContextService.resolve(), the same choke point every HTTP route uses, which is what makes a banned or suspended member refused by the SAME rule rather than by a second one that will drift. It then checks rsvp_to_events against the live role, and re-checks botEnabled at press time because an announcement outlives the setting that produced it. *** THE ONE-PING RULE IS THE OWNER'S, AND IT IS LOAD-BEARING. *** events.announce_role_id is pinged by the announcement and by NOTHING else. The pre-event notification is a THREAD on that same message pinging only Attending+Tentative (Discord treats unsolicited mass DMs as abuse), and a re-render pings nobody because editChannelMessage accepts no mention allow-list at all - that omission is the mechanism, do not add the parameter. Every send still pins allowed_mentions.parse: [], so @everyone in admin text stays inert; the two messages that must notify carry EXPLICIT snowflakes alongside it. The announcement is the only message in the app that is RE-RENDERED, which is why it is the only one composed at DRAIN time: its roster comes from event_rsvps when the job runs. That is not a style choice - refreshes are COALESCED (one pending per event), so a payload frozen at enqueue would deliver the first presser's roster and silently drop everyone after. enqueueEventAnnounce/enqueueEventReminder now take (regimentId, eventId); src/events/event-summary.ts is gone and the projection lives in DiscordModule's EventAnnouncementService, which reads events/event_rsvps by ENTITY IMPORT (not a module edge - EventsModule imports DiscordModule and the reverse would close a cycle). event_announcements (PK = FK) is delivery state, not event state: its presence answers 'has this been announced?'. CROSS-REPO: the authoring form still has no 'Role to ping' picker, so announceRoleId is API-only until lords-regiment-dashboard adds one; it is optional and nullable, so the SPA degrades safely and the two do NOT have to ship together. OPEN ITEM worth deciding: editing an event does not re-render or re-post its announcement, so a title or time changed after it went out is wrong in Discord until someone notices.",
+  "nextIdCounter": 206,
   "connections": [],
   "tasks": [
     {
@@ -14050,7 +14050,334 @@
           "note": "implemented on feat/adopt-existing-discord-roles-on-enlistment; unit + e2e green, e2e verified to fail without the fix"
         }
       ]
+    },
+    {
+      "id": "T-0203",
+      "title": "Let manage_roles appoint its own tier",
+      "summary": "The grant ceiling on POST /members/:id/role capped the role handed out at STRICTLY below the caller (LDA-M4), so an Admin holding manage_roles could not appoint another Admin and a Moderator could not appoint another Moderator - the whole point of enabling \"Manage roles\" for a role in the permission matrix. Relaxed to at-or-below via a named canGrantRole() in member-hierarchy, mirrored client-side by assignableRolesFor(). ESCALATION STAYS SHUT: nobody mints a role above their own, and no chain of appointments can either, because every appointee is capped by the same ceiling - so a Moderator still cannot produce an Admin by any route. The TARGET hierarchy is untouched on purpose: appointing a peer is additive, moderating one is not, so the Admin who just promoted somebody to Admin can no longer demote, suspend or ban them - only the Owner can. Inert until an owner grants manage_roles to Admin/Moderator, which the seeded matrix (Owner-only, insert-only) does not do.",
+      "status": "review",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "role-hierarchy",
+      "repo": "",
+      "paths": [
+        "src/members/member-hierarchy.ts",
+        "src/members/member-hierarchy.spec.ts",
+        "src/members/members.service.ts",
+        "src/members/members.service.spec.ts",
+        "src/members/members.controller.ts",
+        "test/member-hierarchy.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0176"
+      ],
+      "blocks": [
+        "lords-regiment-dashboard:T-0283"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "an Admin holding manage_roles may appoint another Admin, a Moderator another Moderator",
+          "status": "passed"
+        },
+        {
+          "desc": "a tier ABOVE the caller is still 403 (Moderator -> Admin), and Owner is refused outright",
+          "status": "passed"
+        },
+        {
+          "desc": "the appointment is one-way: the new peer reports every permittedAction false to the appointer, and the demotion 403s",
+          "status": "passed"
+        },
+        {
+          "desc": "canGrantRole is exactly !outranks(granted, actor) across the full role matrix, so the two rules cannot drift",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Granting manage_roles to a role is now a strictly larger delegation than it was: that role can multiply itself, and the peers it creates are beyond its own reach (only the Owner can demote them). An owner who enabled the capability under the old rule did not consent to this one - worth restating in the settings UI copy before the matrix is widened.",
+          "status": "open",
+          "notedAt": "2026-07-27T15:30:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Left the TARGET hierarchy strict - a peer still cannot be demoted, suspended or banned by a peer. Only promotion parity was asked for, and relaxing moderation would let two Admins remove each other (the T-0176 hollowing-out guard).",
+        "Did not add a settings-page warning about what enabling manage_roles now implies; recorded as the regression risk above instead."
+      ],
+      "lastTouchedCommit": "fc9bd335990e0466f7260d8d71600e746d2b9370",
+      "createdAt": "2026-07-27T15:30:00Z",
+      "updatedAt": "2026-07-27T15:30:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T15:30:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner request: \"Manage roles\" should let a role promote others to its own level. Implemented on feat/manage-roles-grant-own-tier; local CI green (886 unit, 126 e2e); PR opened against dev."
+        }
+      ]
+    },
+    {
+      "id": "T-0204",
+      "title": "Derive an existing member's rank and medals from their Discord roles",
+      "summary": "*** T-0202 FIXED ENLISTMENT GOING FORWARD AND NOTHING FOR THE PEOPLE ALREADY ON THE ROSTER. *** Anyone approved before it shipped - or while the gateway was unreachable, or before an admin had linked the rank/medal roles at all - was enlisted at the entry rank with no decorations, and the reconcile then stripped the guild roles that were the only record of them. This is the repair, run one member at a time by someone who can see the result: POST /members/:id/derive-from-discord reads that member's CURRENT guild roles through the same DiscordRoleAdoptionService the enlistment uses, and writes what it finds onto their record. PROMOTION-ONLY (their current rank is the floor, so a drifted guild can never demote), ADDITIVE-ONLY on medals (a missing role is not a retraction), and IDEMPOTENT (awards are diffed against member_medals, so a second press credits nothing twice and says so). NEVER ON YOURSELF: it is a ninth MEMBER_ADMIN_ACTION, so the shared hierarchy guard refuses self/owner/peer for free - which matters here because a derive hands out whatever the target's roles say, making a self-derive a self-promotion available to anyone who can get a role onto their own account (LDA-H1). The adoption service gained readGuildState(), a strict sibling of resolveFromGuild() that SAYS WHY it came back empty (not-linked / bot-disabled / not-in-guild / unreachable) - an enlistment is right to shrug a failed read off, but an admin pressing a button must not read a switched-off bot as \"this member earned nothing\". Finding nothing is a 200 with an empty result and a summary saying so; the reasons are 409 (fixable state) and 503 (Discord did not answer). The server authors one human sentence that is written to the audit detail AND returned for the client to show.",
+      "status": "review",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "discord-history-carry-over",
+      "repo": "",
+      "paths": [
+        "src/discord/discord-role-adoption.service.ts",
+        "src/discord/discord-role-adoption.service.spec.ts",
+        "src/members/member-hierarchy.ts",
+        "src/members/members.service.ts",
+        "src/members/members.service.spec.ts",
+        "src/members/members.controller.ts",
+        "src/members/dto/member-admin.dto.ts",
+        "src/members/dto/member.dto.ts",
+        "src/database/seeds/audit-actions.seed.ts",
+        "test/discord.e2e-spec.ts",
+        "test/member-hierarchy.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0202",
+        "T-0176",
+        "T-0177"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "adopts the rank + awards only the medals the roster is missing, with service entries, audit row and a role sync",
+          "status": "passed"
+        },
+        {
+          "desc": "the member's current rank precedence is passed as the floor; a rankless member gets Infinity",
+          "status": "passed"
+        },
+        {
+          "desc": "a second press finds nothing, writes nothing, and enqueues no sync",
+          "status": "passed"
+        },
+        {
+          "desc": "each failed read has its own status and sentence, and writes nothing",
+          "status": "passed"
+        },
+        {
+          "desc": "the hierarchy guard runs BEFORE Discord is read, so a refused derive asks the guild nothing",
+          "status": "passed"
+        },
+        {
+          "desc": "readGuildState distinguishes 'in the guild wearing nothing' (ok) from 'not in the guild' (failure), without catalogue queries",
+          "status": "passed"
+        },
+        {
+          "desc": "the whole T-0176/T-0177 matrix now covers the new action for free (self/owner/peer refusals, flag-matches-guard walk)",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e against real MySQL: approve with nothing linked, link afterwards, derive, and the roles survive a full drain",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: derive on your own record 403s; with the bot off it 409s",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "MEMBER_ADMIN_ACTIONS gained a ninth entry, so PermittedActionsDto grew a field and every consumer of the block sees it. The exhaustive Record<> types in the unit + e2e hierarchy matrices forced both to cover it (they failed to compile until they did), and the frontend mirror was updated in the same change - but any other reader of permittedActions that enumerates keys should be checked.",
+          "status": "open",
+          "notedAt": "2026-07-27T16:40:00Z"
+        },
+        {
+          "desc": "A rank/medal role granted in Discord by mistake becomes real roster state the moment an admin presses this. The precedence floor, the protected-rank exclusions and the self-refusal bound it, but the button trusts the guild's role assignments by design - and unlike the enlistment carry-over, it can be aimed at any member at any time.",
+          "status": "open",
+          "notedAt": "2026-07-27T16:40:00Z"
+        },
+        {
+          "desc": "The derive enqueues a reconcile, which will STRIP a managed role the roster deliberately did not adopt (a protected-rank role, or a rank role below the member's current one). That is the same reconcile any rank change already triggers, but a button labelled 'derive FROM Discord' also writing TO Discord is not obvious from its name or its hint.",
+          "status": "open",
+          "notedAt": "2026-07-27T16:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "No bulk/whole-roster derive - it is deliberately one member at a time, so an admin sees each result before the next.",
+        "Medals are still one award per medal: a role is a boolean and cannot say a medal was earned three times.",
+        "Did not add a roster-row-specific affordance; both mount points render the same modal, so the button is in the ... menu too, but nothing was added there.",
+        "Did not add a way to derive a member who has left the guild or never linked Discord - both are reported as refusals, because there is genuinely nothing to read."
+      ],
+      "lastTouchedCommit": "409720bd2db148f136b704916eda5cd6e5ce3348",
+      "createdAt": "2026-07-27T16:40:00Z",
+      "updatedAt": "2026-07-27T16:40:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T16:40:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner report: members missed ranks and medals because of earlier bugs. Implemented on feat/derive-member-data-from-discord; local CI green (909 unit, 133 e2e); verified in the running dev app (button, hint, refusal snackbar). PR opened against dev."
+        }
+      ]
+    },
+    {
+      "id": "T-0205",
+      "title": "RSVP to an event from its Discord announcement (buttons, thread ping, one role ping)",
+      "summary": "*** THE ANNOUNCEMENT STOPS BEING A NOTICE AND BECOMES THE RSVP SURFACE. *** The lifecycle the owner specified, end to end: event created (by hand or by the recurrence sweep) -> embed announcement, pinging the event's `announceRoleId` ONCE -> members press Attending / Tentative / Declined -> at the 'notify before' offset a THREAD opens on that same message and pings only the people who said they were coming -> the event ends and the buttons go dead. Four rules carry the design. (1) ONE PING, AT CREATION. The role is pinged by the announcement and by nothing else - not the reminder, not a re-render - so one event produces one notification; the recurrence sweep now announces every occurrence it materialises, so a weekly muster pings weekly. (2) THE THREAD REPLACES DMs. Discord's policy treats unsolicited mass DMs as abuse; a thread on the announcement reaches the same attendees with one message, chunked at 80 mentions because both the 2,000-character body and the 100-id allow_mentions cap would otherwise make Discord reject the whole thing and ping nobody. (3) COMPOSED AT DRAIN TIME, NOT ENQUEUE. This is the only re-rendered message in the app, so its Attending/Tentative/Declined sections are read from event_rsvps when the job runs - a frozen payload plus the refresh COALESCING (one pending refresh per event, so twenty presses in a minute are not twenty rate-limited edits) would have delivered whichever RSVP was first. (4) THE PRESS IS NOT A BACK DOOR. A press resolves the presser through SessionContextService - the same choke point every HTTP route uses, so a banned or suspended member is refused there rather than by a second, divergent check - then requires rsvp_to_events against their live role; a Discord account with no roster row is told to apply, and pressing a button never creates a member. Mentions stay off by default: every send pins allowed_mentions.parse: [] and the two messages that must notify carry an EXPLICIT list of snowflakes alongside it, while a message EDIT accepts no allow-list at all, which is why re-rendering on every RSVP cannot re-ping. Buttons deliberately stay LIVE after a press (changing your mind is the normal case) and are disabled only when the event ends, by a sweep hung off EventStatusScheduler so 'over' has one definition. Delivery state lives in a new event_announcements table (PK = FK): its presence answers 'has this been announced?', and its message/thread/closed_at are what make the re-render, the thread and the retirement all target the original message.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "discord-bot",
+      "feature": "event-rsvp",
+      "subfeature": "announcement-buttons-and-thread",
+      "repo": "",
+      "paths": [
+        "src/discord/gateway/discord-gateway.ts",
+        "src/discord/gateway/real-discord-gateway.ts",
+        "src/discord/gateway/mock-discord-gateway.ts",
+        "src/discord/embeds/event-components.ts",
+        "src/discord/embeds/notification-embeds.ts",
+        "src/discord/event-announcement.service.ts",
+        "src/discord/event-rsvp-interaction.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord-job-payloads.ts",
+        "src/discord/discord.module.ts",
+        "src/common/enums/index.ts",
+        "src/events/entities/event-announcement.entity.ts",
+        "src/events/entities/event.entity.ts",
+        "src/events/dto/create-event.dto.ts",
+        "src/events/dto/event.dto.ts",
+        "src/events/events.service.ts",
+        "src/events/event-recurrence.scheduler.ts",
+        "src/events/event-reminder.scheduler.ts",
+        "src/events/event-status.scheduler.ts",
+        "src/events/events.module.ts",
+        "src/database/migrations/1784900004000-EventRsvpButtonsAndThreads.ts",
+        "test/discord.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0174",
+        "T-0172",
+        "T-0075"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "the announcement carries the role ping in CONTENT plus a matching allow-list, three live buttons, and records where it landed",
+          "status": "passed"
+        },
+        {
+          "desc": "the role is pinged by the announcement and by nothing else (reminder payload never names it; an edit carries no allow-list)",
+          "status": "passed"
+        },
+        {
+          "desc": "a button press upserts the RSVP, keeps the member's website reminder offset, and re-renders the embed's three sections",
+          "status": "passed"
+        },
+        {
+          "desc": "buttons stay live after a press so a member can reconsider; only an ended event disables them",
+          "status": "passed"
+        },
+        {
+          "desc": "refuses a non-member, a banned/suspended member (via SessionContextService returning null), a role without rsvp_to_events, and a switched-off bot",
+          "status": "passed"
+        },
+        {
+          "desc": "refresh jobs COALESCE: a second enqueue while one is pending is dropped",
+          "status": "passed"
+        },
+        {
+          "desc": "the thread is opened once, its id recorded BEFORE the pings, and only Attending+Tentative are pinged; nothing is DM'd",
+          "status": "passed"
+        },
+        {
+          "desc": "no announcement (bot was off / no channel) degrades to the plain channel reminder, pinging nobody",
+          "status": "passed"
+        },
+        {
+          "desc": "the close sweep disables the buttons, keeps the roster, stamps closed_at after the edit, and does not rediscover the announcement next tick",
+          "status": "passed"
+        },
+        {
+          "desc": "the recurrence sweep announces every occurrence, clones the ping role, and enqueues AFTER the transaction commits",
+          "status": "passed"
+        },
+        {
+          "desc": "a legacy content-only `announce` outbox row still delivers as plain text with the original two-argument gateway call",
+          "status": "passed"
+        },
+        {
+          "desc": "roster overflow trims by WHOLE mentions with a '+N more' marker, never mid-snowflake",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e against real MySQL + the mock gateway: create -> announce -> press -> re-render -> reconsider -> thread ping -> end -> buttons dead",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "FIRST INBOUND PATH IN THE BOT. Until now the gateway only posted; it now accepts InteractionCreate and a Discord account can change roster state. The handler routes authorization through SessionContextService + AuthzService rather than re-deriving it, and the master switch is re-checked at press time - but any future button must do the same, and the module header's old 'the bot only posts and manages roles' invariant is retired.",
+          "status": "open",
+          "notedAt": "2026-07-27T18:20:00Z"
+        },
+        {
+          "desc": "allowedMentions is no longer unconditionally inert. `parse: []` is still pinned on every send and an EDIT takes no allow-list, so @everyone stays impossible - but two producers now pass explicit snowflakes, and a future caller that passes user-supplied ids would ping whoever they name. The allow-list is the only thing standing between a message and a notification.",
+          "status": "open",
+          "notedAt": "2026-07-27T18:20:00Z"
+        },
+        {
+          "desc": "enqueueEventAnnounce/enqueueEventReminder changed shape (regimentId + eventId, not a composed EventSummary) and src/events/event-summary.ts was deleted - the projection now lives in DiscordModule's EventAnnouncementService. Any future caller must pass an id, and the discord module now reads events/event_rsvps directly (entity imports, not a module edge, so the graph stays acyclic).",
+          "status": "open",
+          "notedAt": "2026-07-27T18:20:00Z"
+        },
+        {
+          "desc": "The refresh dedupe filters on JSON_UNQUOTE(JSON_EXTRACT(payload,'$.eventId')) with no index. It is scoped to PENDING rows of one job type, which is a handful at any moment - but it is a JSON scan on the outbox's hot path and would need revisiting if the pending set ever grows.",
+          "status": "open",
+          "notedAt": "2026-07-27T18:20:00Z"
+        },
+        {
+          "desc": "EventStatusScheduler's first tick after deploy sees every past event that has an announcement and enqueues a close for each. Bounded at 25 per tick and each is stamped once, so it drains steadily - but production has no event_announcements rows yet, so this is only a risk for a future backfill.",
+          "status": "open",
+          "notedAt": "2026-07-27T18:20:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "No frontend counterpart yet: the authoring form has no 'Role to ping' picker, so announceRoleId is API-only until lords-regiment-dashboard catches up. The field is optional and defaults to null, so the SPA degrades safely.",
+        "announceRoleId is validated for snowflake FORMAT only - it is not checked against the guild or against DiscordRolePolicyService, because mentioning a role is not assigning one (no hierarchy or managed-role constraint applies).",
+        "Editing an event does not re-post or re-render its announcement; announceRoleId changes affect the NEXT announcement only. A title/time change after the announcement is not reflected in Discord.",
+        "The 'neutral' RsvpStatus is not offered as a button and a hand-crafted custom_id naming it is rejected - on Discord, no answer is expressed by not pressing anything.",
+        "No thread is opened for an event that was never announced (nothing to hang it on); it degrades to the plain reminder embed and pings nobody rather than mass-mentioning in the main channel.",
+        "Thread pings past 80 attendees are split into extra best-effort messages; a chunk that fails is logged, not retried, because a retry would re-ping everyone in the chunks that already landed."
+      ],
+      "lastTouchedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
+      "createdAt": "2026-07-27T18:20:00Z",
+      "updatedAt": "2026-07-27T18:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-27T18:20:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner spec: role pinged only at creation, three RSVP sections + three buttons on the announcement, buttons stay live, thread + attendee ping at the notify-before offset instead of DMs, buttons disabled when the event ends. Implemented on feat/discord-event-rsvp-buttons-and-threads; local CI green (965 unit, 139 e2e), lint + prettier + tsc clean. PR opened against dev."
+        }
+      ]
     }
   ],
-  "history": []
+  "history": [
+    {
+      "at": "2026-07-27T16:40:00Z",
+      "by": "claude",
+      "note": "T-0204 created and implemented in one session (owner-reported bug); state synced at PR time."
+    }
+  ]
 }

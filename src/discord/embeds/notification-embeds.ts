@@ -85,6 +85,23 @@ export interface AuditSummary {
   occurredAt?: string | null;
 }
 
+/**
+ * Who said what, as DISPLAY LABELS ready to drop into the embed (T-0205).
+ *
+ * Labels, not ids, because the producer is the only thing that knows whether a
+ * given member has a linked Discord identity. When they do, the label is a
+ * `<@snowflake>` mention — which renders as the member's own guild chip and,
+ * because Discord does not resolve mentions inside an embed, notifies nobody.
+ * That is the entire reason the roster can be shown at all: an event with forty
+ * RSVPs re-renders on every button press, and forty pings per press would be
+ * unusable. Members with no linked identity fall back to their in-game name.
+ */
+export interface EventRsvpRoster {
+  attending: string[];
+  tentative: string[];
+  declined: string[];
+}
+
 /** Everything an event announcement or reminder needs, resolved by the producer. */
 export interface EventSummary {
   title: string;
@@ -98,8 +115,8 @@ export interface EventSummary {
   bannerUrl: string | null;
   /** Human label: `One-off`, `Recurring (weekly)`, … */
   eventType: string;
-  /** How many members have RSVP'd (interested + tentative). */
-  rsvpCount: number;
+  /** The three RSVP sections the announcement's buttons write into. */
+  roster: EventRsvpRoster;
 }
 
 /** A decision on an enlistment application. */
@@ -407,10 +424,49 @@ export function buildEventEmbed(
       },
       { name: 'Duration', value: durationLabel(startsAt, endsAt, event.timezone), inline: true },
       { name: 'Type', value: event.eventType, inline: true },
-      { name: 'RSVPs', value: String(event.rsvpCount), inline: true },
+      // The three sections the buttons underneath write into (T-0205). They are
+      // ALWAYS rendered, empty included: a section that vanished when nobody had
+      // picked it would make the embed's shape jump on the first press, and a
+      // reader could not tell "nobody declined" from "declining isn't offered".
+      ...rosterField('✅ Attending', event.roster.attending),
+      ...rosterField('❔ Tentative', event.roster.tentative),
+      ...rosterField('❌ Declined', event.roster.declined),
     ],
     footer: { text: brand.name },
   });
+}
+
+/**
+ * One RSVP section: a headed count plus the names, or an em dash when nobody
+ * has picked it.
+ *
+ * The list is trimmed to WHOLE ENTRIES rather than left to `clampEmbed`'s
+ * character truncation. That is not a nicety: an entry is usually a
+ * `<@1234567890>` mention, and a mention cut in half renders as broken literal
+ * text — so the overflow is stated as "+N more" instead.
+ */
+function rosterField(name: string, labels: string[]): DiscordEmbedField[] {
+  return [{ name: `${name} — ${labels.length}`, value: rosterValue(labels), inline: false }];
+}
+
+/** Budget for one roster field's value, leaving room for the overflow marker. */
+const ROSTER_VALUE_BUDGET = 900;
+
+function rosterValue(labels: string[]): string {
+  if (labels.length === 0) return '—';
+  const shown: string[] = [];
+  let used = 0;
+  for (const label of labels) {
+    const cost = label.length + (shown.length ? 2 : 0);
+    if (used + cost > ROSTER_VALUE_BUDGET) break;
+    shown.push(label);
+    used += cost;
+  }
+  // Even one over-long label must not produce an empty field value — Discord
+  // rejects those outright (50035) and the whole announcement would fail.
+  if (shown.length === 0) return `${labels.length} member${labels.length === 1 ? '' : 's'}`;
+  const hidden = labels.length - shown.length;
+  return hidden > 0 ? `${shown.join(', ')} +${hidden} more` : shown.join(', ');
 }
 
 /** `in 15 minutes` / `in 2 hours` / `in 1 day` — the reminder's lead time. */

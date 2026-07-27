@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsDateString, IsEnum, IsOptional, IsString, MaxLength } from 'class-validator';
 import { IsShortId } from '../../common/ids/short-id';
 import { MemberRole } from '../../common/enums';
+import { MemberDto } from './member.dto';
 
 /** Change a member's rank (admin). */
 export class ChangeRankDto {
@@ -65,6 +66,38 @@ export class BanMemberDto {
   @IsString()
   @MaxLength(255)
   reason?: string;
+}
+
+/**
+ * The outcome of a "derive from Discord" run (T-0204).
+ *
+ * Unlike every other admin action, this one does not return a bare member: the
+ * whole point is that the caller did not know what would happen, so the response
+ * has to say what it found. "Nothing" is a normal, successful answer — reported
+ * as an empty rank + empty medal list with a summary that says so, never as an
+ * error — because "their roles already match the roster" is exactly what an
+ * admin sweeping a roster needs to hear.
+ */
+export class DeriveFromDiscordResultDto {
+  @ApiProperty({ type: MemberDto, description: 'The member as they stand after the derive' })
+  member: MemberDto;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'The rank adopted from Discord, or null when the rank was left alone',
+  })
+  rank: string | null;
+
+  @ApiProperty({
+    type: [String],
+    description: 'Titles of the medals newly credited (ones already held are skipped)',
+  })
+  medals: string[];
+
+  @ApiProperty({
+    description: 'One human sentence naming what was derived — the same one written to the audit',
+  })
+  summary: string;
 }
 
 /** GDPR: request deferred account deletion (self-service). */

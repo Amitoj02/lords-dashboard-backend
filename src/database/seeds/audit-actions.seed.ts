@@ -43,6 +43,15 @@ const ACTIONS = [
   { code: 'member.unban', label: 'Member unbanned', defaultSeverity: AuditSeverity.Info },
   { code: 'member.unsuspend', label: 'Member unsuspended', defaultSeverity: AuditSeverity.Info },
   {
+    code: 'member.derive_from_discord',
+    // Warn, not Info, even though the two writes it makes (rank + medals) are
+    // each Info on their own: this one grants standing an admin did not name,
+    // read out of a guild's role state, so it is the entry you want to be able
+    // to find later when someone asks where a rank came from.
+    label: 'Member rank/medals derived from Discord',
+    defaultSeverity: AuditSeverity.Warn,
+  },
+  {
     code: 'member.deletion.request',
     label: 'Account deletion requested',
     defaultSeverity: AuditSeverity.Warn,

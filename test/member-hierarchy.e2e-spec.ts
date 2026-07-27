@@ -45,11 +45,20 @@ const DISCORD_ID_ADMIN = '900900900900900811';
 const DISCORD_ID_MODERATOR = '900900900900900812';
 const DISCORD_ID_TARGET_ADMIN = '900900900900900813';
 const DISCORD_ID_TARGET_MEMBER = '900900900900900814';
+/** Promotion targets (T-0203) — one per case, never a fixture another test reads. */
+const DISCORD_ID_GRANT_ADMIN = '900900900900900815';
+const DISCORD_ID_GRANT_MODERATOR = '900900900900900816';
+const DISCORD_ID_GRANT_REFUSED = '900900900900900817';
+const DISCORD_ID_GRANT_ONE_WAY = '900900900900900818';
 const ALL_DISCORD_IDS = [
   DISCORD_ID_ADMIN,
   DISCORD_ID_MODERATOR,
   DISCORD_ID_TARGET_ADMIN,
   DISCORD_ID_TARGET_MEMBER,
+  DISCORD_ID_GRANT_ADMIN,
+  DISCORD_ID_GRANT_MODERATOR,
+  DISCORD_ID_GRANT_REFUSED,
+  DISCORD_ID_GRANT_ONE_WAY,
 ];
 
 /** The grants this suite needs and the seeded default it restores them to. */
@@ -121,6 +130,9 @@ describe('Member role hierarchy (e2e)', () => {
       (await request(server()).post(`/api/members/${id}/ban`).set(bearer(token)).send({})).status,
     unban: async (id, token) =>
       (await request(server()).post(`/api/members/${id}/unban`).set(bearer(token))).status,
+    deriveFromDiscord: async (id, token) =>
+      (await request(server()).post(`/api/members/${id}/derive-from-discord`).set(bearer(token)))
+        .status,
   };
 
   async function createMember(
@@ -353,6 +365,67 @@ describe('Member role hierarchy (e2e)', () => {
 
       expect(owner!.permittedActions.ban).toBe(false);
       expect(memberRow!.permittedActions.ban).toBe(true);
+    });
+  });
+
+  // ── T-0203: manage_roles appoints its own tier ───────────────────────────────
+
+  describe('the grant ceiling (T-0203)', () => {
+    /**
+     * A fresh Member target per case. The suite's shared fixtures are read by the
+     * tests above and below; a promotion must not mutate one out from under them.
+     */
+    const target = async (discordUserId: string): Promise<string> =>
+      (await createMember(discordUserId, MemberRole.Member)).member.id;
+
+    const grantRole = (targetId: string, token: string, role: MemberRole) =>
+      request(server()).post(`/api/members/${targetId}/role`).set(bearer(token)).send({ role });
+
+    it('an Admin holding manage_roles may appoint another Admin', async () => {
+      const targetId = await target(DISCORD_ID_GRANT_ADMIN);
+
+      const res = await grantRole(targetId, adminToken, MemberRole.Admin);
+
+      expect(res.status).toBe(201);
+      expect(res.body.role).toBe(MemberRole.Admin);
+      const stored = await dataSource.getRepository(Member).findOne({ where: { id: targetId } });
+      expect(stored!.role).toBe(MemberRole.Admin);
+    });
+
+    it('a Moderator holding manage_roles may appoint another Moderator', async () => {
+      const targetId = await target(DISCORD_ID_GRANT_MODERATOR);
+
+      const res = await grantRole(targetId, moderatorToken, MemberRole.Moderator);
+
+      expect(res.status).toBe(201);
+      expect(res.body.role).toBe(MemberRole.Moderator);
+    });
+
+    it('but never a tier above their own, and never Owner', async () => {
+      const targetId = await target(DISCORD_ID_GRANT_REFUSED);
+
+      expect((await grantRole(targetId, moderatorToken, MemberRole.Admin)).status).toBe(403);
+      expect((await grantRole(targetId, adminToken, MemberRole.Owner)).status).toBe(403);
+      expect((await grantRole(targetId, moderatorToken, MemberRole.Owner)).status).toBe(403);
+
+      const stored = await dataSource.getRepository(Member).findOne({ where: { id: targetId } });
+      expect(stored!.role).toBe(MemberRole.Member);
+    });
+
+    it('the appointment is one-way: the new peer is beyond the appointer’s reach', async () => {
+      // Appointing a peer is additive; moderating one is not. The Admin who just
+      // made this member an Admin can no longer demote, suspend or ban them —
+      // only the Owner can — so a seat holder widens the command, never hollows
+      // it out. The `permittedActions` flags say so too, so the UI folds the
+      // controls away rather than offering a button that 403s.
+      const promotedId = await target(DISCORD_ID_GRANT_ONE_WAY);
+      expect((await grantRole(promotedId, adminToken, MemberRole.Admin)).status).toBe(201);
+
+      expect((await grantRole(promotedId, adminToken, MemberRole.Member)).status).toBe(403);
+      const flags = await permittedActionsFor(promotedId, adminToken);
+      for (const action of MEMBER_ADMIN_ACTIONS) {
+        expect(`promoted.${action}: ${flags[action]}`).toBe(`promoted.${action}: false`);
+      }
     });
   });
 

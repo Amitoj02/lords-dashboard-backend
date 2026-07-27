@@ -88,6 +88,23 @@ export class RegimentEvent extends ShortIdEntity {
   @Column({ type: 'char', length: 12, nullable: true })
   recurrenceTemplateId: string | null;
 
+  /**
+   * The Discord role to ping when this event is ANNOUNCED (T-0205). Null ⇒ the
+   * announcement is posted silently.
+   *
+   * ⚠️ IT IS PINGED EXACTLY ONCE, AT CREATION. Not on the pre-event reminder,
+   * not when the embed is re-rendered after an RSVP, and not when the buttons
+   * are retired: a role ping is a notification to potentially the whole
+   * regiment, and one event must not be able to produce dozens of them. The
+   * lead-time notification reaches attendees through a thread on this same
+   * message instead, which pings only the people who said they were coming.
+   *
+   * Cloned onto every generated recurrence occurrence, because each occurrence
+   * gets its own announcement and therefore its own single ping.
+   */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  announceRoleId: string | null;
+
   @Column({ type: 'varchar', length: 120, nullable: true })
   serverName: string | null;
 

@@ -1,5 +1,5 @@
 import { DiscordSyncJobType } from '../common/enums';
-import { DiscordEmbed } from './gateway/discord-gateway';
+import { DiscordActionRow, DiscordEmbed, DiscordMentionAllowList } from './gateway/discord-gateway';
 
 /**
  * The typed shapes of `discord_sync_jobs.payload` (T-0172).
@@ -24,6 +24,39 @@ export interface ChannelMessagePayload {
   content?: string;
   /** Composed at enqueue time and already clamped to Discord's embed limits. */
   embed?: DiscordEmbed | null;
+}
+
+/**
+ * An EVENT announcement (T-0205): a channel message that also carries RSVP
+ * buttons, may ping one role, and reports back where it landed.
+ *
+ * Every added field is optional, so an `announce` row written before this change
+ * still drains as the plain embed post it was enqueued as.
+ */
+export interface EventAnnouncePayload extends ChannelMessagePayload {
+  /**
+   * The event this announces. Present ⇒ the worker records the resulting message
+   * id against it, which is what makes the announcement re-renderable later.
+   */
+  eventId?: string | null;
+  components?: DiscordActionRow[] | null;
+  /**
+   * The role to ping, as an EXPLICIT allow-list. The `@role` text lives in the
+   * message content; without a matching entry here it renders as an inert chip,
+   * which is exactly what happens on every later re-render.
+   */
+  mentions?: DiscordMentionAllowList | null;
+}
+
+/**
+ * A re-render / thread / close job for an announcement. Carries ONLY the event
+ * id: everything else is re-read at drain time, because the RSVP roster changes
+ * between enqueue and delivery — that is the whole reason the job exists.
+ */
+export interface EventAnnouncementPayload {
+  eventId: string;
+  /** Lead time in minutes, for the thread ping's own wording. */
+  minutesBefore?: number;
 }
 
 /** A direct message to one user. */
@@ -119,8 +152,11 @@ export interface DiscordJobPayloadMap {
   [DiscordSyncJobType.RoleRemove]: RoleTargetPayload;
   [DiscordSyncJobType.RoleSync]: RoleSyncPayload;
   [DiscordSyncJobType.MemberBanRole]: MemberBanRolePayload;
-  [DiscordSyncJobType.Announce]: ChannelMessagePayload;
+  [DiscordSyncJobType.Announce]: EventAnnouncePayload;
   [DiscordSyncJobType.EventReminder]: ChannelMessagePayload;
+  [DiscordSyncJobType.EventAnnouncementRefresh]: EventAnnouncementPayload;
+  [DiscordSyncJobType.EventThreadPing]: EventAnnouncementPayload;
+  [DiscordSyncJobType.EventAnnouncementClose]: EventAnnouncementPayload;
   [DiscordSyncJobType.ApplicationSubmitted]: ChannelMessagePayload;
   [DiscordSyncJobType.GallerySubmitted]: GalleryPostPayload;
   [DiscordSyncJobType.GalleryApproved]: GalleryPostPayload;
