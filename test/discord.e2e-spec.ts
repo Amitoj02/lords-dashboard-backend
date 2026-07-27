@@ -1327,6 +1327,28 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       );
     });
 
+    it('re-renders the announcement when the event is EDITED, without re-pinging (T-0207)', async () => {
+      // The channel must not keep advertising the details as they were when the
+      // event was first announced — that is worse than silence, because it is
+      // confidently wrong about when to turn up.
+      const before = (await announcement())!.messageId;
+
+      await request(server())
+        .patch(`/api/events/${eventId}`)
+        .set(bearer(ownerToken))
+        .send({ title: 'Line Battle — moved to Saturday' })
+        .expect(200);
+      await drainAll();
+
+      const message = mockGateway.sentMessages.find((m) => m.messageId === before);
+      expect(message?.embeds[0]?.title).toContain('moved to Saturday');
+      // Edited in place — no second announcement, and therefore no second ping.
+      expect(await announcement()).toMatchObject({ messageId: before });
+      expect(mockGateway.sentMessages.filter((m) => m.target === EVENT_CHANNEL)).toHaveLength(1);
+      const edit = mockGateway.editedMessages.get(before);
+      expect(JSON.stringify(edit)).not.toContain(PING_ROLE);
+    });
+
     it('opens a thread on the announcement at the lead time and pings only the attendees', async () => {
       // The whole point of the thread: it reaches the people who said they were
       // coming without a single DM, which Discord's policy treats as abuse.

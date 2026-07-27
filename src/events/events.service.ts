@@ -429,6 +429,18 @@ export class EventsService {
       after: this.snapshot(saved),
     });
 
+    // Push the edit out to the Discord announcement (T-0207). Everything the
+    // embed shows — title, description, banner, start, duration, type — is
+    // recomposed from the row at drain time, so this one call covers every
+    // field an author can change. Without it the channel kept advertising the
+    // details as they were when the event was FIRST announced, which is worse
+    // than not announcing at all: it is confidently wrong about when to turn up.
+    //
+    // NOT a re-post. It edits the message that already exists, so it cannot
+    // re-ping the announce role — the ping fired once, at creation, and an edit
+    // carries no mention allow-list at all.
+    await this.discordSync.enqueueEventAnnouncementRefresh(user.regimentId, saved.id);
+
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
   }
 
@@ -444,6 +456,13 @@ export class EventsService {
       actor: AuditService.actorFromUser(user, ip),
       target: { type: 'event', id: saved.id, label: saved.title },
     });
+
+    // Archiving hides the event from the calendar, so its announcement must stop
+    // taking RSVPs too (T-0207). Nothing else would ever retire it: the
+    // close sweep looks for ENDED events, and an archived one never reaches
+    // `previous` because the status sweep skips it — so without this the channel
+    // would keep live buttons, forever, for an event members can no longer see.
+    await this.discordSync.enqueueEventAnnouncementClose(user.regimentId, saved.id);
 
     return this.serializeOne(saved, { includeServer: true, memberId: user.memberId });
   }
@@ -631,6 +650,17 @@ export class EventsService {
       detail:
         dto.cascade === true ? `Cascaded to ${siblings.length} generated occurrence(s)` : null,
     });
+
+    // A re-anchor moves the START TIME, which is the single most load-bearing
+    // line in the announcement — so every row it touched is refreshed, the
+    // cascaded occurrences included (T-0207). Each has its own announcement, and
+    // an occurrence whose card still shows last week's muster time is exactly
+    // the failure this is for. The enqueues no-op for rows that were never
+    // announced, so a cascade over sixty occurrences costs sixty cheap lookups
+    // and queues only the handful that have a live message.
+    for (const step of plan) {
+      await this.discordSync.enqueueEventAnnouncementRefresh(user.regimentId, step.row.id);
+    }
 
     return this.serializeOne(event, { includeServer: true, memberId: user.memberId });
   }
