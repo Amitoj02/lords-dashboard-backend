@@ -140,6 +140,7 @@ describe('EventsService', () => {
   const discordSync = {
     enqueueEventAnnounce: jest.fn().mockResolvedValue(null),
     enqueueEventAnnouncementRefresh: jest.fn().mockResolvedValue(null),
+    enqueueEventAnnouncementClose: jest.fn().mockResolvedValue(null),
   };
   const storage = {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
@@ -747,6 +748,43 @@ describe('EventsService', () => {
     });
   });
 
+  describe('keeping the Discord announcement honest (T-0207)', () => {
+    it('re-renders the announcement after an edit', async () => {
+      // Everything the embed shows — title, description, BANNER, start, duration
+      // — is recomposed from the row at drain time, so one refresh covers every
+      // field an author can change. Without it the channel keeps advertising the
+      // details as they were when the event was first announced, which is worse
+      // than silence: it is confidently wrong about when to turn up.
+      events.findOne.mockResolvedValue(buildEvent());
+
+      await service.update(user(), 'event-1', { title: 'Moved to Saturday' }, null);
+
+      expect(discordSync.enqueueEventAnnouncementRefresh).toHaveBeenCalledWith(REGIMENT, 'event-1');
+    });
+
+    it('does NOT re-announce — an edit can never re-ping the role', async () => {
+      // The ping fires once, at creation. An edit takes the refresh path, which
+      // edits the existing message and carries no mention allow-list at all.
+      events.findOne.mockResolvedValue(buildEvent());
+
+      await service.update(user(), 'event-1', { title: 'Renamed' }, null);
+
+      expect(discordSync.enqueueEventAnnounce).not.toHaveBeenCalled();
+    });
+
+    it('retires the announcement when the event is ARCHIVED', async () => {
+      // Nothing else would ever close it: the close sweep looks for ENDED
+      // events, and an archived one never reaches `previous` because the status
+      // sweep skips it. Without this the channel keeps live RSVP buttons for an
+      // event members can no longer see.
+      events.findOne.mockResolvedValue(buildEvent());
+
+      await service.archive(user(), 'event-1', null);
+
+      expect(discordSync.enqueueEventAnnouncementClose).toHaveBeenCalledWith(REGIMENT, 'event-1');
+    });
+  });
+
   describe('update recurrence (T-0074)', () => {
     it('permanently stops a recurring template via recurrenceActive=false', async () => {
       events.findOne.mockResolvedValue(
@@ -1292,6 +1330,26 @@ describe('EventsService', () => {
           'occ-1',
           'tmpl-1',
         ]);
+      });
+
+      it('refreshes the announcement of EVERY row it moved (T-0207)', async () => {
+        // A re-anchor moves the start time, which is the most load-bearing line
+        // in the announcement. Each occurrence has its own message, so an
+        // occurrence card still showing last week's muster time is exactly the
+        // failure this covers — the template alone is not enough.
+        series('America/New_York');
+
+        await service.reanchor(
+          user(),
+          'tmpl-1',
+          { expectStartsAtLocal: '2026-07-13T21:57:00', cascade: true },
+          null,
+        );
+
+        const refreshed = discordSync.enqueueEventAnnouncementRefresh.mock.calls.map(
+          ([, id]) => id as string,
+        );
+        expect(refreshed.sort()).toEqual(['occ-1', 'occ-2', 'occ-3', 'tmpl-1']);
       });
 
       it('writes earliest-first when the shift moves occurrences EARLIER', async () => {

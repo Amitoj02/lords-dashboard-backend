@@ -243,6 +243,17 @@ export class DiscordSyncService {
     eventId: string,
   ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async () => {
+      // Nothing to re-render, and nothing to say about it. Checked HERE rather
+      // than left to the worker because the callers fan out: a re-anchor with
+      // cascade refreshes every occurrence in the series (T-0207), and most of
+      // those have never been announced. Queuing a job per row to discover that
+      // would be pure churn through the outbox.
+      //
+      // A CLOSED announcement is skipped too — an edit to an ended or archived
+      // event must not put its RSVP buttons back.
+      const delivery = await this.announcements.findDelivery(eventId);
+      if (!delivery || delivery.closedAt) return null;
+
       const pending = await this.jobs
         .createQueryBuilder('job')
         .where('job.regimentId = :regimentId', { regimentId })
