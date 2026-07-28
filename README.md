@@ -270,9 +270,12 @@ Legal documents are stored as Markdown and are **not sanitised server-side** —
 | GET    | `/members/me/export`                                               | self-service (data export)      |
 | POST   | `/members/me/deletion-request`, `/confirm`, `/execute`, `/cancel`  | self-service (account deletion) |
 
-Admin actions on a _specific_ member are additionally gated on a server-computed `permittedActions` block, so the client's action menu cannot drift from what the API will accept.
+Admin actions on a _specific_ member are additionally gated on a server-computed `permittedActions` block, so the client's action menu cannot drift from what the API will accept. That per-target rule comes in two tiers:
 
-`derive-from-discord` credits a member with the rank and medals their existing Discord roles already say they earned — the manual counterpart to the carry-over an enlistment performs. Promotion-only (their current rank is the floor), additive-only on medals, and safe to press twice. Never permitted on your own record: a derive hands out whatever the target's roles say, so on yourself it would be a self-promotion.
+- **Moderation** (`role`, `suspend`, `unsuspend`, `ban`, `unban` — `manage_roles`): not yourself, not the regiment owner, and only against a **strictly lower** role. So an Admin cannot demote a peer Admin; only the Owner can. The role a caller may _grant_ is separately capped at their own tier — an Admin may appoint another Admin, a Moderator another Moderator, and nobody the Owner.
+- **Rank & medals** (`rank`, `medals`, `derive-from-discord` — `edit_ranks_medals`): **any** roster member except yourself, the owner and your seniors included. A rank or a medal is a record of what someone did, not authority over them, so whoever keeps the service record can keep all of it.
+
+`derive-from-discord` credits a member with the rank and medals their existing Discord roles already say they earned — the manual counterpart to the carry-over an enlistment performs. Promotion-only (their current rank is the floor), additive-only on medals, and safe to press twice. Never permitted on your own record, and that is now its **only** target restriction: a derive hands out whatever the target's roles say, so on yourself it would be a self-promotion.
 
 </details>
 

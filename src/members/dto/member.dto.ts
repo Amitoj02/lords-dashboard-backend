@@ -43,39 +43,44 @@ export class MemberMedalSummary {
  * Which admin actions the CALLER may perform on THIS member (T-0177), derived
  * from the same predicate the endpoints enforce (see `member-hierarchy.ts`), so
  * the client can grey out an action instead of discovering the 403 by trying
- * it. A flag is true only when the role hierarchy allows the action AND the
+ * it. A flag is true only when the target-scoped rule allows the action AND the
  * caller holds the capability the route requires — there is never a permitted
  * flag where the endpoint would refuse, nor a refusal where the flag was true.
+ *
+ * The flags are computed per action and can legitimately disagree (T-0211): on
+ * a peer or a superior, an edit_ranks_medals holder gets the four rank/medal
+ * actions true and the five moderation ones false. A block is a per-action
+ * answer, never one verdict copied nine times.
  */
 export class PermittedActionsDto {
-  @ApiProperty({ description: 'Requires manage_roles' })
+  @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
   changeRole: boolean;
 
-  @ApiProperty({ description: 'Requires edit_ranks_medals' })
+  @ApiProperty({ description: 'Requires edit_ranks_medals; any target but yourself' })
   changeRank: boolean;
 
-  @ApiProperty({ description: 'Requires edit_ranks_medals' })
+  @ApiProperty({ description: 'Requires edit_ranks_medals; any target but yourself' })
   awardMedal: boolean;
 
-  @ApiProperty({ description: 'Requires edit_ranks_medals' })
+  @ApiProperty({ description: 'Requires edit_ranks_medals; any target but yourself' })
   removeMedal: boolean;
 
-  @ApiProperty({ description: 'Requires manage_roles' })
+  @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
   suspend: boolean;
 
-  @ApiProperty({ description: 'Requires manage_roles' })
+  @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
   unsuspend: boolean;
 
-  @ApiProperty({ description: 'Requires manage_roles' })
+  @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
   ban: boolean;
 
-  @ApiProperty({ description: 'Requires manage_roles' })
+  @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
   unban: boolean;
 
   @ApiProperty({
     description:
-      'Requires edit_ranks_medals. Never true on your own record — a derive is a ' +
-      'self-promotion there (T-0204)',
+      'Requires edit_ranks_medals; any target but yourself. Never true on your own ' +
+      'record — a derive is a self-promotion there (T-0204)',
   })
   deriveFromDiscord: boolean;
 }

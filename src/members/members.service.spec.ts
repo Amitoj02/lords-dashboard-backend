@@ -33,7 +33,9 @@ import { Member } from './entities/member.entity';
 import { MembersService } from './members.service';
 import {
   ACTION_CAPABILITY,
+  DECORATION_ACTIONS,
   MEMBER_ADMIN_ACTIONS,
+  MODERATION_ACTIONS,
   MemberAdminAction,
   ROLE_PRECEDENCE,
 } from './member-hierarchy';
@@ -844,9 +846,11 @@ describe('MembersService', () => {
         },
       );
 
-      it('reads Discord only AFTER the hierarchy guard has cleared the caller', async () => {
+      it('reads Discord only AFTER the self guard has cleared the caller', async () => {
         // Own record: refused. The guild must not be touched on the way to a 403 —
         // a refused derive is not an excuse to go asking Discord about somebody.
+        // Since T-0211 self is the only refusal a derive has, so this ordering
+        // proof carries the whole guard.
         memberRepo.findOne.mockResolvedValue(buildMember({ id: 'admin-1' }));
 
         await expect(service.deriveFromDiscord('admin-1', admin(), null)).rejects.toBeInstanceOf(
@@ -1033,10 +1037,16 @@ describe('MembersService', () => {
 
     // The capability guard on the controller knows the caller's ROLE but never
     // the target, so before T-0176 nothing stopped an Admin from demoting the
-    // Owner or a Moderator from banning an Admin. Each case below runs every
-    // one of the eight actions, because four of them (rank, medal award/remove,
-    // unban) previously carried no target guard whatsoever.
-    describe('role hierarchy guard (T-0176)', () => {
+    // Owner or a Moderator from banning an Admin.
+    //
+    // The cases below are stated per FAMILY (T-0211). The owner and standing
+    // refusals belong to the five moderation actions; the four rank/medal ones
+    // keep the self refusal and nothing else, so each "cannot" case has a
+    // "but may decorate" twin. A case that still fans over all nine actions —
+    // self, Moderator→Member, Owner→Admin — is asserting something the split
+    // did not touch, and is the evidence nothing was over-relaxed or
+    // over-tightened.
+    describe('role hierarchy guard (T-0176, split in T-0211)', () => {
       /**
        * A target whose state would otherwise let every action through — banned
        * AND actively suspended — so a refusal can only be the authorization
@@ -1075,7 +1085,24 @@ describe('MembersService', () => {
         expect(discordSync.enqueueMemberBanRole).not.toHaveBeenCalled();
       };
 
-      it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s the regiment owner', async (action) => {
+      /** The mirror of {@link expectRefusedWithoutTrace}: the guard let it past. */
+      const expectPermitted = async (
+        action: MemberAdminAction,
+        actor: AuthenticatedUser,
+        target: Member,
+      ): Promise<void> => {
+        memberRepo.findOne.mockResolvedValue(target);
+
+        // Only the AUTHORIZATION verdict is under test — the action's own state
+        // checks (an unstubbed rank lookup 404s, a derive finds nothing) are not
+        // refusals of the actor. `wasForbidden` draws exactly that line.
+        const cell = `${action} on ${target.role} ${target.id}`;
+        expect(
+          `${cell}: refused=${await wasForbidden(invokeAction[action](actor, target.id))}`,
+        ).toBe(`${cell}: refused=false`);
+      };
+
+      it.each(MODERATION_ACTIONS)('an Admin cannot %s the regiment owner', async (action) => {
         await expectRefusedWithoutTrace(
           action,
           user({ memberId: 'admin-1', role: MemberRole.Admin }),
@@ -1083,8 +1110,30 @@ describe('MembersService', () => {
         );
       });
 
-      it.each(MEMBER_ADMIN_ACTIONS)('a Moderator cannot %s an Admin', async (action) => {
+      // The owner pointer guards the SEAT, not the service record. Awarding the
+      // owner a medal takes nothing from anyone, so the regiment's record-keeper
+      // is not blocked from writing down what the owner did (T-0211).
+      it.each(DECORATION_ACTIONS)('but an Admin may %s the regiment owner', async (action) => {
+        await expectPermitted(
+          action,
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          moderatable({ id: 'owner-member', role: MemberRole.Owner }),
+        );
+      });
+
+      it.each(MODERATION_ACTIONS)('a Moderator cannot %s an Admin', async (action) => {
         await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'moderator-1', role: MemberRole.Moderator }),
+          moderatable({ id: 'admin-9', role: MemberRole.Admin }),
+        );
+      });
+
+      // The case T-0211 exists for: a Moderator trusted with edit_ranks_medals
+      // was refused against every peer and superior on the roster, which is most
+      // of the people whose promotions are worth recording.
+      it.each(DECORATION_ACTIONS)('but a Moderator may %s an Admin', async (action) => {
+        await expectPermitted(
           action,
           user({ memberId: 'moderator-1', role: MemberRole.Moderator }),
           moderatable({ id: 'admin-9', role: MemberRole.Admin }),
@@ -1093,8 +1142,16 @@ describe('MembersService', () => {
 
       // Peers do not moderate peers: only the Owner may act on an Admin. Two
       // Admins who fall out must not be able to demote each other.
-      it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s a peer Admin', async (action) => {
+      it.each(MODERATION_ACTIONS)('an Admin cannot %s a peer Admin', async (action) => {
         await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          moderatable({ id: 'admin-9', role: MemberRole.Admin }),
+        );
+      });
+
+      it.each(DECORATION_ACTIONS)('but an Admin may %s a peer Admin', async (action) => {
+        await expectPermitted(
           action,
           user({ memberId: 'admin-1', role: MemberRole.Admin }),
           moderatable({ id: 'admin-9', role: MemberRole.Admin }),
@@ -1103,6 +1160,11 @@ describe('MembersService', () => {
 
       // T-0150 covered role/suspend/ban only; the rank and medal actions were
       // self-targetable until T-0176 folded them into the same guard.
+      //
+      // ⚠️ ALL NINE, and it must stay that way. Since T-0211 this is the ONLY
+      // target guard the four decoration actions have — narrowing this fan the
+      // way its three neighbours were narrowed would re-open self-promotion to
+      // anyone holding edit_ranks_medals.
       it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s their own account', async (action) => {
         await expectRefusedWithoutTrace(
           action,
@@ -1151,6 +1213,75 @@ describe('MembersService', () => {
 
         // The guard hands its read to the projection that follows the write.
         expect(regimentRepo.findOne).toHaveBeenCalledTimes(1);
+      });
+
+      // The decoration half no longer NEEDS the owner pointer to decide anything,
+      // which is exactly why the read looks removable. The projection still needs
+      // it: drop it here and every rank change re-reads `regiments` — or worse,
+      // projects flags against a second read that could differ (T-0211).
+      it('still reads it once on a decoration action, where the guard no longer uses it', async () => {
+        memberRepo.findOne.mockResolvedValue(buildMember({ id: 'member-9' }));
+        rankRepo.findOne.mockResolvedValue({ id: 'rank-9', name: 'Captain', precedence: 1 });
+        memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
+        attendeeRepo.count.mockResolvedValue(0);
+
+        await service.changeRank(
+          'member-9',
+          { rankId: 'rank-9' },
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          null,
+        );
+
+        expect(regimentRepo.findOne).toHaveBeenCalledTimes(1);
+      });
+
+      // "Permitted" proven by a WRITE, not merely by the absence of a 403: the
+      // relaxed path has to land a rank on the row, a service-record entry and an
+      // audit row, exactly as it does for a junior target.
+      it('a decoration against a superior leaves its full trace, not a silent no-op', async () => {
+        memberRepo.findOne.mockResolvedValue(
+          buildMember({ id: 'owner-member', role: MemberRole.Owner }),
+        );
+        rankRepo.findOne.mockResolvedValue({ id: 'rank-9', name: 'Colonel', precedence: 1 });
+        memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
+        attendeeRepo.count.mockResolvedValue(0);
+
+        await service.changeRank(
+          'owner-member',
+          { rankId: 'rank-9' },
+          user({ memberId: 'moderator-1', role: MemberRole.Moderator }),
+          null,
+        );
+
+        expect(memberRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'owner-member', rankId: 'rank-9' }),
+        );
+        expect(serviceRecordRepo.save).toHaveBeenCalledTimes(1);
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'member.rank.change' }),
+        );
+      });
+
+      it('and an award against a superior is a real award', async () => {
+        memberRepo.findOne.mockResolvedValue(
+          buildMember({ id: 'admin-9', role: MemberRole.Admin }),
+        );
+        medalRepo.findOne.mockResolvedValue({ id: 'medal-1', title: 'Valour' });
+        attendeeRepo.count.mockResolvedValue(0);
+
+        await service.awardMedal(
+          'admin-9',
+          { medalId: 'medal-1' },
+          user({ memberId: 'moderator-1', role: MemberRole.Moderator }),
+          null,
+        );
+
+        expect(memberMedalRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ memberId: 'admin-9', medalId: 'medal-1' }),
+        );
+        expect(audit.record).toHaveBeenCalledWith(
+          expect.objectContaining({ action: 'medal.award' }),
+        );
       });
 
       // Mercenary sits strictly BELOW Member on the ladder (a mercenary rides

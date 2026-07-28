@@ -1249,6 +1249,10 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     });
 
     it('refuses your OWN record, where a derive would be a self-promotion', async () => {
+      // Self is the ONLY refusal a derive has left (T-0211) — the owner pointer
+      // and the standing rule no longer apply to a rank/medal write. This target
+      // happens to be both self and the owner; the non-owner self case, and the
+      // permitted peer/superior cases, live in member-hierarchy.e2e-spec.
       await derive(ownerMemberId).expect(403);
     });
 
