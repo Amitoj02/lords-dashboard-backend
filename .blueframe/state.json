@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "28388a9eae45dfce03f3d972caa625f4d6ae424e",
-  "lastSyncedAt": "2026-07-28T01:40:00Z",
-  "notesForNextSession": "BACKUPS NOW WORK - and had never worked before 2026-07-27. r2:lords-backups was empty from go-live until this session; T-0208 has the whole story (rclone in ~/bin, absent from a systemd user unit's PATH, and a 127 swallowed by `|| fail \"rclone upload failed\"`). Production is running the fixed scripts already - they were installed to ~/bin and ~/lords/deploy by hand and md5-match the repo. THE REPO IS THE HALF THAT IS BEHIND: branch fix/backup-rclone-path is committed locally and not pushed, so open the PR into dev before anything else touches deploy/. Two things to actually finish: (1) SET BACKUP_HEARTBEAT_URL in ~/lords/backup.env - it is blank, and its blankness is why a week of failures was invisible; the code fix cannot report a timer that does not run. (2) Confirm the first UNATTENDED 03:30 UTC run succeeded - a manual `systemctl --user start` shares nothing with the timer but the unit file. Also note ~/lords/backup.env now has BACKUP_MIN_BYTES=50000 (real dump is ~107 KB); that file is operator-owned and not in git, so a box rebuild reverts it to 20000. Recorded RTO: 1-2s. The avatar upload round-trip is now the only never-verified item from go-live.",
-  "nextIdCounter": 209,
+  "lastSyncedCommit": "17d99fa5dfcf0aa954ea47241d2a73b8255cc254",
+  "lastSyncedAt": "2026-07-28T16:45:00Z",
+  "notesForNextSession": "T-0211 is the live thread: an edit_ranks_medals holder can now set the rank and medals of ANY member except themselves - peers, seniors and the regiment owner included - while role/suspend/ban keep the full hierarchy untouched. Open as a PR into dev in BOTH repos (feat/rank-medal-decoration-exemption in each; frontend task id T-0285). The one rule that must not be undone: in member-hierarchy.ts `denyReason`, the SELF check sits ABOVE the `isDecorationAction` short-circuit and the owner/outrank checks sit BELOW it. Self is now the ONLY target guard on changeRank/awardMedal/removeMedal/deriveFromDiscord, so reordering those three lines re-opens self-promotion to anyone holding the capability. Do not hand-write ModerationAction (it is Exclude<MemberAdminAction, DecorationAction>, which is what makes a NEW action fail closed into the strict rule) and do not widen OWNER_REFUSALS beyond ModerationAction. Note member-hierarchy.e2e now writes the shared seeded owner row and restores it in afterAll - if that suite ever crashes mid-run, re-create the e2e database rather than trusting the owner's rank. Still open from last session: T-0209 (merged to dev) left the resync fan-out with no batchId, so the only destructive path is also the one that cannot be cancelled or polled; T-0210 (what suspension and unban do to Discord roles - the owner deferred it, and applyBanRoleOnBan is still OFF in production so the whole ban->Discord path remains untested against the real guild). Still true: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank, and the first unattended 03:30 UTC backup run has not been confirmed.",
+  "nextIdCounter": 212,
   "connections": [],
   "tasks": [
     {
@@ -10898,8 +10898,11 @@
       "regressionRisk": [
         {
           "desc": "Touches reconcileRoles, the shared convergence routine used by every rank change, medal award and post-approval sync - an over-broad strip set would remove roles the app does not own",
-          "status": "open",
-          "notedAt": "2026-07-22T19:30:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-22T19:30:00Z",
+          "resolvedAt": "2026-07-28T14:45:00Z",
+          "resolvedBy": "T-0209",
+          "note": "Retired by T-0209: reconcileRoles is no longer shared by rank changes, medal awards or the post-approval sync. Those enqueue a scoped or additive job; the over-broad strip survives only behind POST /api/discord/resync."
         }
       ],
       "skippedByClaude": [],
@@ -13186,7 +13189,10 @@
       "regressionRisk": [
         {
           "note": "reconcileRoles no longer exempts the membership role from stripping. Any guild member holding the OLD join role who is not an enrolled member loses it on their next reconcile \u2014 intended, but it is a real role removal against real people the first time the bot runs with syncRolesOnChange on.",
-          "status": "open"
+          "status": "resolved",
+          "resolvedAt": "2026-07-28T14:45:00Z",
+          "resolvedBy": "T-0209",
+          "resolutionNote": "Narrowed by T-0209: the membership role is still revoked from a non-enrolled member, but only by a scoped sync naming that one id or by the operator resync - no longer as collateral of an unrelated mutation, and never via the (now removed) blind sweep."
         },
         {
           "note": "Visitors with no member row are never reconciled at all, so a stale join-role grant on a non-member is NOT cleaned up by this change and needs a manual sweep in Discord.",
@@ -14203,8 +14209,11 @@
         },
         {
           "desc": "The derive enqueues a reconcile, which will STRIP a managed role the roster deliberately did not adopt (a protected-rank role, or a rank role below the member's current one). That is the same reconcile any rank change already triggers, but a button labelled 'derive FROM Discord' also writing TO Discord is not obvious from its name or its hint.",
-          "status": "open",
-          "notedAt": "2026-07-27T16:40:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-27T16:40:00Z",
+          "resolvedAt": "2026-07-28T14:45:00Z",
+          "resolvedBy": "T-0209",
+          "note": "Retired by T-0209: the derive now enqueues a two-id rank swap plus an ADDITIVE grant, so a managed role the adoption deliberately declined (a protected-rank role, a rank below the floor) is no longer taken off after the fact."
         }
       ],
       "skippedByClaude": [
@@ -14614,6 +14623,339 @@
           "note": "found while the owner was checking whether backups worked at all; diagnosed, fixed, and verified against real R2 in the same session"
         }
       ]
+    },
+    {
+      "id": "T-0209",
+      "title": "Stop ordinary admin actions purging a member's Discord roles",
+      "summary": "Owner report: 'the bot is randomly deleting people's discord roles which are correct' - reproduced by promoting a Moderator to Admin, which succeeded and took the member's decorations off. ROOT CAUSE: all five member mutations (changeRank/changeRole/awardMedal/removeMedal/deriveFromDiscord) funnelled into one `syncMemberRoles` helper enqueuing a RoleSync job whose payload carried {memberId, discordUserId} and nothing else. The DELTA was discarded at the enqueue boundary and unrecoverable at drain time, so the worker had no choice but to recompute the member's whole desired set and strip every MANAGED role (any role linked to any rank or medal, plus the membership role) the roster could not account for. For a regiment that lived on Discord before it had a dashboard that is every decoration handed out by hand - and a Moderator->Admin promotion cannot legitimately change a single rank or medal role, so 100% of what that job removed was collateral. FIX: convergence splits into three modes with disjoint reach. RoleGrant (wire value stays 'role.sync' so queued rows drain under the new rule with no pre-deploy SQL) adds and is structurally unable to remove - approval, rejoin and derive use it. RoleScopedSync converges ONLY the ids named in its payload, so a rank change is two roles, a medal award/removal is one, and an app-role change is the membership role alone; direction is decided at DRAIN time by re-deriving what the member should hold, which is what makes a repeatable medal's surviving duplicate award keep its role for free. RoleFullResync keeps the old destructive diff and is reachable ONLY from POST /api/discord/resync. Also: the blind sweep is gone (fetchMember returns null identically for 'left the guild' and 'Discord did not answer', so a transient failure escalated a diff into a catalogue-wide purge issued against a member nobody had read); every role job now re-checks botEnabled/syncRolesOnChange at drain time, so the switch means 'stop' rather than 'stop enqueuing'; resyncAll honours syncRolesOnChange; and RoleRelinkApply forwards incomingRoleId and drains as a two-id scoped sync. The 'Permission denied' half was NOT a 403: an Admin who promotes a Moderator to Admin can no longer moderate that peer, so the returned projection zeroes every permittedAction and the modal replaced its controls with 'You don't have permission to manage this member' in the same tick as the success toast. The notice now names the rule instead.",
+      "status": "review",
+      "type": "bug",
+      "size": "M",
+      "sizeWeight": 5,
+      "area": "discord-bot",
+      "feature": "role-sync",
+      "subfeature": "scoped-convergence",
+      "repo": "",
+      "paths": [
+        "src/common/enums/index.ts",
+        "src/discord/discord-job-payloads.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord-sync.worker.spec.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "src/discord/discord-onboarding.service.ts",
+        "src/members/members.service.ts",
+        "src/members/members.service.spec.ts",
+        "src/applications/applications.service.ts",
+        "test/discord.e2e-spec.ts",
+        "lords-regiment-dashboard:src/app/core/models/member.model.ts",
+        "lords-regiment-dashboard:src/app/features/member/admin-action-modal/admin-action-modal.component.ts",
+        "lords-regiment-dashboard:src/app/features/member/admin-action-modal/admin-action-modal.component.html"
+      ],
+      "dependsOn": [
+        "T-0159",
+        "T-0191",
+        "T-0202",
+        "T-0204"
+      ],
+      "blocks": [],
+      "questions": [],
+      "resolvesRisk": "T-0159#0",
+      "testPlan": [
+        {
+          "desc": "a rank change converges exactly the two rank roles; an unrecorded medal role and an unmanaged role survive",
+          "status": "passed"
+        },
+        {
+          "desc": "a Moderator->Admin promotion issues ZERO Discord calls (both tiers hold the membership role)",
+          "status": "passed"
+        },
+        {
+          "desc": "removing one award of a repeatable medal KEEPS the role while another award survives",
+          "status": "passed"
+        },
+        {
+          "desc": "RoleGrant removes nothing, not even a managed role the roster cannot account for",
+          "status": "passed"
+        },
+        {
+          "desc": "an unreadable member (fetchMember null) gets the additive half only - no blind strip, in any mode",
+          "status": "passed"
+        },
+        {
+          "desc": "every role job re-checks botEnabled/syncRolesOnChange at drain time",
+          "status": "passed"
+        },
+        {
+          "desc": "a relink payload queued before this change degrades to the strip-only swap T-0159 shipped",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: rank change swaps only the rank roles, with the mock gateway seeded and an unmanaged control role",
+          "status": "passed"
+        },
+        {
+          "desc": "frontend: the peer-appointment lockout is explained by name, not as 'no permission'",
+          "status": "passed"
+        },
+        {
+          "desc": "a relink row queued before T-0209 still APPLIES the incoming role (additive pass), not just the strip",
+          "status": "passed"
+        },
+        {
+          "desc": "the operator resync still runs with syncRolesOnChange off, and stops when the bot is off",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Renames the DiscordSyncJobType member RoleSync -> RoleGrant while KEEPING the wire value 'role.sync'. Deliberate (queued rows drain under the safe new semantics with no pre-deploy SQL), but code and database now disagree on the name: anyone reading discord_sync_jobs.job_type sees 'role.sync' for what the code calls a grant. The bot-operations ledger stores job.jobType verbatim, so historical rows mix the old destructive meaning and the new additive one under one string.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "The blind sweep is gone, so a superseded rank role on a member the gateway cannot read is no longer removed by that member's own sync. It is removed by the next successful scoped sync or by POST /api/discord/resync. On a regiment whose gateway is persistently unreachable, strips now never happen at all - the intended direction to fail in, but a behaviour change from 'strip anyway'.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "resyncAll is gated on botEnabled ALONE, deliberately not on syncRolesOnChange - a manual Resync is neither automatic nor 'on change', and it is now the only path that clears a managed role the roster cannot account for. Consequence: turning role syncing off does NOT stop an operator-triggered resync from stripping roles. The bot master switch is the only thing that does.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "A resync fan-out is one RoleFullResync job per linked member (~576 in production) and is NOT in BULK_JOB_TYPES, so it takes the full tick budget ahead of announcements/DMs and writes one operations-ledger row each. It also carries no batchId, so it cannot be cancelled or polled. Pre-existing, but it matters more now that this is the ONLY destructive path.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "'Only the operator resync strips broadly' is true of the reconcile family but NOT absolutely: MemberBanRole -> applyBanRole still removes every managed role the member wears and IS produced by a member mutation (members.service ban). Pre-existing and owner-gated behind applyBanRoleOnBan (default off), and it is the one strip the owner explicitly wants - but the claim needs that caveat wherever it is repeated.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Suspension still does NOT touch Discord - owner chose to leave it out of this PR (see T-0210).",
+        "applyBanRoleOnBan left at its default OFF; the owner asked to re-review that flow before enabling, and this change does not touch it.",
+        "unban/unsuspend still do not restore roles or remove the Ban role; deferred with T-0210 since the ban strip is inert in production today.",
+        "resyncAll was NOT given a batchId or moved into BULK_JOB_TYPES - the batch progress/cancel endpoints are keyed to the RoleRelinkApply/Expand job types and would report total=0 for a resync batch. Recorded as a regression risk instead.",
+        "No migration written: discord_sync_jobs.job_type is varchar(40), not an enum column, so the two new values need no schema change.",
+        "An adversarial review caught three real defects in the first cut, all fixed before commit: legacy relink rows (no incomingRoleId) would have stripped the outgoing role without ever applying the incoming one; gating resyncAll on syncRolesOnChange silently disabled the manual Resync button; and the new lockout notice claimed 'only the Owner can' when the server rule is strict precedence, which is wrong for any target below Admin."
+      ],
+      "lastTouchedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
+      "createdAt": "2026-07-28T14:45:00Z",
+      "updatedAt": "2026-07-28T14:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T14:45:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner bug report: promoting a moderator to admin succeeded, showed 'Permission denied', and destroyed the member's Discord roles. Both halves diagnosed and fixed on fix/discord-role-scoped-sync (backend) + fix/admin-modal-peer-lockout-copy (frontend). 1000 unit + 140 e2e + 618 frontend tests green. Owner decisions this session: leave suspension alone this PR; never strip blind. PRs open and CI green: backend #67, frontend Amitoj02/lords-regiment-dashboard#57."
+        }
+      ]
+    },
+    {
+      "id": "T-0210",
+      "title": "Decide and wire what suspension + unban do to Discord roles",
+      "summary": "Owner stated the intended policy as 'remove all the discord roles when the user is banned OR suspended, to give him the ban discord role'. Today only BAN enqueues the strip-all + Ban-role job, and even that is inert: applyBanRoleOnBan defaults OFF and the owner asked to re-review the flow before enabling it. suspend() touches Discord not at all. The reverse legs are missing too - unban and unsuspend neither remove the Ban role nor restore the member's rank/medal/membership roles, so once the ban strip IS enabled a lifted ban leaves the member stripped and still wearing the Ban role. Open question the owner deferred in T-0209: does suspension reuse applyBanRoleOnBan + banRoleId (simple, but a suspended member visibly wears a role labelled 'Ban'), or get its own settings column, role picker and copy? Deciding that decides whether a migration and frontend settings work are in scope.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 3,
+      "area": "discord-bot",
+      "feature": "role-sync",
+      "subfeature": "ban-and-suspension-roles",
+      "repo": "",
+      "paths": [
+        "src/members/members.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/entities/discord-bot-settings.entity.ts"
+      ],
+      "dependsOn": [
+        "T-0209"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should suspension reuse the existing applyBanRoleOnBan switch and Ban role, or get its own setting and role?",
+          "status": "open",
+          "askedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "q": "When should applyBanRoleOnBan actually be turned on in production? It has been OFF since go-live, so the whole ban->Discord path is untested against the real guild.",
+          "status": "open",
+          "askedAt": "2026-07-28T14:45:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "suspending strips managed roles and applies the configured role, behind whichever switch is chosen",
+          "status": "pending"
+        },
+        {
+          "desc": "unsuspend/unban remove the Ban role AND restore rank/medal/membership roles via the additive grant",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "",
+      "createdAt": "2026-07-28T14:45:00Z",
+      "updatedAt": "2026-07-28T14:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T14:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "split out of T-0209 - owner chose 'Leave suspension alone this PR' when asked."
+        }
+      ]
+    },
+    {
+      "id": "T-0211",
+      "title": "Make rank and medal writes answer to edit_ranks_medals alone",
+      "summary": "Owner report: a Moderator (and an Admin) granted the rank/medal capability still could not record a promotion for a peer, a senior or the Owner - every rank and medal write was behind the same target guard as a ban, so the dialog answered \"You don't have permission to manage this member.\" The member admin actions now split in two in member-hierarchy.ts. MODERATION (changeRole, suspend, unsuspend, ban, unban) keeps the whole rule unchanged: not yourself, not the regiments.owner_member_id pointer, and only strictly below you; canGrantRole's own-tier ceiling is untouched. DECORATION (changeRank, awardMedal, removeMedal, deriveFromDiscord) has NO target rule at all - `denyReason` returns null for them on its first line, before self, owner and standing are ever consulted. The capability grant is the whole control. Both SELF_REFUSALS and OWNER_REFUSALS are keyed on ModerationAction, so a decoration action cannot be given refusal wording it can never show; ModerationAction is Exclude<MemberAdminAction, DecorationAction>, so a tenth action is a moderation action by default and fails closed. permittedActions is computed per action, so one member's block can now mix true and false - the frontend half of the task exists because of exactly that, and the caller's OWN row is one of the targets that mixes.",
+      "status": "review",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 5,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "role-hierarchy",
+      "repo": "",
+      "paths": [
+        "src/members/member-hierarchy.ts",
+        "src/members/members.service.ts",
+        "src/members/members.controller.ts",
+        "src/members/dto/member.dto.ts",
+        "test/member-hierarchy.e2e-spec.ts",
+        "SCHEMA.md",
+        "README.md"
+      ],
+      "dependsOn": [
+        "T-0150",
+        "T-0176",
+        "T-0177",
+        "T-0203",
+        "T-0204"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should the regiment owner's rank and medals be editable by any edit_ranks_medals holder?",
+          "askedAt": "2026-07-28T16:45:00Z",
+          "answeredAt": "2026-07-28T16:45:00Z",
+          "answer": "Yes - owner included. The owner pointer guards the SEAT (role, suspension, ban), not the service record."
+        },
+        {
+          "q": "Does 'Derive data from Discord' follow the same relaxation, given it writes a rank and medal awards in bulk?",
+          "askedAt": "2026-07-28T16:45:00Z",
+          "answeredAt": "2026-07-28T16:45:00Z",
+          "answer": "Yes - it writes exactly a rank and medals and draws on the same capability."
+        },
+        {
+          "q": "Should a capability holder be able to change their OWN rank and medals - and which capability unlocks it, manage_roles or edit_ranks_medals?",
+          "askedAt": "2026-07-28T18:30:00Z",
+          "answeredAt": "2026-07-28T18:30:00Z",
+          "answer": "Anyone with edit_ranks_medals, and self-derive comes with it. Asked with the LDA-H1 consequence spelled out (a derive credits whatever the caller's own Discord roles say) and the more conservative manage_roles-only option offered; the owner chose the fully-open rule."
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "member-hierarchy.spec: the two families partition MEMBER_ADMIN_ACTIONS; decoration permitted against owner/peer/superior/SELF; moderation still refused on all four",
+          "status": "passed"
+        },
+        {
+          "desc": "member-hierarchy.spec: the capability is the only gate left on the decoration half - edit_ranks_medals alone turns the flag on for an identity-only Applicant caller",
+          "status": "passed"
+        },
+        {
+          "desc": "members.service.spec: 'cannot' fans narrowed to MODERATION_ACTIONS with a permitted twin each (owner, peer, superior, self); a decoration against a superior leaves save + service-record + audit trace",
+          "status": "passed"
+        },
+        {
+          "desc": "member-hierarchy.e2e: a Moderator may decorate an Admin, a peer Moderator, the Owner and their own record; may still not moderate any of them; the permittedActions block mixes per family on one target",
+          "status": "passed"
+        },
+        {
+          "desc": "discord.e2e: the self-derive test inverted - it asserts NOT 403, and says why re-tightening it would be a decision rather than a fix",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e teardown proven idempotent: suite run twice against the same database, then checked for leaked owner service-record rows, leaked owner medals and a leaked Moderator grant (all zero)",
+          "status": "passed"
+        },
+        {
+          "desc": "full suites green: 1047 unit, 155 e2e",
+          "status": "passed"
+        },
+        {
+          "desc": "the permittedActions-vs-endpoint sweep carries an explicit 60s timeout: T-0211 grew it from three targets to five (45 serial HTTP round-trips), which straddled Jest's 5s default and passed on one CI runner while timing out on the other",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "\u26a0\ufe0f SELF-PROMOTION IS NOW REACHABLE BY DESIGN, and this is the entry to read before touching any of it. edit_ranks_medals holders may set their own rank, pin their own medal, and run deriveFromDiscord on their own record - which credits whatever their own Discord roles say they have earned, a trigger that lives in the guild rather than in this application. That was LDA-H1's last defence. What still bounds it: the capability (Owner+Admin by default in role-permissions.seed.ts), the promotion-only rank floor and additive-only medal diff in the derive path, DiscordRolePolicyService refusing to bind a role the bot cannot manage, and the audit row on every write. What does NOT bound it is member-hierarchy.ts.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "ModerationAction is DERIVED (Exclude<MemberAdminAction, DecorationAction>) and BOTH SELF_REFUSALS and OWNER_REFUSALS are keyed on it with exactly five entries. Replacing either with a hand-written literal union, or widening a refusal map to Record<MemberAdminAction, string> 'for symmetry', turns a compile error into a runtime 'You cannot undefined' and opts new actions out of the moderation guards.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "assertMayActOn still reads the owner pointer on the decoration paths even though the guard no longer consults it - the read is handed to the projection that follows the write. It now looks removable; removing it reintroduces a per-call regiments.findOne and lets the returned flags be computed against a second, possibly different read. Pinned by the changeRank counterpart of the 'reads the owner pointer once per action' spec.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "member-hierarchy.e2e now really writes the SHARED seeded owner row: changeRank lands, removeMedal can delete an award the suite never created, and a rank change appends service-record entries that cannot cascade because the owner row is never deleted. afterAll restores all three, snapshots them AFTER cleanup() (a snapshot taken before it can capture rows cleanup is about to delete, and re-inserting one throws on the FK), and wraps the restore in try/catch so the FLIPPED_GRANTS revert always runs.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "member-hierarchy.e2e's 'never advertises an action the endpoint then refuses' sweep is the only test in the repo with an explicit timeout, because it is the only one doing ~45 serial HTTP calls. Adding a sixth target, or an action to MEMBER_ADMIN_ACTIONS, grows it multiplicatively - re-check the budget rather than trimming the sweep, which is what makes it an invariant.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:35:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not touch canGrantRole or the role-grant ceiling - the owner confirmed that half already behaves as intended (admins appoint admins, moderators appoint moderators, nobody appoints an Owner).",
+        "Did not widen the seeded permission matrix: EditRanksMedals is still Owner+Admin by default (role-permissions.seed.ts is tier-1 and refreshes on every prod deploy). A regiment that wants Moderators keeping the service record grants it in the settings UI - and, since T-0211, grants them their own rank with it.",
+        "Did not narrow the self relaxation to manage_roles holders, which was offered as the more conservative option and declined.",
+        "Left the suspension/unsuspend Discord role question to T-0210 - untouched here.",
+        "The adversarial review workflow's verify phase lost 39 of 47 agents to a session limit, so its 'nothing confirmed' verdict is not evidence. The candidate findings were checked by hand instead; two were real and are fixed (e2e snapshot ordering, and a tautological capability assertion), the rest were the owner's stated decisions or pre-existing behaviour."
+      ],
+      "lastTouchedCommit": "",
+      "createdAt": "2026-07-28T16:45:00Z",
+      "updatedAt": "2026-07-28T19:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T16:45:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "Owner report: an edit_ranks_medals holder could not record a rank or medal for a peer, a senior or the Owner. Split the member admin actions into moderation vs decoration; decorations keep the self refusal alone. Backend on feat/rank-medal-decoration-exemption, frontend companion on the same branch name in lords-regiment-dashboard (its T-0285). 1047 unit + 150 e2e + 630 frontend tests green. Owner decisions this session: the regiment owner IS decoratable; deriveFromDiscord follows the same rule."
+        },
+        {
+          "at": "2026-07-28T19:10:00Z",
+          "from": "review",
+          "to": "review",
+          "by": "claude",
+          "note": "Owner follow-up mid-review: capability holders must also be able to change their OWN rank and medals. The self refusal came out of the decoration half entirely (self-derive included), so the short-circuit moved to the FIRST line of denyReason and SELF_REFUSALS is now keyed on ModerationAction alongside OWNER_REFUSALS. Also fixed two real defects the review surfaced in the e2e teardown. 1047 unit + 155 e2e + 633 frontend green. PRs open into dev: this repo #69, frontend [lords-regiment-dashboard #59](https://github.com/Amitoj02/lords-regiment-dashboard/pull/59)."
+        },
+        {
+          "at": "2026-07-28T19:35:00Z",
+          "from": "review",
+          "to": "review",
+          "by": "claude",
+          "note": "CI on #69 caught a flake I introduced: the widened permittedActions sweep exceeded Jest's 5s default on the slower runner (it passed on the pull_request run and failed on the push run for the same commit). Given an explicit 60s budget rather than fewer targets - the exhaustiveness is the test."
+        }
+      ]
     }
   ],
   "history": [
@@ -14626,6 +14968,11 @@
       "at": "2026-07-28T01:40:00Z",
       "by": "claude",
       "note": "T-0208 created and fixed in one session: nightly backups had never once succeeded in production; verified with a real upload and a full restore drill."
+    },
+    {
+      "at": "2026-07-28T14:45:00Z",
+      "by": "claude",
+      "note": "T-0209 (Discord role purge + the 'Permission denied' the owner saw) implemented and opened for review in both repos; T-0210 split out for the deferred suspension/unban policy. Retired T-0159#0 and T-0204#2, narrowed T-0191#0."
     }
   ]
 }

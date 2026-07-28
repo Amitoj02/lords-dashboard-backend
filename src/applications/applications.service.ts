@@ -613,24 +613,27 @@ export class ApplicationsService {
     // so an approved recruit got the rank on the dashboard and NO Discord role
     // for it. It only ever landed later, by accident, on the next rank/role/medal
     // change or a manual `POST /discord/resync`. Enlistment was the one
-    // rank-assigning path in the app that did not sync — every path in
-    // MembersService ends in `syncMemberRoles`.
+    // rank-assigning path in the app that did not sync.
     //
-    // Ordering is the whole story: the Applicant marker comes OFF, then the
-    // reconcile puts on what the roster now says they are (rank role plus the
-    // Membership role, which `holdsMembershipRole` withholds from a Mercenary).
-    // Both are enqueued AFTER the transaction has committed — `reconcileRoles`
-    // re-reads the member by id and silently returns if the row is not there
-    // yet, and the worker ticks every 3 seconds.
+    // Ordering is the whole story: the Applicant marker comes OFF, then the sync
+    // puts on what the roster now says they are (rank role plus the Membership
+    // role, which `holdsMembershipRole` withholds from a Mercenary). Both are
+    // enqueued AFTER the transaction has committed — the worker re-reads the
+    // member by id and silently returns if the row is not there yet, and it
+    // ticks every 3 seconds.
     //
-    // Since T-0202 that reconcile is also what makes the carry-over SAFE. It
-    // strips every managed role the roster does not account for, and the rows
-    // committed above are what account for them: the adopted rank role and medal
-    // roles are now `desired`, so the member keeps exactly the roles they walked
-    // in with. Anything the roster still cannot explain is a role nobody in the
-    // dashboard ever linked to anything, and that is the one the strip is for.
+    // ⚠️ ADDITIVE SINCE T-0209, AND THAT REPLACES THE T-0202 ARGUMENT RATHER
+    // THAN WEAKENING IT. This used to be a destructive reconcile, made safe by
+    // the carry-over having taught the roster what the applicant already wore —
+    // which held only as far as the carry-over did. When the gateway was
+    // unreachable, or the role belonged to a protected rank the adoption
+    // deliberately declines, approval stripped a veteran's decorations at the
+    // exact moment they joined. A grant cannot: it adds what the roster can
+    // account for and leaves everything else where it is. Managed roles the
+    // roster genuinely should not honour are now the operator resync's business,
+    // which is a decision someone makes on purpose.
     await this.discordSync.enqueueApplicantRole(user.regimentId, discordUserId, 'remove');
-    await this.discordSync.enqueueRoleSync(user.regimentId, member.id, discordUserId);
+    await this.discordSync.enqueueRoleGrant(user.regimentId, member.id, discordUserId);
 
     // Best-effort decision DM to the applicant (never affects the approval).
     await this.enqueueDecisionDm(

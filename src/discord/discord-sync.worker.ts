@@ -35,7 +35,11 @@ import { holdsMembershipRole } from './membership-role';
 const IDEMPOTENT_JOB_TYPES = new Set<string>([
   DiscordSyncJobType.RoleAssign,
   DiscordSyncJobType.RoleRemove,
-  DiscordSyncJobType.RoleSync,
+  // Every role job converges to a fixed end state, so re-running one after a
+  // restart lands exactly where the first run aimed.
+  DiscordSyncJobType.RoleGrant,
+  DiscordSyncJobType.RoleScopedSync,
+  DiscordSyncJobType.RoleFullResync,
   // Strip-roles + apply-Ban-role converges to the same end state on re-run.
   DiscordSyncJobType.MemberBanRole,
   // Re-expanding a page re-inserts jobs that converge to the same end state,
@@ -314,8 +318,22 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         await this.gateway.removeRole(p.discordUserId, p.roleId);
         return;
       }
-      case DiscordSyncJobType.RoleSync: {
+      case DiscordSyncJobType.RoleGrant: {
         const p = this.payloadOf(job, type);
+        if (!(await this.roleSyncingLive(job, p.discordUserId))) return;
+        await this.grantRoles(job.regimentId, p.memberId, p.discordUserId);
+        return;
+      }
+      case DiscordSyncJobType.RoleScopedSync: {
+        const p = this.payloadOf(job, type);
+        if (!(await this.roleSyncingLive(job, p.discordUserId))) return;
+        await this.reconcileScoped(job.regimentId, p.memberId, p.discordUserId, p.roleIds ?? []);
+        return;
+      }
+      case DiscordSyncJobType.RoleFullResync: {
+        const p = this.payloadOf(job, type);
+        // `automatic: false` — the operator asked for this one by hand.
+        if (!(await this.roleSyncingLive(job, p.discordUserId, false))) return;
         await this.reconcileRoles(job.regimentId, p.memberId, p.discordUserId);
         return;
       }
@@ -326,22 +344,25 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         return;
       case DiscordSyncJobType.RoleRelinkApply: {
         const p = this.payloadOf(job, type);
-        // ⚠️ Re-check the gate at EXECUTION time, exactly like the ban-role job:
-        // a fan-out spans minutes, and a re-link job that drains after the bot
-        // (or role syncing) was switched off must not touch Discord.
-        const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
-        if (!settings?.botEnabled || !settings?.syncRolesOnChange) {
-          this.logger.warn(
-            `Skipping queued re-link for ${p.discordUserId}: botEnabled/syncRolesOnChange disabled since enqueue`,
-          );
-          return;
-        }
-        await this.reconcileRoles(
-          job.regimentId,
-          p.memberId,
-          p.discordUserId,
-          p.outgoingRoleId ?? null,
+        if (!(await this.roleSyncingLive(job, p.discordUserId))) return;
+        // A re-link changed ONE mapping, so it converges the two ends of that
+        // mapping and nothing else (T-0209). It used to run the whole-member
+        // reconcile, which meant re-pointing one medal's role could strip an
+        // unrelated one.
+        const scope = [p.outgoingRoleId, p.incomingRoleId].filter(
+          (id): id is string => typeof id === 'string' && id.length > 0,
         );
+        await this.reconcileScoped(job.regimentId, p.memberId, p.discordUserId, scope);
+        // ⚠️ ROWS QUEUED BEFORE T-0209 CARRY NO `incomingRoleId`, so the scope
+        // above is the outgoing role alone and the INCOMING one would never be
+        // applied. The reconcile this replaced assigned every desired role
+        // before it stripped anything, so a legacy row did deliver the new role
+        // — dropping that would leave a member mid-fan-out wearing neither.
+        // The additive pass restores exactly that half, and costs nothing on a
+        // current row (its incoming role is already in scope and assigned).
+        if (!p.incomingRoleId) {
+          await this.grantRoles(job.regimentId, p.memberId, p.discordUserId);
+        }
         return;
       }
       case DiscordSyncJobType.MemberBanRole: {
@@ -616,44 +637,71 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Reconcile a member's bot-managed Discord roles. The DESIRED managed-role set
-   * is the member's linked rank role, the linked role of every medal they
-   * currently hold, and — when they qualify — the regiment's Membership role. We
-   * assign any desired role they lack and remove any MANAGED role they hold that
-   * is no longer desired (e.g. the role of a revoked medal), only ever touching
-   * roles in {@link managedRoleIds} — unmanaged roles are never added or
-   * removed. Best-effort.
+   * Is role syncing still on for this job's regiment? Re-checked at DRAIN time
+   * for EVERY role job (T-0209), not only the ones that used to bother.
    *
-   * `outgoingRoleId` is the extra role a bulk re-link must strip (T-0159). It
-   * cannot be derived: once the rank/medal points at its new role the previous
-   * one is no longer in the managed set, so the diff below would leave it on
-   * every holder forever. Only that one id is added to the strippable set —
-   * unrelated manual roles stay untouched.
+   * The bulk re-link and the ban strip already did this; the plain per-member
+   * sync did not, and that asymmetry had teeth: an admin watching the bot strip
+   * roles it should not could turn `syncRolesOnChange` — or the whole bot — off
+   * and still have every job queued or sitting in backoff (up to thirty minutes
+   * of it) drain against the guild anyway. The switch now means "stop", not
+   * "stop enqueuing".
    */
-  private async reconcileRoles(
-    regimentId: string,
-    memberId: string,
+  private async roleSyncingLive(
+    job: DiscordSyncJob,
     discordUserId: string,
-    outgoingRoleId: string | null = null,
-  ): Promise<void> {
+    /**
+     * False for the operator's own Resync. `syncRolesOnChange` is labelled "push
+     * rank/role changes to Discord automatically", so it governs the AUTOMATIC
+     * producers — a human pressing Resync is neither automatic nor "on change",
+     * and since this is now the only path that clears a managed role the roster
+     * cannot account for, letting that toggle disable it would take away the
+     * repair tool along with the automation.
+     */
+    automatic = true,
+  ): Promise<boolean> {
+    const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
+    if (settings?.botEnabled && (!automatic || settings.syncRolesOnChange)) return true;
+    this.logger.warn(
+      `Skipping queued ${job.jobType} for ${discordUserId}: ` +
+        `botEnabled/syncRolesOnChange disabled since enqueue`,
+    );
+    return false;
+  }
+
+  /**
+   * A member's DESIRED managed-role set: their linked rank role, the linked role
+   * of every medal they currently hold, and — when they qualify — the regiment's
+   * Membership role.
+   *
+   * Extracted in T-0209 so all three convergence modes answer "what should this
+   * person be wearing?" from ONE definition. What differs between the modes is
+   * only ever *which roles they are allowed to act on*, never what they consider
+   * correct.
+   *
+   * Returns null when the member is gone or banned — the two cases in which no
+   * role job may touch Discord at all. A banned member's roles are
+   * owned by the ban strip ({@link applyBanRole}) and nothing else may re-grant
+   * them — that would leave the Ban role in place while handing back every
+   * managed role it just removed.
+   */
+  private async desiredRoleIds(regimentId: string, memberId: string): Promise<Set<string> | null> {
     const member = await this.members.findOne({
       where: { id: memberId, regimentId },
       relations: { rank: true },
     });
-    if (!member) return;
-    // A banned member's Discord roles are owned by the ban strip (applyBanRole);
-    // never re-grant their rank/medal roles via a reconcile — that would undo the
-    // ban (the Ban role would remain but every managed role would come back).
-    if (member.bannedAt) return;
+    if (!member || member.bannedAt) return null;
 
-    // Desired = the member's rank role (if linked) ∪ the linked role of every
-    // medal they currently hold.
     const desired = new Set<string>();
     const rank = member.rankId
       ? await this.ranks.findOne({ where: { id: member.rankId, regimentId } })
       : null;
     if (rank?.discordRoleId) desired.add(rank.discordRoleId);
 
+    // Read fresh, every time. A medal is REPEATABLE, so "does this role still
+    // belong?" is a question about the surviving `member_medals` rows at this
+    // instant — which is precisely why removing an award cannot be turned into a
+    // frozen "remove this role" instruction at enqueue time.
     const held = await this.memberMedals.find({
       where: { memberId },
       relations: { medal: true },
@@ -662,72 +710,140 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
       if (mm.medal?.discordRoleId) desired.add(mm.medal.discordRoleId);
     }
 
-    // The Membership role is reconciled like any other managed role — added when
-    // the roster says this person is enrolled, stripped when it does not.
-    //
-    // ⚠️ THIS IS THE OPPOSITE OF WHAT THE OLD JOIN ROLE DID. That role was
-    // assign-only and explicitly excluded from every strip below, because it was
-    // owned by the guild-join flow rather than by roster state. It is now owned
-    // by roster state alone, so the exclusions are gone: a member who becomes a
-    // Mercenary, or a visitor still carrying the role from the old join-time
-    // grant, loses it on their next reconcile. That is the entire point — the
-    // role has to mean "enrolled" for the guild to hang permissions off it.
+    // The Membership role is roster-derived like the others: an enrolled member
+    // gets it, a Mercenary and an Applicant do not (T-0191).
     const settings = await this.settings.findOne({ where: { regimentId } });
     const membershipRoleId = settings?.membershipRoleId ?? null;
     if (membershipRoleId && holdsMembershipRole(member)) desired.add(membershipRoleId);
 
-    const managed = await this.managedRoleIds(regimentId);
-    const strippable = new Set(managed);
-    if (outgoingRoleId) strippable.add(outgoingRoleId);
+    return desired;
+  }
 
-    // Diff against the member's CURRENT roles when the gateway can report them so
-    // revoked-medal roles are removed; otherwise fall back to an idempotent
-    // assign + explicit strip of every non-held managed medal role.
+  /**
+   * Converge EXACTLY the role ids in `roleIds` and nothing else (T-0209). This is
+   * what a rank change, a medal award/removal, a member-role change and a re-link
+   * fan-out drain as.
+   *
+   * ── WHY THE SCOPE IS THE PAYLOAD ────────────────────────────────────────────
+   * The bug this replaces: every one of those mutations enqueued a whole-member
+   * reconcile, which recomputed the member's entire desired set and stripped any
+   * MANAGED role — any role linked to any rank or medal in the catalogue — the
+   * roster did not account for. For a regiment that lived on Discord before it
+   * had a dashboard, that is every decoration a veteran was ever handed by hand:
+   * a Moderator→Admin promotion, which cannot legitimately change a single rank
+   * or medal role, took all of them off. Naming the ids in the payload makes the
+   * blast radius a property of the ACTION rather than of the catalogue's size or
+   * of how complete the roster happens to be.
+   *
+   * A failed `fetchMember` cannot widen this. The worst it costs is a redundant
+   * assign or remove of an id that was already in the list — Discord treats both
+   * as no-ops — so unlike the reconcile below there is no unreadable-member case
+   * to fall back from.
+   */
+  private async reconcileScoped(
+    regimentId: string,
+    memberId: string,
+    discordUserId: string,
+    roleIds: readonly string[],
+  ): Promise<void> {
+    const scope = [...new Set(roleIds.filter((id) => !!id))];
+    if (scope.length === 0) return;
+
+    const desired = await this.desiredRoleIds(regimentId, memberId);
+    if (!desired) return;
+
+    // One read, used only to skip calls that would change nothing. Null means we
+    // could not check — so we issue the calls anyway, which is safe HERE and
+    // only here, because they cannot reach beyond `scope`.
     const ref = await this.gateway.fetchMember(discordUserId);
     const current = ref ? new Set(ref.roles) : null;
 
-    // Assign every desired role the member is missing (idempotent when unknown).
+    for (const roleId of scope) {
+      if (desired.has(roleId)) {
+        if (!current || !current.has(roleId)) await this.gateway.assignRole(discordUserId, roleId);
+      } else if (!current || current.has(roleId)) {
+        await this.gateway.removeRole(discordUserId, roleId);
+      }
+    }
+  }
+
+  /**
+   * ADD every managed role the roster says the member should hold, and remove
+   * NOTHING (T-0209).
+   *
+   * This is what enlistment approval, a rejoin and a Discord-derive drain as.
+   * Each of those is a moment where the roster has just LEARNED something — a
+   * veteran's carried-over decorations, a returning member's record — and the
+   * one thing none of them should do is overrule the guild with a roster that
+   * may still be incomplete. Being structurally unable to remove is stronger
+   * than being careful not to: there is no argument to get wrong and no failure
+   * mode that turns it destructive.
+   */
+  private async grantRoles(
+    regimentId: string,
+    memberId: string,
+    discordUserId: string,
+  ): Promise<void> {
+    const desired = await this.desiredRoleIds(regimentId, memberId);
+    if (!desired) return;
+
+    const ref = await this.gateway.fetchMember(discordUserId);
+    const current = ref ? new Set(ref.roles) : null;
+    for (const roleId of desired) {
+      if (!current || !current.has(roleId)) {
+        await this.gateway.assignRole(discordUserId, roleId);
+      }
+    }
+  }
+
+  /**
+   * The FULL reconcile: assign every desired role and strip every MANAGED role
+   * the member holds that the roster does not account for.
+   *
+   * ⚠️ THE ONLY DESTRUCTIVE MODE, AND THE ONLY OPERATOR-TRIGGERED ONE. Since
+   * T-0209 nothing but `POST /api/discord/resync` can produce one of these jobs.
+   * That is the point: "make the guild match the roster, and take off whatever
+   * the roster does not know about" is a legitimate thing to want, but it is a
+   * decision an admin makes deliberately about a whole regiment — never a side
+   * effect of awarding somebody a medal.
+   *
+   * ── AND IT NEVER STRIPS BLIND ───────────────────────────────────────────────
+   * When the gateway cannot list the member's current roles this used to strip
+   * the linked role of every rank and every medal in the catalogue anyway, on
+   * the theory that `removeRole` is a no-op for a role they never had. But
+   * `fetchMember` returns null identically for "left the guild" and "Discord did
+   * not answer", so a transient failure escalated a diff into a catalogue-wide
+   * purge issued against a member whose roles nobody had actually read. A role
+   * is now only ever removed against a CONFIRMED reading of what the member
+   * wears; an unreadable member gets the additive half and a warning, and the
+   * next resync — with a working gateway — completes the strip.
+   */
+  private async reconcileRoles(
+    regimentId: string,
+    memberId: string,
+    discordUserId: string,
+  ): Promise<void> {
+    const desired = await this.desiredRoleIds(regimentId, memberId);
+    if (!desired) return;
+
+    const strippable = await this.managedRoleIds(regimentId);
+    const ref = await this.gateway.fetchMember(discordUserId);
+    const current = ref ? new Set(ref.roles) : null;
+
     for (const roleId of desired) {
       if (!current || !current.has(roleId)) {
         await this.gateway.assignRole(discordUserId, roleId);
       }
     }
 
-    if (current) {
-      // Remove any STRIPPABLE role the member holds that is no longer desired.
-      for (const roleId of current) {
-        if (strippable.has(roleId) && !desired.has(roleId)) {
-          await this.gateway.removeRole(discordUserId, roleId);
-        }
-      }
+    if (!current) {
+      this.logger.warn(
+        `Resync for ${discordUserId}: could not read current roles, so nothing was removed`,
+      );
       return;
     }
-
-    // The gateway can't list current roles, so nothing can be diffed and every
-    // strip has to be issued blind (removeRole is idempotent for a role the
-    // member never had).
-    if (outgoingRoleId) {
-      // A re-link knows EXACTLY which role left the mapping, so the blind sweep
-      // below is unnecessary — one targeted strip is both correct and ~25x
-      // cheaper against the rate budget on a 600-member fan-out.
-      if (!desired.has(outgoingRoleId)) {
-        await this.gateway.removeRole(discordUserId, outgoingRoleId);
-      }
-      return;
-    }
-
-    // A plain reconcile has no such hint: strip the linked role of every rank
-    // and medal the member does NOT currently hold, so a revoked medal's role —
-    // and, since T-0159, a superseded RANK role — is still removed. Without the
-    // rank half, a promotion left the old rank role on the member every time
-    // fetchMember failed. The Membership role rides along because it is now
-    // roster-derived like the others: undesired here means "not enrolled".
-    const ranks = await this.ranks.find({ where: { regimentId } });
-    const medals = await this.medals.find({ where: { regimentId } });
-    const blindSweep = [...ranks, ...medals].map((linked) => linked.discordRoleId);
-    blindSweep.push(membershipRoleId);
-    for (const roleId of blindSweep) {
-      if (roleId && !desired.has(roleId)) {
+    for (const roleId of current) {
+      if (strippable.has(roleId) && !desired.has(roleId)) {
         await this.gateway.removeRole(discordUserId, roleId);
       }
     }

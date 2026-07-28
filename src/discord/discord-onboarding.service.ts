@@ -88,15 +88,16 @@ export class DiscordOnboardingService implements OnModuleInit {
    *    nothing at all. This is the case the retired join-role grant got wrong.
    *  - BANNED — the Ban role, never the rank/medal set. Checked FIRST, because a
    *    banned member is still a roster row and a reconcile would hand their
-   *    whole managed role set straight back. (`reconcileRoles` also refuses a
-   *    banned member, so this is belt and braces — but the belt is what decides
+   *    whole managed role set straight back. (The worker refuses a banned member
+   *    in every mode, so this is belt and braces — but the belt is what decides
    *    which of the two jobs is enqueued.) Still subject to the owner-gated
    *    `applyBanRoleOnBan` switch: with it off no Ban role was ever applied, so
    *    there is nothing to restore.
    *  - actively SUSPENDED — nothing. A suspension is a withdrawal of standing,
    *    and handing the roles back at the door would quietly end it early.
-   *  - otherwise — a full reconcile, which grants rank role, medal roles and the
-   *    Membership role from current roster state.
+   *  - otherwise — an ADDITIVE sync, which grants the rank role, the medal roles
+   *    and the Membership role from current roster state and removes nothing. A
+   *    rejoin is a restore, so it has no business taking anything off (T-0209).
    *
    * Soft-deleted members are excluded by the default scope: a removed member is
    * not a member.
@@ -119,7 +120,7 @@ export class DiscordOnboardingService implements OnModuleInit {
     }
 
     this.logger.log(`Restoring Discord roles for returning member ${discordUserId}`);
-    await this.sync.enqueueRoleSync(regimentId, member.id, discordUserId);
+    await this.sync.enqueueRoleGrant(regimentId, member.id, discordUserId);
   }
 
   /** True when this user was already onboarded inside {@link ONBOARD_DEDUPE_MS}. */

@@ -272,10 +272,13 @@ export class MembersService {
 
   // ── Admin actions (capability-gated in the controller; each is audited) ──────
   //
-  // Every one of them opens with `assertMayModerate` (T-0176): the capability
+  // Every one of them opens with `assertMayActOn` (T-0176): the capability
   // guard in the controller only asks "may this ROLE do this at all", it has no
-  // notion of the target, so the target-scoped rule — not self, not the owner,
-  // and strictly outranking — lives here, ahead of every write.
+  // notion of the target, so the target-scoped rule lives here, ahead of every
+  // write. What that rule IS depends on the action (T-0211) — the full hierarchy
+  // for the ones that move authority, and NO target rule at all for the ones
+  // that only write a rank or a medal. The guard is passed the action for
+  // exactly that reason; see `member-hierarchy.ts`.
 
   /**
    * Change a member's rank. Records a service-record entry + audit row. The
@@ -289,7 +292,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'changeRank');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'changeRank');
     const rank = await this.ranks.findOne({
       where: { id: dto.rankId, regimentId: user.regimentId },
     });
@@ -299,6 +302,10 @@ export class MembersService {
     // Resolved BEFORE the row is mutated — the old rank is what decides whether
     // this move reads as a promotion or a demotion.
     const type = this.rankChangeType(member.rank ?? null, rank);
+    // Captured pre-mutation for the same reason (T-0209): the outgoing rank's
+    // Discord role is half the scope of the sync below, and once `member.rank`
+    // is reassigned there is nothing left to read it from.
+    const previousRankRoleId = member.rank?.discordRoleId ?? null;
     member.rankId = rank.id;
     member.rank = rank;
     await this.members.save(member);
@@ -314,7 +321,13 @@ export class MembersService {
       detail: dto.note ?? null,
     });
 
-    await this.syncMemberRoles(member);
+    // A rank change moves the rank role and NOTHING else (T-0209).
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [previousRankRoleId, rank.discordRoleId],
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -342,10 +355,10 @@ export class MembersService {
     // Rejected outright rather than allowed through as a same-role no-op below:
     // self-targeting this endpoint always gets one predictable answer (T-0150),
     // and the same holds for the owner/hierarchy refusals (T-0176).
-    const ownerMemberId = await this.assertMayModerate(member, user, 'changeRole');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'changeRole');
 
     // Cap the GRANTED role at the caller's own tier (LDA-M4, relaxed to include
-    // that tier in T-0203). assertMayModerate only checks that the caller
+    // that tier in T-0203). assertMayActOn only checks that the caller
     // outranks the target's CURRENT role; without this a manage_roles holder
     // could mint a SUPERIOR — a Moderator promoting a Member straight to Admin.
     // Their own tier is deliberately allowed: appointing a peer is what holding
@@ -379,7 +392,16 @@ export class MembersService {
     // so the new role takes effect on their next request without a re-login.
     this.sessionContext.invalidate(member.discordIdentityId);
 
-    await this.syncMemberRoles(member);
+    // The ONLY Discord role an app-level role maps onto is the Membership role
+    // (T-0209). A move that stays inside the enrolled tiers — Moderator to Admin,
+    // say — therefore converges one id that was desired before and is desired
+    // after, and touches Discord not at all. This used to be a whole-member
+    // reconcile, which is how a promotion came to strip a member's decorations.
+    await this.discordSync.enqueueMembershipRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -391,7 +413,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'awardMedal');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'awardMedal');
     const medal = await this.medals.findOne({
       where: { id: dto.medalId, regimentId: user.regimentId },
     });
@@ -415,7 +437,13 @@ export class MembersService {
       detail: `Awarded ${medal.title}`,
     });
 
-    await this.syncMemberRoles(member);
+    // Only this medal's role is in scope (T-0209).
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [medal.discordRoleId],
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -430,7 +458,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'removeMedal');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'removeMedal');
     const award = await this.memberMedals.findOne({
       where: { memberId: member.id, medalId },
       order: { awardedAt: 'DESC' },
@@ -450,7 +478,15 @@ export class MembersService {
       detail: `Removed ${title}`,
     });
 
-    await this.syncMemberRoles(member);
+    // Only this medal's role is in scope (T-0209) — and because the worker
+    // re-derives what the member should hold at drain time, a member who still
+    // has ANOTHER award of the same repeatable medal keeps the role.
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [award.medal?.discordRoleId ?? null],
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -465,9 +501,9 @@ export class MembersService {
    * LEARNING what the guild already knows. Enlistment does that now (T-0202) —
    * but every approval taken before it did, and any taken while the gateway was
    * unreachable, enlisted a veteran at the entry rank with none of their
-   * decorations. The reconcile that follows then strips the roles that were the
-   * only place that history was written down. This is the repair, run one member
-   * at a time by someone who can see the result.
+   * decorations — and until T-0209 the reconcile that followed then stripped the
+   * roles that were the only place that history was written down. This is the
+   * repair, run one member at a time by someone who can see the result.
    *
    * ── WHAT IT WILL AND WILL NOT DO ────────────────────────────────────────────
    *  - PROMOTION ONLY. The member's current rank is the floor, so a derive can
@@ -480,9 +516,15 @@ export class MembersService {
    *  - IDEMPOTENT. Awards are diffed against what the member already holds, so
    *    pressing it twice credits nothing twice — the second press reports that
    *    there was nothing left to derive.
-   *  - NEVER ON YOURSELF. Enforced by the shared hierarchy guard: a derive hands
-   *    out whatever the target's roles say, so on your own record it is a
-   *    self-promotion (see ACTION_LABELS.deriveFromDiscord).
+   *  - ⚠️ NO TARGET RULE AT ALL, YOUR OWN RECORD INCLUDED (T-0211, owner
+   *    decision). This used to refuse self, and that refusal was the whole of
+   *    LDA-H1: a derive hands out whatever the target's Discord roles say they
+   *    have earned, so run on yourself it is a self-promotion whose trigger —
+   *    getting a role added to your own account in the guild — lives outside
+   *    this application. What still bounds it is the capability (Owner+Admin by
+   *    default), the promotion-only floor and additive-only medal diff below,
+   *    the role-link policy that refuses a role the bot cannot manage, and the
+   *    audit row. Read `DECORATION_ACTIONS` before narrowing or widening this.
    *
    * A failed READ is reported, not swallowed (unlike the enlistment path): an
    * admin who pressed a button and got "nothing to derive" must not be looking at
@@ -494,7 +536,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<DeriveFromDiscordResultDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'deriveFromDiscord');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'deriveFromDiscord');
 
     // ⚠️ Reads Discord — deliberately BEFORE any transaction is opened, so an
     // unreachable gateway can never hold the roster's locks open.
@@ -596,9 +638,26 @@ export class MembersService {
     });
 
     // Push the derived state back out to Discord. Mostly a no-op by construction
-    // (these roles came FROM the guild), but a rank change leaves the member
-    // wearing their old rank role, and that is the reconcile's job to strip.
-    await this.syncMemberRoles(member);
+    // — these roles came FROM the guild — plus a targeted swap when the derive
+    // promoted them, so the superseded rank role does not linger.
+    //
+    // ⚠️ ADDITIVE, DELIBERATELY (T-0209). A derive adopts what the guild already
+    // says, and it adopts SELECTIVELY: a protected rank's role and any rank below
+    // the member's current one are excluded by design. Following it with a
+    // destructive reconcile — which is what this did — took those very roles back
+    // off, so the button advertised as "pull their history in" quietly deleted
+    // the parts of it the roster had declined to adopt.
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [previousRank?.discordRoleId ?? null, rank?.discordRoleId ?? null],
+    );
+    await this.discordSync.enqueueRoleGrant(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+    );
 
     return {
       member: await this.project(member, user, ownerMemberId),
@@ -620,7 +679,7 @@ export class MembersService {
       throw new BadRequestException('Suspension end must be a future date');
     }
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'suspend');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'suspend');
 
     const before = {
       suspendedUntil: member.suspendedUntil ? member.suspendedUntil.toISOString() : null,
@@ -668,7 +727,7 @@ export class MembersService {
     ip: string | null,
   ): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'ban');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'ban');
     if (member.bannedAt) throw new ConflictException('Member is already banned');
 
     member.bannedAt = new Date();
@@ -711,7 +770,7 @@ export class MembersService {
    */
   async unsuspend(id: string, user: AuthenticatedUser, ip: string | null): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'unsuspend');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'unsuspend');
     if (!member.suspendedUntil || member.suspendedUntil.getTime() <= Date.now()) {
       throw new ConflictException('Member is not currently suspended');
     }
@@ -736,7 +795,7 @@ export class MembersService {
   /** Lift a ban: clear bannedAt + reactivate. */
   async unban(id: string, user: AuthenticatedUser, ip: string | null): Promise<MemberDto> {
     const member = await this.loadMember(id, user.regimentId);
-    const ownerMemberId = await this.assertMayModerate(member, user, 'unban');
+    const ownerMemberId = await this.assertMayActOn(member, user, 'unban');
     if (!member.bannedAt) throw new ConflictException('Member is not banned');
 
     member.bannedAt = null;
@@ -1003,18 +1062,18 @@ export class MembersService {
 
   // ── Internal helpers ─────────────────────────────────────────────────────────
 
-  /**
-   * Best-effort: enqueue a Discord role reconciliation for a member after a
-   * rank/role/medal change. No-ops when the bot is disabled or the member has no
-   * linked Discord identity; never throws (the enqueuer swallows failures).
-   */
-  private async syncMemberRoles(member: Member): Promise<void> {
-    await this.discordSync.enqueueRoleSync(
-      member.regimentId,
-      member.id,
-      member.discordIdentity?.discordUserId ?? null,
-    );
-  }
+  // ⚠️ THERE IS NO `syncMemberRoles` HELPER ANY MORE, AND ITS ABSENCE IS THE FIX
+  // (T-0209). Every mutation here used to funnel into one "sync this member"
+  // call, which threw away WHAT had changed at the enqueue boundary — leaving
+  // the worker no choice but to recompute the member's whole desired set and
+  // strip every managed role the roster could not account for. Awarding a medal
+  // and promoting a Moderator to Admin both ran that, so either could take a
+  // veteran's hand-granted decorations off.
+  //
+  // Each mutation now names its own scope at the call site
+  // (`enqueueScopedRoleSync` / `enqueueMembershipRoleSync`) or asks for the
+  // additive sync (`enqueueRoleGrant`). Bringing the helper back would re-open
+  // the bug, because a single shared call has nowhere to put the delta.
 
   /** Load a regiment-scoped, non-deleted member with its rank + identity, or 404. */
   private async loadMember(id: string, regimentId: string): Promise<Member> {
@@ -1045,7 +1104,7 @@ export class MembersService {
    * costs I/O — the owner pointer and the caller's capabilities — is resolved
    * HERE, once; the returned function is pure, so a roster page of any size
    * keeps the endpoint's query count. The flags come from the very predicate
-   * {@link assertMayModerate} enforces, so the client can never be told an
+   * {@link assertMayActOn} enforces, so the client can never be told an
    * action is available that the endpoint would then refuse.
    */
   private async permittedActionsResolver(
@@ -1138,11 +1197,11 @@ export class MembersService {
    * piecemeal — and, before this, not at all on changeRank/awardMedal/
    * removeMedal/unban:
    *
-   *  - SELF: a moderator cannot moderate themselves (T-0150) — otherwise a
-   *    non-owner Admin holding manage_roles could demote or ban their own
-   *    account and lock the regiment out of a seat only they occupy. Matched on
-   *    member id; the Discord id and the display name are both re-assignable and
-   *    would be the wrong key.
+   *  - SELF: nobody MODERATES their own record (T-0150) — otherwise a non-owner
+   *    Admin holding manage_roles could demote or ban their own account and lock
+   *    the regiment out of a seat only they occupy. Matched on member id; the
+   *    Discord id and the display name are both re-assignable and would be the
+   *    wrong key.
    *  - OWNER: the regiment owner pointer is untouchable. It stays the stricter,
    *    authoritative check — it holds even if the owner's ROLE ever drifts from
    *    the pointer, so it is not superseded by the role comparison.
@@ -1151,10 +1210,17 @@ export class MembersService {
    *    Admin. The capability guard in the controller cannot express this: it
    *    only knows the caller's role, never the target.
    *
+   * All three are the MODERATION rule and apply to role/suspend/ban only
+   * (T-0211). A rank or medal write — changeRank, awardMedal, removeMedal,
+   * deriveFromDiscord — is not asked any of them: it answers to
+   * edit_ranks_medals and stops, so the regiment's record-keeper can enter a
+   * promotion for a peer, a superior, the Owner, or themselves. It still runs
+   * through here, because the owner-pointer read it returns feeds the projection.
+   *
    * Called before any write, so a rejected action leaves no audit row, no
    * service-record entry, no Discord sync job and no session invalidation.
    */
-  private async assertMayModerate(
+  private async assertMayActOn(
     member: Member,
     user: AuthenticatedUser,
     action: MemberAdminAction,

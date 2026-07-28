@@ -379,6 +379,13 @@ Capabilities & **default grants** (Owner column is locked = always granted):
 > Owner+Admin **only** (Moderator excluded); **Manage settings** is Owner only. Enforce from this table,
 > not from `role ∈ {Owner,Admin,Moderator}`.
 
+> ⚠️ **Edit ranks & medals reaches the whole roster, including the holder** (T-0211). Unlike **Manage
+> roles**, it carries no target rule whatsoever: whoever holds it may set the rank and award or remove the
+> medals of _any_ member — a peer, a senior, the regiment owner, **and themselves**. Granting it hands over
+> the regiment's whole service record and makes the holder able to record their own promotion, including
+> via `derive-from-discord`, which credits whatever their own Discord roles say. It confers no authority —
+> no role, suspension or ban moves with it — but grant it to a role only if that is acceptable.
+
 > **Manage regiment details** (`manage_regiment_details`, T-0145) is a *publishing* right, not an
 > ownership right: it governs the landing/sign-in presentation and the three legal documents — the copy
 > the whole internet sees — and deliberately grants nothing else. It is separate from **Manage settings**
@@ -868,6 +875,18 @@ client can route to `/apply`.
 - `RolesGuard` + `@Roles(...)` for coarse checks; capability checks consult `role_permissions`
   (stricter — see §3.2). The matrix is **seeded** now; the capability guard is wired as feature
   endpoints arrive.
+- **Target-scoped rule** for the member admin actions (`src/members/member-hierarchy.ts`). A
+  capability knows the caller's role and nothing about who they are pointing at, so every action on
+  another member passes a second, per-target guard. Two tiers:
+  - _Moderation_ — role, suspend, unsuspend, ban, unban: never yourself, never the
+    `regiments.owner_member_id` pointer, and only against a **strictly lower** role, so peers cannot
+    moderate each other. The role a caller may _grant_ is capped at their own tier (`canGrantRole`).
+  - _Rank & medals_ — rank, medal award/remove, derive-from-discord: no target rule at all, the
+    caller's own record included (T-0211). A decoration is a record, not authority; the capability
+    grant is the whole control.
+  - The same predicate produces the `permittedActions` block on `MemberDto`, so the client is never
+    offered an action the endpoint would refuse. A single target's block can mix `true` and `false`
+    across the two tiers.
 
 ### Future REST surface (confirmed by frontend service TODOs — built after sign-in)
 
