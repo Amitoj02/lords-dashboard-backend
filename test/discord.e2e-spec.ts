@@ -1248,12 +1248,15 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       ).toBe(1);
     });
 
-    it('refuses your OWN record, where a derive would be a self-promotion', async () => {
-      // Self is the ONLY refusal a derive has left (T-0211) — the owner pointer
-      // and the standing rule no longer apply to a rank/medal write. This target
-      // happens to be both self and the owner; the non-owner self case, and the
-      // permitted peer/superior cases, live in member-hierarchy.e2e-spec.
-      await derive(ownerMemberId).expect(403);
+    it('⚠️ no longer refuses your OWN record — a derive is a self-promotion path now', async () => {
+      // This asserted 403 until T-0211, on the grounds that a derive credits
+      // whatever the target's Discord roles say and is therefore a self-promotion
+      // on your own record (LDA-H1). The owner removed every target restriction
+      // from the rank/medal actions, self included, so it does not refuse any
+      // more. Kept, inverted, as the record of that: if this ever goes back to
+      // 403 somebody has re-tightened the rule, which is a decision, not a fix.
+      const res = await derive(ownerMemberId);
+      expect(res.status).not.toBe(403);
     });
 
     it('says the bot is switched off rather than reporting nothing to derive', async () => {

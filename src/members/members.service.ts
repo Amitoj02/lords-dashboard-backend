@@ -276,9 +276,9 @@ export class MembersService {
   // guard in the controller only asks "may this ROLE do this at all", it has no
   // notion of the target, so the target-scoped rule lives here, ahead of every
   // write. What that rule IS depends on the action (T-0211) — the full hierarchy
-  // for the ones that move authority, the self refusal alone for the ones that
-  // only write a rank or a medal. The guard is passed the action for exactly
-  // that reason; see `member-hierarchy.ts`.
+  // for the ones that move authority, and NO target rule at all for the ones
+  // that only write a rank or a medal. The guard is passed the action for
+  // exactly that reason; see `member-hierarchy.ts`.
 
   /**
    * Change a member's rank. Records a service-record entry + audit row. The
@@ -516,12 +516,15 @@ export class MembersService {
    *  - IDEMPOTENT. Awards are diffed against what the member already holds, so
    *    pressing it twice credits nothing twice — the second press reports that
    *    there was nothing left to derive.
-   *  - NEVER ON YOURSELF. Enforced by the shared hierarchy guard, and it is the
-   *    ONLY refusal left on this action (T-0211): a derive hands out whatever
-   *    the target's roles say, so on your own record it is a self-promotion
-   *    (see SELF_REFUSALS.deriveFromDiscord). On anyone else's record it is a
-   *    rank and medal write like any other, so it is open to whoever holds
-   *    edit_ranks_medals, peers and the Owner included.
+   *  - ⚠️ NO TARGET RULE AT ALL, YOUR OWN RECORD INCLUDED (T-0211, owner
+   *    decision). This used to refuse self, and that refusal was the whole of
+   *    LDA-H1: a derive hands out whatever the target's Discord roles say they
+   *    have earned, so run on yourself it is a self-promotion whose trigger —
+   *    getting a role added to your own account in the guild — lives outside
+   *    this application. What still bounds it is the capability (Owner+Admin by
+   *    default), the promotion-only floor and additive-only medal diff below,
+   *    the role-link policy that refuses a role the bot cannot manage, and the
+   *    audit row. Read `DECORATION_ACTIONS` before narrowing or widening this.
    *
    * A failed READ is reported, not swallowed (unlike the enlistment path): an
    * admin who pressed a button and got "nothing to derive" must not be looking at
@@ -1194,12 +1197,11 @@ export class MembersService {
    * piecemeal — and, before this, not at all on changeRank/awardMedal/
    * removeMedal/unban:
    *
-   *  - SELF: nobody acts on their own record (T-0150) — otherwise a non-owner
+   *  - SELF: nobody MODERATES their own record (T-0150) — otherwise a non-owner
    *    Admin holding manage_roles could demote or ban their own account and lock
-   *    the regiment out of a seat only they occupy, and anyone holding
-   *    edit_ranks_medals could promote themselves. Matched on member id; the
+   *    the regiment out of a seat only they occupy. Matched on member id; the
    *    Discord id and the display name are both re-assignable and would be the
-   *    wrong key. Applies to EVERY action.
+   *    wrong key.
    *  - OWNER: the regiment owner pointer is untouchable. It stays the stricter,
    *    authoritative check — it holds even if the owner's ROLE ever drifts from
    *    the pointer, so it is not superseded by the role comparison.
@@ -1208,11 +1210,12 @@ export class MembersService {
    *    Admin. The capability guard in the controller cannot express this: it
    *    only knows the caller's role, never the target.
    *
-   * The last two are the MODERATION rule and apply to role/suspend/ban only
+   * All three are the MODERATION rule and apply to role/suspend/ban only
    * (T-0211). A rank or medal write — changeRank, awardMedal, removeMedal,
-   * deriveFromDiscord — passes the self check and then answers to
-   * edit_ranks_medals alone, so the regiment's record-keeper can enter a
-   * promotion for a peer, a superior or the Owner.
+   * deriveFromDiscord — is not asked any of them: it answers to
+   * edit_ranks_medals and stops, so the regiment's record-keeper can enter a
+   * promotion for a peer, a superior, the Owner, or themselves. It still runs
+   * through here, because the owner-pointer read it returns feeds the projection.
    *
    * Called before any write, so a rejected action leaves no audit row, no
    * service-record entry, no Discord sync job and no session invalidation.

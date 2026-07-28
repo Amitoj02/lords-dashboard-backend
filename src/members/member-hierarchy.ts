@@ -9,8 +9,7 @@ import { Capability, MemberRole } from '../common/enums';
  *
  * They are NOT all subject to the same rule. The set splits in two (T-0211):
  * the ones that move authority get the full hierarchy, the ones that only write
- * a rank or a medal get the self refusal and nothing else. See
- * {@link DECORATION_ACTIONS}.
+ * a rank or a medal get no target rule at all. See {@link DECORATION_ACTIONS}.
  *
  * The list is also the key set of `MemberDto.permittedActions` (T-0177): the
  * flags the client reads and the guard the service enforces are derived from
@@ -38,18 +37,27 @@ export type MemberAdminAction = (typeof MEMBER_ADMIN_ACTIONS)[number];
  * invalidated — a rank and a medal are a record of what a member has done, not
  * a statement of what they may do.
  *
- * That is why these four answer to their CAPABILITY alone (plus the self
- * refusal below). Holding `edit_ranks_medals` is the regiment saying "this
- * person keeps the service record"; a record-keeper who cannot enter an Admin's
- * promotion, or pin a medal on the Owner, cannot keep the record. Before this
- * the whole set sat behind the moderation rule, so a Moderator with the
- * capability was refused against every peer and superior on the roster.
+ * These four have NO target-scoped rule at all. They answer to their capability
+ * and stop: `edit_ranks_medals` is the regiment saying "this person keeps the
+ * service record", and it is kept for the whole roster — peers, seniors, the
+ * regiment owner, and the record-keeper's own row. Before T-0211 the whole set
+ * sat behind the moderation rule, so a Moderator trusted with the capability
+ * was refused against most of the people whose promotions are worth recording.
  *
  * `deriveFromDiscord` belongs here because it writes exactly a rank and medal
  * awards — the same two things, read off the guild instead of typed by hand.
- * Its self refusal is the load-bearing one and is unaffected: deriving your own
- * record is a self-promotion available to anyone who can get a role added to
- * their own account in the guild.
+ *
+ * ⚠️ SELF IS PERMITTED HERE, INCLUDING FOR THE DERIVE — an owner decision, taken
+ * with the consequence stated. The self refusal on these four was the last
+ * defence of LDA-H1: a derive hands out whatever the target's Discord roles say
+ * they have earned, so on your own record it is a self-promotion reachable by
+ * anyone who can get a role added to their own account in the guild, outside
+ * this application entirely. What still bounds it: the capability itself (not
+ * granted below Admin by default), the promotion-only floor and additive-only
+ * medal diff in the derive path, `DiscordRolePolicyService`'s refusal to bind a
+ * role the bot cannot manage, and the audit row every write leaves. What does
+ * NOT bound it is this module. Granting `edit_ranks_medals` now means granting
+ * the holder their own rank.
  */
 export const DECORATION_ACTIONS = [
   'changeRank',
@@ -194,33 +202,27 @@ export interface ActOnCheck {
 }
 
 /**
- * The SELF refusal, per action — "You cannot …" completed (the phrasing the
- * self-guard has used since T-0150). Every action has one: nobody moderates
- * themselves, and nobody decorates themselves either.
+ * The SELF refusal — "You cannot …" completed (the phrasing the self-guard has
+ * used since T-0150). Nobody moderates themselves: otherwise a non-owner Admin
+ * holding `manage_roles` could demote or ban their own account and lock the
+ * regiment out of a seat only they occupy.
  *
- * ⚠️ For `deriveFromDiscord` this is the load-bearing refusal (LDA-H1). A derive
- * hands out whatever rank and medals the target's Discord roles say they have
- * earned — so on your own record it is a self-promotion, available to anyone who
- * can get a role added to their own account in the guild. Nobody derives
- * themselves, the Owner included; another admin does it for them.
+ * Keyed on {@link ModerationAction}, because that is now the whole of it — the
+ * rank/medal actions carry no self refusal (T-0211), and the type is what keeps
+ * one from being written for an action that would never show it.
  */
-const SELF_REFUSALS: Record<MemberAdminAction, string> = {
+const SELF_REFUSALS: Record<ModerationAction, string> = {
   changeRole: 'change your own role',
-  changeRank: 'change your own rank',
-  awardMedal: 'award yourself a medal',
-  removeMedal: 'remove your own medal',
   suspend: 'suspend your own account',
   unsuspend: 'lift your own suspension',
   ban: 'ban your own account',
   unban: 'lift your own ban',
-  deriveFromDiscord: 'derive your own rank and medals from Discord',
 };
 
 /**
- * The OWNER refusal, per action. Keyed on {@link ModerationAction}, so it holds
- * an entry for exactly the actions that can reach it — a decoration action is
- * cleared before the owner check, and TypeScript will not let one be given
- * wording it can never show (T-0211).
+ * The OWNER refusal, per action. Keyed on {@link ModerationAction} for the same
+ * reason — a decoration action is cleared before this check is reached, and
+ * TypeScript will not let one be given wording it can never show (T-0211).
  */
 const OWNER_REFUSALS: Record<ModerationAction, string> = {
   changeRole: "change the regiment owner's role",
@@ -234,34 +236,34 @@ const OWNER_REFUSALS: Record<ModerationAction, string> = {
 const RANK_REFUSAL = 'You cannot moderate a member whose role equals or outranks your own';
 
 /**
- * The single rule, as the sentence it refuses with (null = permitted). The
- * message is built here rather than by the caller because only here is it known
- * which refusals an action can even reach.
+ * The rule, as the sentence it refuses with (null = permitted). The message is
+ * built here rather than by the caller because only here is it known which
+ * refusals an action can even reach.
  *
- * Order is the rule, not just the wording:
+ *  1. DECORATIONS ARE NOT ASKED (T-0211). Rank and medals answer to the
+ *     capability alone — no self refusal, no owner refusal, no standing
+ *     comparison. See {@link DECORATION_ACTIONS} for what that gives away and
+ *     what still bounds it.
+ *  2. SELF, for the moderation actions. Self and owner would both also be caught
+ *     by the standing comparison below (an actor never strictly outranks their
+ *     own role, and the owner holds the top tier), but each deserves its own
+ *     explanation.
+ *  3. OWNER: the regiment owner pointer is the stricter, authoritative guard —
+ *     it holds even if the owner's ROLE has drifted from the pointer, and it
+ *     protects them from a same-tier Owner too.
+ *  4. STANDING: strictly outranking, so peers cannot moderate each other.
  *
- *  1. SELF, for everything. Self and owner would both also be caught by the rank
- *     comparison below (an actor never strictly outranks their own role, and the
- *     owner holds the top tier), but each deserves its own explanation — and for
- *     a decoration action this is now the ONLY thing standing between the caller
- *     and their own record.
- *  2. DECORATIONS STOP HERE (T-0211). Rank and medals are not authority, so past
- *     the self refusal they answer to the capability alone — see
- *     {@link DECORATION_ACTIONS}.
- *  3. OWNER, for the rest: the regiment owner pointer is the stricter,
- *     authoritative guard — it holds even if the owner's ROLE has drifted from
- *     the pointer, and it protects them from a same-tier Owner too.
- *  4. STANDING, for the rest: strictly outranking, so peers cannot moderate each
- *     other.
+ * The early return on line one is the whole of T-0211. Everything below it is
+ * the rule exactly as T-0176 wrote it.
  */
 function denyReason(
   { actorRole, actorMemberId, target, ownerMemberId }: ActOnCheck,
   action: MemberAdminAction,
 ): string | null {
+  if (isDecorationAction(action)) return null;
   if (actorMemberId && actorMemberId === target.id) {
     return `You cannot ${SELF_REFUSALS[action]}`;
   }
-  if (isDecorationAction(action)) return null;
   if (ownerMemberId && ownerMemberId === target.id) {
     return `You cannot ${OWNER_REFUSALS[action]}`;
   }

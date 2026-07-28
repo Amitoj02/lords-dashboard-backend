@@ -379,11 +379,12 @@ Capabilities & **default grants** (Owner column is locked = always granted):
 > Owner+Admin **only** (Moderator excluded); **Manage settings** is Owner only. Enforce from this table,
 > not from `role ∈ {Owner,Admin,Moderator}`.
 
-> ⚠️ **Edit ranks & medals reaches the whole roster** (T-0211). Unlike **Manage roles**, it is not
-> narrowed by the target's standing: whoever holds it may set the rank and award or remove the medals of
-> _any_ member — a peer, a senior, the regiment owner — and is refused only on their own record. Granting
-> it to Moderator in the settings matrix therefore hands over the regiment's whole service record, not
-> just the junior half of it. It confers no authority: no role, suspension or ban moves with it.
+> ⚠️ **Edit ranks & medals reaches the whole roster, including the holder** (T-0211). Unlike **Manage
+> roles**, it carries no target rule whatsoever: whoever holds it may set the rank and award or remove the
+> medals of _any_ member — a peer, a senior, the regiment owner, **and themselves**. Granting it hands over
+> the regiment's whole service record and makes the holder able to record their own promotion, including
+> via `derive-from-discord`, which credits whatever their own Discord roles say. It confers no authority —
+> no role, suspension or ban moves with it — but grant it to a role only if that is acceptable.
 
 > **Manage regiment details** (`manage_regiment_details`, T-0145) is a *publishing* right, not an
 > ownership right: it governs the landing/sign-in presentation and the three legal documents — the copy
@@ -880,8 +881,9 @@ client can route to `/apply`.
   - _Moderation_ — role, suspend, unsuspend, ban, unban: never yourself, never the
     `regiments.owner_member_id` pointer, and only against a **strictly lower** role, so peers cannot
     moderate each other. The role a caller may _grant_ is capped at their own tier (`canGrantRole`).
-  - _Rank & medals_ — rank, medal award/remove, derive-from-discord: never yourself, and no other
-    restriction (T-0211). A decoration is a record, not authority.
+  - _Rank & medals_ — rank, medal award/remove, derive-from-discord: no target rule at all, the
+    caller's own record included (T-0211). A decoration is a record, not authority; the capability
+    grant is the whole control.
   - The same predicate produces the `permittedActions` block on `MemberDto`, so the client is never
     offered an action the endpoint would refuse. A single target's block can mix `true` and `false`
     across the two tiers.

@@ -273,9 +273,9 @@ Legal documents are stored as Markdown and are **not sanitised server-side** —
 Admin actions on a _specific_ member are additionally gated on a server-computed `permittedActions` block, so the client's action menu cannot drift from what the API will accept. That per-target rule comes in two tiers:
 
 - **Moderation** (`role`, `suspend`, `unsuspend`, `ban`, `unban` — `manage_roles`): not yourself, not the regiment owner, and only against a **strictly lower** role. So an Admin cannot demote a peer Admin; only the Owner can. The role a caller may _grant_ is separately capped at their own tier — an Admin may appoint another Admin, a Moderator another Moderator, and nobody the Owner.
-- **Rank & medals** (`rank`, `medals`, `derive-from-discord` — `edit_ranks_medals`): **any** roster member except yourself, the owner and your seniors included. A rank or a medal is a record of what someone did, not authority over them, so whoever keeps the service record can keep all of it.
+- **Rank & medals** (`rank`, `medals`, `derive-from-discord` — `edit_ranks_medals`): **no target rule at all** — any roster member, the owner, your seniors and **your own record** included. A rank or a medal is a record of what someone did, not authority over them, so whoever keeps the service record keeps all of it. ⚠️ That makes the grant self-serving by design: an `edit_ranks_medals` holder can promote themselves. Grant it accordingly.
 
-`derive-from-discord` credits a member with the rank and medals their existing Discord roles already say they earned — the manual counterpart to the carry-over an enlistment performs. Promotion-only (their current rank is the floor), additive-only on medals, and safe to press twice. Never permitted on your own record, and that is now its **only** target restriction: a derive hands out whatever the target's roles say, so on yourself it would be a self-promotion.
+`derive-from-discord` credits a member with the rank and medals their existing Discord roles already say they earned — the manual counterpart to the carry-over an enlistment performs. Promotion-only (their current rank is the floor), additive-only on medals, and safe to press twice. It refused your own record until the rule above; it no longer does, so running it on yourself credits whatever your own Discord roles say you have earned.
 
 </details>
 

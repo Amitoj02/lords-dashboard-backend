@@ -846,15 +846,15 @@ describe('MembersService', () => {
         },
       );
 
-      it('reads Discord only AFTER the self guard has cleared the caller', async () => {
-        // Own record: refused. The guild must not be touched on the way to a 403 —
-        // a refused derive is not an excuse to go asking Discord about somebody.
-        // Since T-0211 self is the only refusal a derive has, so this ordering
-        // proof carries the whole guard.
-        memberRepo.findOne.mockResolvedValue(buildMember({ id: 'admin-1' }));
+      it('reads Discord only AFTER the member has been resolved in this regiment', async () => {
+        // The guild must not be touched on the way to a rejection — a derive that
+        // is going to fail is not an excuse to go asking Discord about somebody.
+        // This used to be proved with the self refusal, which T-0211 removed;
+        // the out-of-regiment 404 is the rejection that remains.
+        memberRepo.findOne.mockResolvedValue(null);
 
-        await expect(service.deriveFromDiscord('admin-1', admin(), null)).rejects.toBeInstanceOf(
-          ForbiddenException,
+        await expect(service.deriveFromDiscord('nobody-1', admin(), null)).rejects.toBeInstanceOf(
+          NotFoundException,
         );
 
         expect(roleAdoption.readGuildState).not.toHaveBeenCalled();
@@ -1039,11 +1039,11 @@ describe('MembersService', () => {
     // the target, so before T-0176 nothing stopped an Admin from demoting the
     // Owner or a Moderator from banning an Admin.
     //
-    // The cases below are stated per FAMILY (T-0211). The owner and standing
-    // refusals belong to the five moderation actions; the four rank/medal ones
-    // keep the self refusal and nothing else, so each "cannot" case has a
-    // "but may decorate" twin. A case that still fans over all nine actions —
-    // self, Moderator→Member, Owner→Admin — is asserting something the split
+    // The cases below are stated per FAMILY (T-0211). All three refusals belong
+    // to the five moderation actions; the four rank/medal ones have no target
+    // rule at all, so each "cannot" case has a "but may decorate" twin —
+    // including on the caller's own record. A case that still fans over all nine
+    // actions (Moderator→Member, Owner→Admin) is asserting something the split
     // did not touch, and is the evidence nothing was over-relaxed or
     // over-tightened.
     describe('role hierarchy guard (T-0176, split in T-0211)', () => {
@@ -1158,15 +1158,23 @@ describe('MembersService', () => {
         );
       });
 
-      // T-0150 covered role/suspend/ban only; the rank and medal actions were
-      // self-targetable until T-0176 folded them into the same guard.
-      //
-      // ⚠️ ALL NINE, and it must stay that way. Since T-0211 this is the ONLY
-      // target guard the four decoration actions have — narrowing this fan the
-      // way its three neighbours were narrowed would re-open self-promotion to
-      // anyone holding edit_ranks_medals.
-      it.each(MEMBER_ADMIN_ACTIONS)('an Admin cannot %s their own account', async (action) => {
+      // T-0150: nobody moderates their own account. T-0176 briefly extended it
+      // to rank and medals; T-0211 took that back out on the owner's decision.
+      it.each(MODERATION_ACTIONS)('an Admin cannot %s their own account', async (action) => {
         await expectRefusedWithoutTrace(
+          action,
+          user({ memberId: 'admin-1', role: MemberRole.Admin }),
+          moderatable({ id: 'admin-1', role: MemberRole.Admin }),
+        );
+      });
+
+      // ⚠️ The self-promotion path, permitted deliberately (T-0211). Recorded as
+      // a test so it is a decision somebody made rather than a guard somebody
+      // forgot: an edit_ranks_medals holder may set their own rank, pin their own
+      // medal, and — the sharp one — derive their own record, which credits
+      // whatever their own Discord roles say they have earned.
+      it.each(DECORATION_ACTIONS)('but an Admin may %s their own account', async (action) => {
+        await expectPermitted(
           action,
           user({ memberId: 'admin-1', role: MemberRole.Admin }),
           moderatable({ id: 'admin-1', role: MemberRole.Admin }),

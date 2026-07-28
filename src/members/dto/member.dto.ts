@@ -48,21 +48,22 @@ export class MemberMedalSummary {
  * flag where the endpoint would refuse, nor a refusal where the flag was true.
  *
  * The flags are computed per action and can legitimately disagree (T-0211): on
- * a peer or a superior, an edit_ranks_medals holder gets the four rank/medal
- * actions true and the five moderation ones false. A block is a per-action
- * answer, never one verdict copied nine times.
+ * a peer, a superior, the regiment owner or the caller's OWN record, an
+ * edit_ranks_medals holder gets the four rank/medal actions true and the five
+ * moderation ones false. A block is a per-action answer, never one verdict
+ * copied nine times.
  */
 export class PermittedActionsDto {
   @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
   changeRole: boolean;
 
-  @ApiProperty({ description: 'Requires edit_ranks_medals; any target but yourself' })
+  @ApiProperty({ description: 'Requires edit_ranks_medals; no target restriction' })
   changeRank: boolean;
 
-  @ApiProperty({ description: 'Requires edit_ranks_medals; any target but yourself' })
+  @ApiProperty({ description: 'Requires edit_ranks_medals; no target restriction' })
   awardMedal: boolean;
 
-  @ApiProperty({ description: 'Requires edit_ranks_medals; any target but yourself' })
+  @ApiProperty({ description: 'Requires edit_ranks_medals; no target restriction' })
   removeMedal: boolean;
 
   @ApiProperty({ description: 'Requires manage_roles, and the full role hierarchy' })
@@ -79,8 +80,8 @@ export class PermittedActionsDto {
 
   @ApiProperty({
     description:
-      'Requires edit_ranks_medals; any target but yourself. Never true on your own ' +
-      'record — a derive is a self-promotion there (T-0204)',
+      'Requires edit_ranks_medals; no target restriction, your own record included ' +
+      '(T-0211 relaxed the self refusal T-0204 relied on)',
   })
   deriveFromDiscord: boolean;
 }

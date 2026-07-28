@@ -47,8 +47,8 @@ import { MembersService } from './members.service';
  * subject to the target-scoped guard in the service (T-0176). What that guard
  * asks depends on the action (T-0211): role/suspend/ban get the full hierarchy
  * — not yourself, not the regiment owner, and only against a strictly lower
- * role — while rank/medal/derive get the self refusal alone, because a
- * decoration is not authority. The `permittedActions` block on MemberDto reports
+ * role — while rank/medal/derive get no target rule at all, because a decoration
+ * is not authority. The `permittedActions` block on MemberDto reports
  * the combined verdict per member and per action so the client does not have to
  * guess (T-0177).
  */
@@ -188,8 +188,8 @@ export class MembersController {
     summary: "Change a member's rank",
     description:
       'A rank is a decoration, not authority, so this answers to edit_ranks_medals ' +
-      'alone (T-0211): the target may be a peer, a superior or the regiment owner. ' +
-      'Refused only on your own record.',
+      'alone (T-0211): any member of the regiment, including a peer, a superior, ' +
+      'the regiment owner, and the caller themselves.',
   })
   @ApiOkResponse({ type: MemberDto })
   changeRank(
@@ -226,8 +226,8 @@ export class MembersController {
   @ApiOperation({
     summary: 'Award a medal to a member (repeatable)',
     description:
-      'Like every rank/medal write, gated on edit_ranks_medals alone and refused ' +
-      'only on your own record (T-0211).',
+      'Like every rank/medal write, gated on edit_ranks_medals alone — any member, ' +
+      'the caller included (T-0211).',
   })
   @ApiOkResponse({ type: MemberDto })
   awardMedal(
@@ -244,8 +244,8 @@ export class MembersController {
   @ApiOperation({
     summary: "Remove a member's most recent award of a medal",
     description:
-      'Like every rank/medal write, gated on edit_ranks_medals alone and refused ' +
-      'only on your own record (T-0211).',
+      'Like every rank/medal write, gated on edit_ranks_medals alone — any member, ' +
+      'the caller included (T-0211).',
   })
   @ApiOkResponse({ type: MemberDto })
   removeMedal(
@@ -265,11 +265,11 @@ export class MembersController {
     description:
       'The repair for members whose history only ever existed as Discord roles (T-0204). ' +
       'Promotion-only (their current rank is the floor) and additive-only on medals, ' +
-      'diffed against what they already hold so it is safe to press twice. Refused on ' +
-      "your own record — a derive hands out whatever the target's roles say, so on " +
-      'yourself it is a self-promotion — and refused nowhere else: it writes a rank ' +
-      'and medals, so it is open to any edit_ranks_medals holder against any other ' +
-      'member, the regiment owner included (T-0211). 409 when there is nothing to read from ' +
+      'diffed against what they already hold so it is safe to press twice. It writes a ' +
+      'rank and medal awards, so it carries no target restriction at all (T-0211): any ' +
+      'edit_ranks_medals holder may run it against any member of the regiment, the owner ' +
+      'and THEMSELVES included — on your own record it credits whatever your own Discord ' +
+      'roles already say you have earned. 409 when there is nothing to read from ' +
       '(no linked account, bot switched off, not in the guild); 503 when Discord did ' +
       'not answer. Finding nothing to derive is a 200.',
   })

@@ -20,7 +20,7 @@ import {
  *
  * Two rules since T-0211, and both are pinned here: the MODERATION actions
  * (role, suspend, ban) keep self + owner + strictly-outranks, while the
- * DECORATION actions (rank, medals, derive) keep the self refusal alone. Nearly
+ * DECORATION actions (rank, medals, derive) have no target rule at all. Nearly
  * every case below is therefore stated per family — a test that fans over all
  * nine actions is now asserting something about the split itself.
  */
@@ -140,12 +140,21 @@ describe('member hierarchy (T-0176)', () => {
       expect(canActOn(check({ actorRole: MemberRole.Moderator }), a)).toBe(true);
     });
 
-    it.each(MEMBER_ADMIN_ACTIONS)('refuses the caller acting on themselves (%s)', (action) => {
-      // The one universal guard, and for the decoration actions the ONLY one —
-      // see the derive rationale (LDA-H1). It must hold for all nine.
+    it.each(MODERATION_ACTIONS)('refuses the caller moderating themselves (%s)', (action) => {
+      // T-0150: a seat holder must not be able to remove themselves and hollow
+      // out a seat only they occupy.
       expect(canActOn(check({ actorMemberId: 'actor-1', targetId: 'actor-1' }), action)).toBe(
         false,
       );
+    });
+
+    it.each(DECORATION_ACTIONS)('but permits decorating YOURSELF (%s)', (action) => {
+      // ⚠️ An owner decision (T-0211), and the sharpest edge of it. With the self
+      // refusal gone, `deriveFromDiscord` on your own record credits whatever
+      // your own Discord roles say you have earned — the trigger for which lives
+      // in the guild, outside this application. Nothing in this module bounds it
+      // any more; the capability grant is the whole control.
+      expect(canActOn(check({ actorMemberId: 'actor-1', targetId: 'actor-1' }), action)).toBe(true);
     });
 
     it.each(MODERATION_ACTIONS)(
@@ -209,23 +218,19 @@ describe('member hierarchy (T-0176)', () => {
       );
     });
 
-    it('leaves an identity-only caller to the CAPABILITY gate on the decoration half', () => {
-      // With the standing rule gone there is nothing role-shaped left to refuse
-      // an Applicant here — `canActOn` never spoke for capabilities (see its
-      // docblock), and an Applicant holds no edit_ranks_medals, so the flags and
-      // the controller guard both still say no. Stated rather than assumed,
-      // because it is the one place the relaxation removes the last
-      // hierarchy-shaped backstop.
+    it('leaves the CAPABILITY as the only gate on the decoration half', () => {
+      // ⚠️ Stated as an EXPOSURE, not a reassurance. With no target rule left,
+      // this module says yes to every decoration for every caller — an Applicant,
+      // an identity-only caller with no member row, anyone. Holding the grant is
+      // the whole control, so the assertion that matters is the positive one:
+      // edit_ranks_medals alone turns the flag on.
+      const applicant = check({ actorMemberId: null, actorRole: MemberRole.Applicant });
       for (const action of DECORATION_ACTIONS) {
-        expect(
-          canActOn(check({ actorMemberId: null, actorRole: MemberRole.Applicant }), action),
-        ).toBe(true);
-        expect(
-          permittedActions(
-            check({ actorMemberId: null, actorRole: MemberRole.Applicant }),
-            new Set(),
-          )[action],
-        ).toBe(false);
+        expect(canActOn(applicant, action)).toBe(true);
+        expect(permittedActions(applicant, new Set([Capability.EditRanksMedals]))[action]).toBe(
+          true,
+        );
+        expect(permittedActions(applicant, new Set([Capability.ManageRoles]))[action]).toBe(false);
       }
     });
   });
@@ -237,16 +242,12 @@ describe('member hierarchy (T-0176)', () => {
       );
     });
 
-    it('keeps a self wording for the decoration actions too', () => {
-      expect(() => assertCanActOn(check({ targetId: 'actor-1' }), 'changeRank')).toThrow(
-        'You cannot change your own rank',
-      );
-      expect(() => assertCanActOn(check({ targetId: 'actor-1' }), 'awardMedal')).toThrow(
-        'You cannot award yourself a medal',
-      );
-      expect(() => assertCanActOn(check({ targetId: 'actor-1' }), 'deriveFromDiscord')).toThrow(
-        'You cannot derive your own rank and medals from Discord',
-      );
+    it('has no self wording left for the decoration actions — and cannot grow one', () => {
+      // SELF_REFUSALS is keyed on ModerationAction, so there is no sentence to
+      // print for these four and the type system is what keeps it that way.
+      for (const action of DECORATION_ACTIONS) {
+        expect(() => assertCanActOn(check({ targetId: 'actor-1' }), action)).not.toThrow();
+      }
     });
 
     it('names the owner when the owner pointer is the reason', () => {
@@ -298,11 +299,17 @@ describe('member hierarchy (T-0176)', () => {
         expect(`${action}=${flags[action]}`).toBe(`${action}=true`);
     });
 
-    it('is all-false on your own record, whatever the caller holds', () => {
+    it('splits the block on your OWN record too — decorations on, moderation off', () => {
       const held = new Set<string>([Capability.ManageRoles, Capability.EditRanksMedals]);
       const flags = permittedActions(check({ actorMemberId: 'me', targetId: 'me' }), held);
 
-      expect(Object.values(flags).some(Boolean)).toBe(false);
+      // Your own row now offers the rank and medal controls (T-0211) while still
+      // withholding the moderation ones — which is the state T-0246's
+      // disabled-and-explained self treatment was written for, reachable at last.
+      for (const action of MODERATION_ACTIONS)
+        expect(`self.${action}=${flags[action]}`).toBe(`self.${action}=false`);
+      for (const action of DECORATION_ACTIONS)
+        expect(`self.${action}=${flags[action]}`).toBe(`self.${action}=true`);
     });
 
     it('is all-false on the owner pointer when the caller holds only manage_roles', () => {

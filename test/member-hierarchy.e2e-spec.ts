@@ -14,6 +14,7 @@ import { Capability, MemberRole, MemberStatus } from '../src/common/enums';
 import { Medal } from '../src/medals/entities/medal.entity';
 import { MemberMedal } from '../src/medals/entities/member-medal.entity';
 import { Member } from '../src/members/entities/member.entity';
+import { ServiceRecordEntry } from '../src/members/entities/service-record-entry.entity';
 import {
   DECORATION_ACTIONS,
   MEMBER_ADMIN_ACTIONS,
@@ -31,9 +32,9 @@ import { Regiment } from '../src/regiments/entities/regiment.entity';
  * TWO rules, not one (T-0211). The MODERATION actions — role, suspend,
  * unsuspend, ban, unban — keep the full hierarchy: not yourself, not the
  * regiment owner, and only against a strictly lower role. The DECORATION
- * actions — rank, medal award/remove, derive — keep the self refusal alone, so
- * an `edit_ranks_medals` holder may decorate a peer, a superior or the owner.
- * Nearly every case below is therefore run per family.
+ * actions — rank, medal award/remove, derive — have no target rule at all, so an
+ * `edit_ranks_medals` holder may decorate a peer, a superior, the owner and
+ * their own record. Nearly every case below is therefore run per family.
  *
  * Sessions are minted directly from a saved identity (the pattern from
  * account-deletion.e2e-spec) rather than through the OAuth flow, because the
@@ -113,6 +114,8 @@ describe('Member role hierarchy (e2e)', () => {
    * this run; anything missing at the end is put back (T-0211).
    */
   let ownerMedalSnapshot: MemberMedal[];
+  /** The owner's service-record entry ids as found; anything newer is this run's. */
+  let ownerServiceRecordIds: string[];
 
   const createdMemberIds: string[] = [];
   const createdIdentityIds: string[] = [];
@@ -239,11 +242,24 @@ describe('Member role hierarchy (e2e)', () => {
       bannedAt: owner!.bannedAt,
       suspendedUntil: owner!.suspendedUntil,
     };
+    await cleanup();
+
+    // ⚠️ Snapshotted AFTER cleanup(), not before. A crashed prior run can leave
+    // awards pinned on the owner by actors this run is about to delete; captured
+    // beforehand, the restore below would re-insert one whose awardedByMemberId
+    // no longer exists, throw on the FK, and take the grant revert down with it —
+    // leaving the shared e2e regiment with a widened permission matrix.
     ownerMedalSnapshot = await dataSource
       .getRepository(MemberMedal)
       .find({ where: { memberId: ownerMemberId } });
-
-    await cleanup();
+    // Same window, same reason: a permitted changeRank against the owner appends
+    // to their service record, and the owner row itself is never deleted, so
+    // nothing else would sweep those entries out of the shared database.
+    ownerServiceRecordIds = (
+      await dataSource
+        .getRepository(ServiceRecordEntry)
+        .find({ where: { memberId: ownerMemberId }, select: ['id'] })
+    ).map((entry) => entry.id);
 
     // Widen the matrix so the CAPABILITY guard is out of the way and what the
     // tests observe is the hierarchy guard, not a missing grant. Reverted in
@@ -306,13 +322,28 @@ describe('Member role hierarchy (e2e)', () => {
     await cleanup();
     if (ownerMemberId) {
       await dataSource.getRepository(Member).update({ id: ownerMemberId }, ownerSnapshot);
-      // Awards this suite pinned on the owner are swept by `cleanup()` (it deletes
-      // everything the created actors awarded). This puts back anything a
-      // permitted `removeMedal` took OFF the owner — a row that predates the run
-      // and that nothing else would restore.
-      const medalRepo = dataSource.getRepository(MemberMedal);
-      for (const award of ownerMedalSnapshot ?? []) {
-        if (!(await medalRepo.findOne({ where: { id: award.id } }))) await medalRepo.save(award);
+      // Wrapped, because everything after it — the FLIPPED_GRANTS revert — must
+      // run even if a restore fails. A suite that leaves the shared permission
+      // matrix widened breaks every suite that follows it.
+      try {
+        // Awards this suite pinned on the owner are swept by `cleanup()` (it
+        // deletes everything the created actors awarded). This puts back anything
+        // a permitted `removeMedal` took OFF the owner — a row that predates the
+        // run and that nothing else would restore.
+        const medalRepo = dataSource.getRepository(MemberMedal);
+        for (const award of ownerMedalSnapshot ?? []) {
+          if (!(await medalRepo.findOne({ where: { id: award.id } }))) await medalRepo.save(award);
+        }
+        // ...and drop the service-record entries a permitted rank change appended
+        // to the owner. They cannot cascade: the owner row is not deleted.
+        if (ownerServiceRecordIds) {
+          const entries = dataSource.getRepository(ServiceRecordEntry);
+          const written = await entries.find({ where: { memberId: ownerMemberId } });
+          const added = written.filter((e) => !ownerServiceRecordIds.includes(e.id));
+          if (added.length > 0) await entries.delete({ id: In(added.map((e) => e.id)) });
+        }
+      } catch (error) {
+        console.error('member-hierarchy e2e: owner restore failed', error);
       }
     }
     for (const grant of FLIPPED_GRANTS) {
@@ -388,10 +419,18 @@ describe('Member role hierarchy (e2e)', () => {
       await expectNotRefused(action, ownerMemberId, moderatorToken, 'owner');
     });
 
-    // The one refusal left, and the load-bearing one: a derive hands out whatever
-    // the caller's own Discord roles say, so on your own record it is a
-    // self-promotion. Nothing above may be read as relaxing this.
-    it.each(DECORATION_ACTIONS)('but nobody may %s their OWN record', async (action) => {
+    // ⚠️ AND THEIR OWN RECORD, deliberately (T-0211). This is the self-promotion
+    // path: an edit_ranks_medals holder may set their own rank, pin their own
+    // medal, and derive their own record — which credits whatever their own
+    // Discord roles say they have earned, a trigger that lives in the guild
+    // rather than in this application. Asserted so it reads as a decision
+    // somebody took, not a guard somebody dropped.
+    it.each(DECORATION_ACTIONS)('and may %s their OWN record', async (action) => {
+      await expectNotRefused(action, adminMemberId, adminToken, 'self-admin');
+      await expectNotRefused(action, moderatorMemberId, moderatorToken, 'self-moderator');
+    });
+
+    it.each(MODERATION_ACTIONS)('but still may not %s their own record', async (action) => {
       expect(await ACTIONS[action](adminMemberId, adminToken)).toBe(403);
       expect(await ACTIONS[action](moderatorMemberId, moderatorToken)).toBe(403);
     });
@@ -427,11 +466,16 @@ describe('Member role hierarchy (e2e)', () => {
       }
     });
 
-    it('still reports every action false on the caller’s own record', async () => {
+    it('splits the block on the caller’s own record too', async () => {
       const onSelf = await permittedActionsFor(adminMemberId, adminToken);
 
-      for (const action of MEMBER_ADMIN_ACTIONS) {
+      // Your own row is no longer all-false: the rank and medal controls are
+      // offered there (T-0211) while suspend/ban/role stay withheld.
+      for (const action of MODERATION_ACTIONS) {
         expect(`self.${action}: ${onSelf[action]}`).toBe(`self.${action}: false`);
+      }
+      for (const action of DECORATION_ACTIONS) {
+        expect(`self.${action}: ${onSelf[action]}`).toBe(`self.${action}: true`);
       }
     });
 
