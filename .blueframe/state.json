@@ -14890,6 +14890,10 @@
         {
           "desc": "full suites green: 1047 unit, 155 e2e",
           "status": "passed"
+        },
+        {
+          "desc": "the permittedActions-vs-endpoint sweep carries an explicit 60s timeout: T-0211 grew it from three targets to five (45 serial HTTP round-trips), which straddled Jest's 5s default and passed on one CI runner while timing out on the other",
+          "status": "passed"
         }
       ],
       "regressionRisk": [
@@ -14912,6 +14916,11 @@
           "desc": "member-hierarchy.e2e now really writes the SHARED seeded owner row: changeRank lands, removeMedal can delete an award the suite never created, and a rank change appends service-record entries that cannot cascade because the owner row is never deleted. afterAll restores all three, snapshots them AFTER cleanup() (a snapshot taken before it can capture rows cleanup is about to delete, and re-inserting one throws on the FK), and wraps the restore in try/catch so the FLIPPED_GRANTS revert always runs.",
           "status": "open",
           "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "member-hierarchy.e2e's 'never advertises an action the endpoint then refuses' sweep is the only test in the repo with an explicit timeout, because it is the only one doing ~45 serial HTTP calls. Adding a sixth target, or an action to MEMBER_ADMIN_ACTIONS, grows it multiplicatively - re-check the budget rather than trimming the sweep, which is what makes it an invariant.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:35:00Z"
         }
       ],
       "skippedByClaude": [
@@ -14938,6 +14947,13 @@
           "to": "review",
           "by": "claude",
           "note": "Owner follow-up mid-review: capability holders must also be able to change their OWN rank and medals. The self refusal came out of the decoration half entirely (self-derive included), so the short-circuit moved to the FIRST line of denyReason and SELF_REFUSALS is now keyed on ModerationAction alongside OWNER_REFUSALS. Also fixed two real defects the review surfaced in the e2e teardown. 1047 unit + 155 e2e + 633 frontend green. PRs open into dev: this repo #69, frontend [lords-regiment-dashboard #59](https://github.com/Amitoj02/lords-regiment-dashboard/pull/59)."
+        },
+        {
+          "at": "2026-07-28T19:35:00Z",
+          "from": "review",
+          "to": "review",
+          "by": "claude",
+          "note": "CI on #69 caught a flake I introduced: the widened permittedActions sweep exceeded Jest's 5s default on the slower runner (it passed on the pull_request run and failed on the push run for the same commit). Given an explicit 60s budget rather than fewer targets - the exhaustiveness is the test."
         }
       ]
     }

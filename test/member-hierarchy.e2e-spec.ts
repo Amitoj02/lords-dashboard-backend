@@ -479,6 +479,14 @@ describe('Member role hierarchy (e2e)', () => {
       }
     });
 
+    // ⏱ The one test in this repo with an explicit timeout, and it earns it: five
+    // targets × nine actions, each a real HTTP round-trip, run serially — 50 in
+    // all. T-0211 grew it from three targets to five (a peer Moderator and the
+    // caller's own record are new cases the split created), which pushed it past
+    // Jest's 5s default on a slow runner and made it pass on one CI machine and
+    // time out on another. Widening the budget rather than trimming the sweep:
+    // the exhaustiveness IS the test — it is the only place a permitted flag and
+    // a 403 are checked against each other action by action.
     it('never advertises an action the endpoint then refuses (and vice versa)', async () => {
       // Walked target by target: the flags are read first, then every action is
       // actually invoked, so a flag and a 403 can never disagree.
@@ -500,7 +508,7 @@ describe('Member role hierarchy (e2e)', () => {
           );
         }
       }
-    });
+    }, 60_000);
 
     it('is present on the list projection too, not only the detail one', async () => {
       type Row = { id: string; permittedActions: Record<MemberAdminAction, boolean> };
