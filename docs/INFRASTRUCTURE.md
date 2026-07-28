@@ -26,7 +26,11 @@ Verified at go-live:
 | SPA | served, `<title>Lords Regiment Dashboard</title>` |
 
 **Not yet verified** (see [Open items](#open-items)): a real avatar upload
-round-trip, and backups/restore against real R2.
+round-trip.
+
+Backups and restore **were** verified against real R2 on 2026-07-27 — see
+[Open items](#open-items) for what that took, and `deploy/README.md` for the
+seven nights of silent failure that preceded it.
 
 ---
 
@@ -306,9 +310,9 @@ rclone delete r2:lords-media       # only when intentionally resetting
 | Item | Status |
 |---|---|
 | Avatar upload round-trip (presign → CORS → PUT → cdn) | **unverified** — the most likely thing to break |
-| Backups against real R2 | **never run** — enable the timer, then run the drill |
-| Restore drill + recorded RTO | **never run** — a backup you have not restored is a hypothesis |
-| Better Stack heartbeat + `/api/health/ready` monitor | not set up |
+| Backups against real R2 | **verified 2026-07-27** — first object in `r2:lords-backups`. Every run from go-live to that date failed silently; see `deploy/README.md`. |
+| Restore drill + recorded RTO | **verified 2026-07-27** — 31/31 tables, all row counts exact, **RTO 1–2s** |
+| Better Stack heartbeat + `/api/health/ready` monitor | **not set up** — this is what let seven nights of failed backups go unnoticed |
 | Legal pages (privacy policy, delete-my-account, retention job) | **required before public sign-in** — plan Phase 7 |
 | Discord bot rollout into the 576-member guild | plan Phase 6, seven-step ladder, not started |
 | Guild-membership gate | **built, shipped OFF** — see below |

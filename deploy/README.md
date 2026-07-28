@@ -171,6 +171,26 @@ Point a **Better Stack heartbeat** at `BACKUP_HEARTBEAT_URL` in `backup.env`. It
 is pinged only on success, so the monitor alerts on its absence — which is the
 only way to catch the timer silently not running at all.
 
+> ### The seven nights nothing was backed up
+>
+> From go-live (2026-07-20) to 2026-07-27 **every run failed and the bucket stayed
+> empty.** `rclone` lives in `~/bin`, and a systemd *user* unit inherits
+> `PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin` — which does not
+> include it. An interactive login shell does, because Debian's `~/.profile`
+> prepends `~/bin`. So `rclone ls r2:lords-backups` typed by hand worked perfectly
+> while the identical command under the timer was never found at all.
+>
+> Two things turned that into a week of silence rather than a first-night alarm:
+> `|| fail "rclone upload failed"` reported bash's exit 127 as an upload error, so
+> the log accused the network instead of the PATH; and `BACKUP_HEARTBEAT_URL` was
+> blank, so nothing was watching for the success ping that never came.
+>
+> Both scripts now resolve rclone by absolute path and preflight the bucket
+> *before* the dump, and the unit sets `Environment=PATH=%h/bin:...`. **Set the
+> heartbeat** — the code fix closes this instance, the monitor is what catches the
+> next one. The tell, if you ever see it again: the failure arrives less than a
+> millisecond after `uploading`, far too fast for a network round-trip.
+
 ### Restore drill
 
 ```bash
@@ -184,6 +204,12 @@ number is your RTO — record it.** Safe against production: it never writes to
 
 Run it once now, and again after any MySQL upgrade. A backup you have not
 restored is a hypothesis.
+
+**Last drill: 2026-07-27 — 31/31 tables, every row count exact, RTO 1–2s** on a
+107 KB dump. That drill is also what caught `audit_logs` sitting in the row-count
+list under a name the schema has never used (`audit_log_entries`), silently
+skipped on every previous run. A stale name in that list now prints a `?` line
+instead of passing over in silence.
 
 ### Real restore
 

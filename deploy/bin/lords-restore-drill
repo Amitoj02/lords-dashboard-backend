@@ -38,6 +38,12 @@ DB_DATABASE="$(read_env DB_DATABASE)"
 : "${RCLONE_REMOTE:=r2}"
 : "${BACKUP_BUCKET:=lords-backups}"
 
+# Resolved explicitly, not via PATH — see the long note in lords-backup. ~/bin is
+# on an interactive login shell's PATH and not on a systemd user unit's.
+RCLONE="${RCLONE_BIN:-$(command -v rclone 2>/dev/null || true)}"
+: "${RCLONE:=$HOME/bin/rclone}"
+[ -x "$RCLONE" ] || fail "rclone is not executable at '$RCLONE' — set RCLONE_BIN in $CFG_FILE"
+
 [ "$DRILL_DB" != "$DB_DATABASE" ] || fail "refusing to drill onto the live database"
 
 mysql_root() {
@@ -50,7 +56,7 @@ trap 'rm -rf "$WORK"; mysql_root -e "DROP DATABASE IF EXISTS \`${DRILL_DB}\`;" >
 # ── Pick the archive ────────────────────────────────────────────────────────
 OBJECT="${1:-}"
 if [ -z "$OBJECT" ]; then
-	OBJECT="$(rclone lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" --include 'lords_dashboard-*.sql.zst' \
+	OBJECT="$("$RCLONE" lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" --include 'lords_dashboard-*.sql.zst' \
 		| sort | tail -1)"
 	[ -n "$OBJECT" ] || fail "no backups found in ${RCLONE_REMOTE}:${BACKUP_BUCKET}"
 fi
@@ -59,7 +65,7 @@ log "restoring $OBJECT"
 START="$(date +%s)"
 
 # ── Download ────────────────────────────────────────────────────────────────
-rclone copyto "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${OBJECT}" "$WORK/$OBJECT" --retries 3 \
+"$RCLONE" copyto "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${OBJECT}" "$WORK/$OBJECT" --retries 3 \
 	|| fail "download failed"
 log "downloaded $(stat -c %s "$WORK/$OBJECT") bytes in $(( $(date +%s) - START ))s"
 
@@ -97,9 +103,16 @@ printf '  %-28s %s\n\n' "tables restored:" "$DRILL_TABLES"
 
 # Exact row counts on the tables whose loss would actually hurt. information_schema
 # table_rows is an estimate for InnoDB, so count these for real.
-for t in members ranks medals applications events gallery_items audit_logs; do
+for t in members ranks medals applications events gallery_items audit_log_entries; do
 	live=$(mysql_root -N -B -e "SELECT COUNT(*) FROM \`${DB_DATABASE}\`.\`$t\`;" 2>/dev/null || echo skip)
-	[ "$live" = skip ] && continue
+	if [ "$live" = skip ]; then
+		# Say so out loud. Skipping in silence is how `audit_logs` sat in this
+		# list from go-live without ever being checked — the table is actually
+		# audit_log_entries, so every drill quietly passed over the audit trail
+		# while printing nothing but ticks.
+		printf '  ? %-20s not in the live schema — stale name in this list\n' "$t"
+		continue
+	fi
 	got=$(mysql_root -N -B -e "SELECT COUNT(*) FROM \`${DRILL_DB}\`.\`$t\`;" 2>/dev/null || echo ERR)
 	if [ "$live" = "$got" ]; then
 		printf '  ✓ %-20s %s rows\n' "$t" "$got"

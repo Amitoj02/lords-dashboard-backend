@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "f124324a1e6803a27b56c923ed0bedf53b6be956",
-  "lastSyncedAt": "2026-07-27T20:10:00Z",
-  "notesForNextSession": "LATEST SESSION (T-0206 + T-0207): finished the event-announcement feature the owner actually asked for, and learned the lesson recorded in the memory 'always do BOTH repos'. T-0205 shipped the backend and left the SPA with no way to set announceRoleId, so the owner's first requirement - 'when creating events it asks for a Role to ping' - did not exist and every event announced silently. *** IF A TASK HAS A FRONTEND HALF, IT IS PART OF THE TASK. Flagging a gap is not delivering it. *** Two defects surfaced only by DRIVING THE FORM in the running app: GET /discord/roles was gated on edit_ranks_medals while the event form is manage_events (Moderator holds one and not the other, so a Moderator got a 403 on a form they may open) - fixed with a new @RequireAnyCapability OR guard, deliberately NOT @RequireRole, which would have bypassed the editable permissions matrix; and @everyone was offered in the picker, a control that would have silently pinged nobody because Discord needs parse:['everyone'] for it and the API never sends that. T-0207 then made the announcement track the event: update refreshes it (covering every field including the banner), reanchor refreshes every row it moved, and ARCHIVE closes it - nothing else ever would, because the close sweep looks for ENDED events and an archived one never reaches `previous`. An edit NEVER re-pings; it edits the existing message and that path takes no mention allow-list at all. THE BANNER WAS ALREADY WIRED - it just cannot render in dev, because the URL is http://localhost:9100 (MinIO) and Discord's servers cannot reach it. Do not 'fix' that; production R2 URLs work. TWO LOCAL TRAPS worth knowing: the dev DB needs `migration:run` pointed at lords_dashboard (I migrated only the e2e DB and left the owner with 500s), and the api container wedges itself on every restart via nest-cli deleteOutDir + tsconfig incremental - see the memory. OPEN, NOT DONE: the deleteOutDir/incremental one-line fix is still uncommitted (it was held back so it would not land inside a release PR), and the T-0204 derive e2e cases still flake when the full suite runs.",
-  "nextIdCounter": 208,
+  "lastSyncedCommit": "28388a9eae45dfce03f3d972caa625f4d6ae424e",
+  "lastSyncedAt": "2026-07-28T01:40:00Z",
+  "notesForNextSession": "BACKUPS NOW WORK - and had never worked before 2026-07-27. r2:lords-backups was empty from go-live until this session; T-0208 has the whole story (rclone in ~/bin, absent from a systemd user unit's PATH, and a 127 swallowed by `|| fail \"rclone upload failed\"`). Production is running the fixed scripts already - they were installed to ~/bin and ~/lords/deploy by hand and md5-match the repo. THE REPO IS THE HALF THAT IS BEHIND: branch fix/backup-rclone-path is committed locally and not pushed, so open the PR into dev before anything else touches deploy/. Two things to actually finish: (1) SET BACKUP_HEARTBEAT_URL in ~/lords/backup.env - it is blank, and its blankness is why a week of failures was invisible; the code fix cannot report a timer that does not run. (2) Confirm the first UNATTENDED 03:30 UTC run succeeded - a manual `systemctl --user start` shares nothing with the timer but the unit file. Also note ~/lords/backup.env now has BACKUP_MIN_BYTES=50000 (real dump is ~107 KB); that file is operator-owned and not in git, so a box rebuild reverts it to 20000. Recorded RTO: 1-2s. The avatar upload round-trip is now the only never-verified item from go-live.",
+  "nextIdCounter": 209,
   "connections": [],
   "tasks": [
     {
@@ -14523,6 +14523,97 @@
           "note": "owner: 'include the event banner' (already wired - it just cannot render from a localhost MinIO URL) and 'editing the event should re-render its discord announcement'. Implemented on feat/event-announcement-resync; 977 unit + 140 e2e green."
         }
       ]
+    },
+    {
+      "id": "T-0208",
+      "title": "Restore the nightly backup: rclone was never on the timer's PATH",
+      "summary": "Every nightly backup from go-live (2026-07-20) to 2026-07-27 failed and r2:lords-backups was EMPTY the whole time - the first backup this project has ever actually stored was taken during this session. rclone is installed to ~/bin because bootstrap.sh is not allowed to need root, and a systemd USER unit inherits PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin, which does not contain it; an interactive login shell DOES, because Debian's ~/.profile prepends ~/bin. So `rclone ls r2:lords-backups` typed by hand worked perfectly while the identical bare `rclone` under the timer was never found. What turned one bad night into seven was the error handling: `|| fail \"rclone upload failed\"` swallowed bash's 127 and blamed the upload, so the journal accused R2 while the credentials were fine the entire time (proved by a write probe: 0.3s, Copied (new)). The tell was in the timestamps all along - uploading -> FAILED in 737 MICROseconds, with --retries 3 set, far too fast for any network round-trip. Both scripts now resolve rclone explicitly (RCLONE_BIN, then PATH, then ~/bin/rclone) and refuse to start if it is not executable; lords-backup preflights the bucket BEFORE spending a mysqldump on it; the upload reports the exit code it actually got; and the unit sets Environment=PATH=%h/bin:... as a second lock. Separately, the drill's row-count list named `audit_logs`, a table this schema has never had (it is audit_log_entries), and `|| echo skip` passed over it in SILENCE on every run - the audit trail was the one table never verified. Same bug class as the swallowed 127, so a stale name now prints a `?` line instead of nothing.",
+      "status": "review",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "backups",
+      "repo": "",
+      "paths": [
+        "deploy/bin/lords-backup",
+        "deploy/bin/lords-restore-drill",
+        "deploy/systemd/lords-backup.service",
+        "deploy/README.md",
+        "docs/INFRASTRUCTURE.md"
+      ],
+      "dependsOn": [
+        "T-0142"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "a real backup uploads to r2:lords-backups and is listable (106,766 B, 2026-07-27)",
+          "status": "passed"
+        },
+        {
+          "desc": "restore drill: 31/31 tables, all seven row counts exact, RTO 1-2s, live DB untouched",
+          "status": "passed"
+        },
+        {
+          "desc": "audit_log_entries is actually counted by the drill (470 rows) instead of silently skipped",
+          "status": "passed"
+        },
+        {
+          "desc": "rclone missing -> the script names the real cause instead of reporting an upload error",
+          "status": "passed"
+        },
+        {
+          "desc": "unreachable bucket -> preflight fails before the dump, surfacing rclone stderr",
+          "status": "passed"
+        },
+        {
+          "desc": "the UNATTENDED 03:30 UTC timer run succeeds - the manual run shares nothing with cron but the unit",
+          "status": "open"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "lords-backup and lords-restore-drill both resolve rclone through the same new RCLONE block; a change to it breaks backup AND the only means of verifying one",
+          "status": "open",
+          "notedAt": "2026-07-28T01:40:00Z"
+        },
+        {
+          "desc": "Environment=PATH in lords-backup.service REPLACES the unit's default PATH rather than extending it; dropping a directory from that literal silently removes it from every command the backup runs (docker, zstd, curl)",
+          "status": "open",
+          "notedAt": "2026-07-28T01:40:00Z"
+        },
+        {
+          "desc": "BACKUP_MIN_BYTES was raised 20000 -> 50000 in ~/lords/backup.env on the box only; backup.env is operator-owned and NOT in git, so nothing in the repo records the live floor and a rebuild silently reverts to 20000",
+          "status": "open",
+          "notedAt": "2026-07-28T01:40:00Z"
+        },
+        {
+          "desc": "the drill's row-count list is still a hardcoded seven of 31 tables; adding a table does not add it to the check, and a rename is only caught now because a stale name prints a `?`",
+          "status": "open",
+          "notedAt": "2026-07-28T01:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "BACKUP_HEARTBEAT_URL is still blank - this is the actual reason seven nights of failure went unnoticed, and it needs a Better Stack (or equivalent) monitor the owner must create. The code fix closes this instance; only the heartbeat catches the next one.",
+        "Did not push the branch or open the PR (fix/backup-rclone-path, commit 28388a9) - production is already running the fixed scripts, so the repo is the half that is behind.",
+        "Did not resolve why bash's `rclone: command not found` never reached the journal on any failed run, only the script's own FAILED line. The diagnosis stands without it (127 reproduced under the unit's exact PATH, and the 737us timing rules out an exec), but the stderr gap is unexplained and would have named the cause on night one.",
+        "Did not reconcile the 50%-shrink guard with a one-object bucket: with a single stored backup it now compares against that, so the guard is live but has one data point."
+      ],
+      "lastTouchedCommit": "28388a9eae45dfce03f3d972caa625f4d6ae424e",
+      "createdAt": "2026-07-28T01:40:00Z",
+      "updatedAt": "2026-07-28T01:40:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T01:40:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "found while the owner was checking whether backups worked at all; diagnosed, fixed, and verified against real R2 in the same session"
+        }
+      ]
     }
   ],
   "history": [
@@ -14530,6 +14621,11 @@
       "at": "2026-07-27T16:40:00Z",
       "by": "claude",
       "note": "T-0204 created and implemented in one session (owner-reported bug); state synced at PR time."
+    },
+    {
+      "at": "2026-07-28T01:40:00Z",
+      "by": "claude",
+      "note": "T-0208 created and fixed in one session: nightly backups had never once succeeded in production; verified with a real upload and a full restore drill."
     }
   ]
 }
