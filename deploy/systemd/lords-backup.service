@@ -20,6 +20,15 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=%h/bin/lords-backup
 
+# A user unit's default PATH is /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+# — it does NOT include ~/bin, where bootstrap.sh installs rclone (nothing here
+# is allowed to need root). An interactive login shell DOES have ~/bin, via
+# Debian's ~/.profile, so anything tested by hand works and the same command
+# under this unit does not. The scripts now resolve rclone by absolute path
+# regardless; this is the second lock on the same door, and it covers any future
+# helper in ~/bin.
+Environment=PATH=%h/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+
 # The dump streams through zstd on a 2 vCore box shared with a live MySQL and
 # the API. Keep it off the critical path rather than letting it compete.
 Nice=10

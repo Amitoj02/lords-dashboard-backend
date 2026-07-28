@@ -16,6 +16,7 @@
 #   BACKUP_RETENTION_DAYS=30
 #   BACKUP_MIN_BYTES=20000              floor for the "did the dump work" check
 #   BACKUP_HEARTBEAT_URL=https://...    optional; pinged only on success
+#   RCLONE_BIN=/path/to/rclone          optional; only if it is not found below
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -45,6 +46,28 @@ DB_DATABASE="$(read_env DB_DATABASE)"
 : "${BACKUP_BUCKET:=lords-backups}"
 : "${BACKUP_RETENTION_DAYS:=30}"
 : "${BACKUP_MIN_BYTES:=20000}"
+
+# ── Locate rclone ───────────────────────────────────────────────────────────
+# bootstrap.sh installs rclone to ~/bin because nothing here is allowed to need
+# root. But a systemd USER unit inherits
+#   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+# which does NOT contain ~/bin — while an interactive login shell does, because
+# Debian's ~/.profile prepends it. So a bare `rclone` works perfectly when you
+# test it by hand and is not found at all under the timer. That asymmetry cost
+# this project every backup between 2026-07-20 and 2026-07-27: bash's 127 was
+# caught by `|| fail "rclone upload failed"` and reported as an upload error.
+# Resolve the binary explicitly instead of trusting PATH.
+RCLONE="${RCLONE_BIN:-$(command -v rclone 2>/dev/null || true)}"
+: "${RCLONE:=$HOME/bin/rclone}"
+[ -x "$RCLONE" ] || fail "rclone is not executable at '$RCLONE' — set RCLONE_BIN in $CFG_FILE"
+
+# ── Preflight the destination ───────────────────────────────────────────────
+# Checked BEFORE the dump, not after. A destination we cannot reach is a
+# different fault from a bad dump, and finding out first means the failure names
+# its real cause instead of arriving 30s later attached to a discarded archive.
+if ! PREFLIGHT="$("$RCLONE" lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" --max-depth 1 2>&1 >/dev/null)"; then
+	fail "cannot reach ${RCLONE_REMOTE}:${BACKUP_BUCKET} — $(printf '%s' "$PREFLIGHT" | tail -1)"
+fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 NAME="lords_dashboard-${STAMP}.sql.zst"
@@ -90,7 +113,7 @@ SIZE="$(stat -c %s "$OUT")"
 # Relative check against the most recent stored backup. A database does not
 # normally shrink by more than half overnight; if it has, something is wrong and
 # a human should look before this overwrites the good history.
-PREV_SIZE="$(rclone lsjson "${RCLONE_REMOTE}:${BACKUP_BUCKET}" 2>/dev/null \
+PREV_SIZE="$("$RCLONE" lsjson "${RCLONE_REMOTE}:${BACKUP_BUCKET}" 2>/dev/null \
 	| grep -o '"Size":[0-9]*' | cut -d: -f2 | sort -n | tail -1 || true)"
 if [ -n "${PREV_SIZE:-}" ] && [ "$PREV_SIZE" -gt 0 ] && [ "$SIZE" -lt $((PREV_SIZE / 2)) ]; then
 	fail "dump is ${SIZE}B but the largest stored backup is ${PREV_SIZE}B — over 50% smaller, refusing to upload"
@@ -108,19 +131,19 @@ zstdcat "$OUT" | tail -5 | grep -q 'Dump completed' \
 
 # ── Upload ──────────────────────────────────────────────────────────────────
 log "uploading to ${RCLONE_REMOTE}:${BACKUP_BUCKET}/"
-rclone copyto "$OUT" "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${NAME}" \
-	--s3-no-check-bucket --retries 3 || fail "rclone upload failed"
+"$RCLONE" copyto "$OUT" "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${NAME}" \
+	--s3-no-check-bucket --retries 3 || fail "rclone upload exited $?"
 
-rclone lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${NAME}" >/dev/null \
+"$RCLONE" lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}/${NAME}" >/dev/null \
 	|| fail "uploaded object is not listable — treating as a failed backup"
 
 # ── Prune ───────────────────────────────────────────────────────────────────
 log "pruning backups older than ${BACKUP_RETENTION_DAYS}d"
-rclone delete "${RCLONE_REMOTE}:${BACKUP_BUCKET}" \
+"$RCLONE" delete "${RCLONE_REMOTE}:${BACKUP_BUCKET}" \
 	--min-age "${BACKUP_RETENTION_DAYS}d" --include 'lords_dashboard-*.sql.zst' \
 	|| log "WARNING: prune failed (backup itself succeeded)"
 
-REMAINING="$(rclone lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" | wc -l)"
+REMAINING="$("$RCLONE" lsf "${RCLONE_REMOTE}:${BACKUP_BUCKET}" | wc -l)"
 log "done — ${REMAINING} backup(s) retained"
 
 # ── Heartbeat ───────────────────────────────────────────────────────────────
