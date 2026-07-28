@@ -14,14 +14,27 @@ import { Capability, MemberRole, MemberStatus } from '../src/common/enums';
 import { Medal } from '../src/medals/entities/medal.entity';
 import { MemberMedal } from '../src/medals/entities/member-medal.entity';
 import { Member } from '../src/members/entities/member.entity';
-import { MEMBER_ADMIN_ACTIONS, MemberAdminAction } from '../src/members/member-hierarchy';
+import { ServiceRecordEntry } from '../src/members/entities/service-record-entry.entity';
+import {
+  DECORATION_ACTIONS,
+  MEMBER_ADMIN_ACTIONS,
+  MODERATION_ACTIONS,
+  MemberAdminAction,
+} from '../src/members/member-hierarchy';
 import { Rank } from '../src/ranks/entities/rank.entity';
 import { Regiment } from '../src/regiments/entities/regiment.entity';
 
 /**
- * E2E for T-0176/T-0177: the member admin actions honour a role hierarchy, and
- * the `permittedActions` flags on the member projection say exactly what the
- * endpoints do.
+ * E2E for T-0176/T-0177/T-0211: the member admin actions honour a role
+ * hierarchy, and the `permittedActions` flags on the member projection say
+ * exactly what the endpoints do.
+ *
+ * TWO rules, not one (T-0211). The MODERATION actions — role, suspend,
+ * unsuspend, ban, unban — keep the full hierarchy: not yourself, not the
+ * regiment owner, and only against a strictly lower role. The DECORATION
+ * actions — rank, medal award/remove, derive — have no target rule at all, so an
+ * `edit_ranks_medals` holder may decorate a peer, a superior, the owner and
+ * their own record. Nearly every case below is therefore run per family.
  *
  * Sessions are minted directly from a saved identity (the pattern from
  * account-deletion.e2e-spec) rather than through the OAuth flow, because the
@@ -29,10 +42,15 @@ import { Regiment } from '../src/regiments/entities/regiment.entity';
  * flow cannot produce.
  *
  * The e2e database persists between runs and is shared, so every row this suite
- * creates is torn down in both beforeAll and afterAll, the two capability grants
- * it flips are reverted, and the seeded regiment owner's mutable fields are
- * snapshotted and restored (a safety net: if the guard under test regressed, an
- * action against the owner would otherwise land on a shared row).
+ * creates is torn down in both beforeAll and afterAll, the three capability
+ * grants it flips are reverted, and the seeded regiment owner's mutable fields
+ * are snapshotted and restored.
+ *
+ * ⚠️ That owner snapshot used to be a safety net for a regressed guard. Since
+ * T-0211 it is REQUIRED: the decoration cases below really do write the shared
+ * owner row — a rank change lands, and `removeMedal` can take away an award this
+ * suite never created — so `ownerSnapshot` and `ownerMedalSnapshot` are the only
+ * thing putting the seeded owner back as it found them.
  */
 const fakeDiscord = {
   buildAuthorizeUrl: (state: string) => `https://discord.com/oauth2/authorize?state=${state}`,
@@ -45,6 +63,8 @@ const DISCORD_ID_ADMIN = '900900900900900811';
 const DISCORD_ID_MODERATOR = '900900900900900812';
 const DISCORD_ID_TARGET_ADMIN = '900900900900900813';
 const DISCORD_ID_TARGET_MEMBER = '900900900900900814';
+/** A peer for the Moderator actor — the "can decorate its own kind" case (T-0211). */
+const DISCORD_ID_TARGET_MODERATOR = '900900900900900819';
 /** Promotion targets (T-0203) — one per case, never a fixture another test reads. */
 const DISCORD_ID_GRANT_ADMIN = '900900900900900815';
 const DISCORD_ID_GRANT_MODERATOR = '900900900900900816';
@@ -54,6 +74,7 @@ const ALL_DISCORD_IDS = [
   DISCORD_ID_ADMIN,
   DISCORD_ID_MODERATOR,
   DISCORD_ID_TARGET_ADMIN,
+  DISCORD_ID_TARGET_MODERATOR,
   DISCORD_ID_TARGET_MEMBER,
   DISCORD_ID_GRANT_ADMIN,
   DISCORD_ID_GRANT_MODERATOR,
@@ -77,13 +98,24 @@ describe('Member role hierarchy (e2e)', () => {
   let medalId: string;
 
   let adminToken: string;
+  let adminMemberId: string;
   let moderatorToken: string;
+  let moderatorMemberId: string;
   let ownerMemberId: string;
   let adminTargetId: string;
+  let moderatorTargetId: string;
   let memberTargetId: string;
 
   /** Owner fields restored in afterAll — see the suite docblock. */
   let ownerSnapshot: Pick<Member, 'role' | 'rankId' | 'status' | 'bannedAt' | 'suspendedUntil'>;
+  /**
+   * The owner's medal awards as this suite found them. `removeMedal` against the
+   * owner is now a PERMITTED action, so it can delete a row seeded long before
+   * this run; anything missing at the end is put back (T-0211).
+   */
+  let ownerMedalSnapshot: MemberMedal[];
+  /** The owner's service-record entry ids as found; anything newer is this run's. */
+  let ownerServiceRecordIds: string[];
 
   const createdMemberIds: string[] = [];
   const createdIdentityIds: string[] = [];
@@ -210,8 +242,24 @@ describe('Member role hierarchy (e2e)', () => {
       bannedAt: owner!.bannedAt,
       suspendedUntil: owner!.suspendedUntil,
     };
-
     await cleanup();
+
+    // ⚠️ Snapshotted AFTER cleanup(), not before. A crashed prior run can leave
+    // awards pinned on the owner by actors this run is about to delete; captured
+    // beforehand, the restore below would re-insert one whose awardedByMemberId
+    // no longer exists, throw on the FK, and take the grant revert down with it —
+    // leaving the shared e2e regiment with a widened permission matrix.
+    ownerMedalSnapshot = await dataSource
+      .getRepository(MemberMedal)
+      .find({ where: { memberId: ownerMemberId } });
+    // Same window, same reason: a permitted changeRank against the owner appends
+    // to their service record, and the owner row itself is never deleted, so
+    // nothing else would sweep those entries out of the shared database.
+    ownerServiceRecordIds = (
+      await dataSource
+        .getRepository(ServiceRecordEntry)
+        .find({ where: { memberId: ownerMemberId }, select: ['id'] })
+    ).map((entry) => entry.id);
 
     // Widen the matrix so the CAPABILITY guard is out of the way and what the
     // tests observe is the hierarchy guard, not a missing grant. Reverted in
@@ -221,9 +269,15 @@ describe('Member role hierarchy (e2e)', () => {
     }
     app.get(AuthzService).invalidate();
 
-    adminToken = (await createMember(DISCORD_ID_ADMIN, MemberRole.Admin)).token;
-    moderatorToken = (await createMember(DISCORD_ID_MODERATOR, MemberRole.Moderator)).token;
+    const admin = await createMember(DISCORD_ID_ADMIN, MemberRole.Admin);
+    adminToken = admin.token;
+    adminMemberId = admin.member.id;
+    const moderator = await createMember(DISCORD_ID_MODERATOR, MemberRole.Moderator);
+    moderatorToken = moderator.token;
+    moderatorMemberId = moderator.member.id;
     adminTargetId = (await createMember(DISCORD_ID_TARGET_ADMIN, MemberRole.Admin)).member.id;
+    moderatorTargetId = (await createMember(DISCORD_ID_TARGET_MODERATOR, MemberRole.Moderator))
+      .member.id;
     memberTargetId = (await createMember(DISCORD_ID_TARGET_MEMBER, MemberRole.Member)).member.id;
   });
 
@@ -268,6 +322,29 @@ describe('Member role hierarchy (e2e)', () => {
     await cleanup();
     if (ownerMemberId) {
       await dataSource.getRepository(Member).update({ id: ownerMemberId }, ownerSnapshot);
+      // Wrapped, because everything after it — the FLIPPED_GRANTS revert — must
+      // run even if a restore fails. A suite that leaves the shared permission
+      // matrix widened breaks every suite that follows it.
+      try {
+        // Awards this suite pinned on the owner are swept by `cleanup()` (it
+        // deletes everything the created actors awarded). This puts back anything
+        // a permitted `removeMedal` took OFF the owner — a row that predates the
+        // run and that nothing else would restore.
+        const medalRepo = dataSource.getRepository(MemberMedal);
+        for (const award of ownerMedalSnapshot ?? []) {
+          if (!(await medalRepo.findOne({ where: { id: award.id } }))) await medalRepo.save(award);
+        }
+        // ...and drop the service-record entries a permitted rank change appended
+        // to the owner. They cannot cascade: the owner row is not deleted.
+        if (ownerServiceRecordIds) {
+          const entries = dataSource.getRepository(ServiceRecordEntry);
+          const written = await entries.find({ where: { memberId: ownerMemberId } });
+          const added = written.filter((e) => !ownerServiceRecordIds.includes(e.id));
+          if (added.length > 0) await entries.delete({ id: In(added.map((e) => e.id)) });
+        }
+      } catch (error) {
+        console.error('member-hierarchy e2e: owner restore failed', error);
+      }
     }
     for (const grant of FLIPPED_GRANTS) {
       await dataSource.getRepository(RolePermission).update(grant, { granted: false });
@@ -278,15 +355,15 @@ describe('Member role hierarchy (e2e)', () => {
 
   // ── T-0176: the guard ────────────────────────────────────────────────────────
 
-  describe('the hierarchy guard (T-0176)', () => {
-    it.each(MEMBER_ADMIN_ACTIONS)(
+  describe('the moderation guard (T-0176)', () => {
+    it.each(MODERATION_ACTIONS)(
       'an Admin holding the capability still cannot %s the regiment owner',
       async (action) => {
         expect(await ACTIONS[action](ownerMemberId, adminToken)).toBe(403);
       },
     );
 
-    it.each(MEMBER_ADMIN_ACTIONS)('a Moderator cannot %s an Admin', async (action) => {
+    it.each(MODERATION_ACTIONS)('a Moderator cannot %s an Admin', async (action) => {
       expect(await ACTIONS[action](adminTargetId, moderatorToken)).toBe(403);
     });
 
@@ -297,7 +374,8 @@ describe('Member role hierarchy (e2e)', () => {
       expect(owner!.role).toBe(ownerSnapshot.role);
       expect(owner!.bannedAt).toEqual(ownerSnapshot.bannedAt);
       expect(owner!.suspendedUntil).toEqual(ownerSnapshot.suspendedUntil);
-      expect(owner!.rankId).toBe(ownerSnapshot.rankId);
+      // ⚠️ NOT rankId. The owner's rank is a decoration and the block below
+      // legitimately writes it; only the seat is untouchable (T-0211).
     });
 
     it('a Moderator may moderate a Member', async () => {
@@ -305,30 +383,119 @@ describe('Member role hierarchy (e2e)', () => {
       expect(await ACTIONS.unsuspend(memberTargetId, moderatorToken)).toBe(201);
       expect(await ACTIONS.ban(memberTargetId, moderatorToken)).toBe(201);
       expect(await ACTIONS.unban(memberTargetId, moderatorToken)).toBe(201);
-      expect(await ACTIONS.changeRank(memberTargetId, moderatorToken)).toBe(201);
+    });
+  });
+
+  // ── T-0211: the decoration half answers to the capability alone ──────────────
+
+  describe('the decoration exemption (T-0211)', () => {
+    /**
+     * A rank/medal write that the authorization layer allowed through. It is the
+     * 403 that is under test, so anything the action's own state produces — a 404
+     * for a medal the target does not hold, a 409 from a derive with no bot — is
+     * a pass. `FLIPPED_GRANTS` has already given the Moderator edit_ranks_medals.
+     */
+    const expectNotRefused = async (
+      action: MemberAdminAction,
+      targetId: string,
+      token: string,
+      label: string,
+    ): Promise<void> => {
+      const status = await ACTIONS[action](targetId, token);
+      expect(`${label}.${action}: forbidden=${status === 403} (${status})`).toBe(
+        `${label}.${action}: forbidden=false (${status})`,
+      );
+    };
+
+    it.each(DECORATION_ACTIONS)('a Moderator may %s an Admin', async (action) => {
+      await expectNotRefused(action, adminTargetId, moderatorToken, 'admin-target');
+    });
+
+    it.each(DECORATION_ACTIONS)('a Moderator may %s a peer Moderator', async (action) => {
+      await expectNotRefused(action, moderatorTargetId, moderatorToken, 'moderator-target');
+    });
+
+    it.each(DECORATION_ACTIONS)('a Moderator may %s the regiment owner', async (action) => {
+      await expectNotRefused(action, ownerMemberId, moderatorToken, 'owner');
+    });
+
+    // ⚠️ AND THEIR OWN RECORD, deliberately (T-0211). This is the self-promotion
+    // path: an edit_ranks_medals holder may set their own rank, pin their own
+    // medal, and derive their own record — which credits whatever their own
+    // Discord roles say they have earned, a trigger that lives in the guild
+    // rather than in this application. Asserted so it reads as a decision
+    // somebody took, not a guard somebody dropped.
+    it.each(DECORATION_ACTIONS)('and may %s their OWN record', async (action) => {
+      await expectNotRefused(action, adminMemberId, adminToken, 'self-admin');
+      await expectNotRefused(action, moderatorMemberId, moderatorToken, 'self-moderator');
+    });
+
+    it.each(MODERATION_ACTIONS)('but still may not %s their own record', async (action) => {
+      expect(await ACTIONS[action](adminMemberId, adminToken)).toBe(403);
+      expect(await ACTIONS[action](moderatorMemberId, moderatorToken)).toBe(403);
+    });
+
+    it('the rank really landed on the owner — permitted means written, not merely un-403ed', async () => {
+      expect(await ACTIONS.changeRank(ownerMemberId, moderatorToken)).toBe(201);
+
+      const owner = await dataSource
+        .getRepository(Member)
+        .findOne({ where: { id: ownerMemberId } });
+      expect(owner!.rankId).toBe(rankId);
+      // Restored wholesale in afterAll — see the suite docblock.
     });
   });
 
   // ── T-0177: the flags agree with the guard ───────────────────────────────────
 
   describe('permittedActions (T-0177)', () => {
-    it('reports every action false for a target the caller may not touch', async () => {
+    it('splits the block per family on a target the caller may not moderate', async () => {
       const onOwner = await permittedActionsFor(ownerMemberId, adminToken);
       const onPeerAdmin = await permittedActionsFor(adminTargetId, adminToken);
 
-      for (const action of MEMBER_ADMIN_ACTIONS) {
+      for (const action of MODERATION_ACTIONS) {
         expect(`owner.${action}: ${onOwner[action]}`).toBe(`owner.${action}: false`);
         expect(`peer.${action}: ${onPeerAdmin[action]}`).toBe(`peer.${action}: false`);
       }
+      // The Admin holds edit_ranks_medals by default, so the decoration half of
+      // the very same block is true — the mixed shape the client had never seen
+      // before T-0211.
+      for (const action of DECORATION_ACTIONS) {
+        expect(`owner.${action}: ${onOwner[action]}`).toBe(`owner.${action}: true`);
+        expect(`peer.${action}: ${onPeerAdmin[action]}`).toBe(`peer.${action}: true`);
+      }
     });
 
+    it('splits the block on the caller’s own record too', async () => {
+      const onSelf = await permittedActionsFor(adminMemberId, adminToken);
+
+      // Your own row is no longer all-false: the rank and medal controls are
+      // offered there (T-0211) while suspend/ban/role stay withheld.
+      for (const action of MODERATION_ACTIONS) {
+        expect(`self.${action}: ${onSelf[action]}`).toBe(`self.${action}: false`);
+      }
+      for (const action of DECORATION_ACTIONS) {
+        expect(`self.${action}: ${onSelf[action]}`).toBe(`self.${action}: true`);
+      }
+    });
+
+    // ⏱ The one test in this repo with an explicit timeout, and it earns it: five
+    // targets × nine actions, each a real HTTP round-trip, run serially — 50 in
+    // all. T-0211 grew it from three targets to five (a peer Moderator and the
+    // caller's own record are new cases the split created), which pushed it past
+    // Jest's 5s default on a slow runner and made it pass on one CI machine and
+    // time out on another. Widening the budget rather than trimming the sweep:
+    // the exhaustiveness IS the test — it is the only place a permitted flag and
+    // a 403 are checked against each other action by action.
     it('never advertises an action the endpoint then refuses (and vice versa)', async () => {
       // Walked target by target: the flags are read first, then every action is
       // actually invoked, so a flag and a 403 can never disagree.
       for (const [label, targetId, token] of [
         ['owner', ownerMemberId, adminToken],
         ['admin-target', adminTargetId, moderatorToken],
+        ['moderator-peer', moderatorTargetId, moderatorToken],
         ['member-target', memberTargetId, moderatorToken],
+        ['self', adminMemberId, adminToken],
       ] as const) {
         const flags = await permittedActionsFor(targetId, token);
         for (const action of MEMBER_ADMIN_ACTIONS) {
@@ -341,7 +508,7 @@ describe('Member role hierarchy (e2e)', () => {
           );
         }
       }
-    });
+    }, 60_000);
 
     it('is present on the list projection too, not only the detail one', async () => {
       type Row = { id: string; permittedActions: Record<MemberAdminAction, boolean> };
@@ -365,6 +532,9 @@ describe('Member role hierarchy (e2e)', () => {
 
       expect(owner!.permittedActions.ban).toBe(false);
       expect(memberRow!.permittedActions.ban).toBe(true);
+      // The list row is where the two tiers visibly diverge on ONE record: the
+      // Moderator cannot ban the owner and can still record their promotion.
+      expect(owner!.permittedActions.changeRank).toBe(true);
     });
   });
 
@@ -416,15 +586,20 @@ describe('Member role hierarchy (e2e)', () => {
       // Appointing a peer is additive; moderating one is not. The Admin who just
       // made this member an Admin can no longer demote, suspend or ban them —
       // only the Owner can — so a seat holder widens the command, never hollows
-      // it out. The `permittedActions` flags say so too, so the UI folds the
+      // it out. The `permittedActions` flags say so too, so the UI folds those
       // controls away rather than offering a button that 403s.
       const promotedId = await target(DISCORD_ID_GRANT_ONE_WAY);
       expect((await grantRole(promotedId, adminToken, MemberRole.Admin)).status).toBe(201);
 
       expect((await grantRole(promotedId, adminToken, MemberRole.Member)).status).toBe(403);
       const flags = await permittedActionsFor(promotedId, adminToken);
-      for (const action of MEMBER_ADMIN_ACTIONS) {
+      for (const action of MODERATION_ACTIONS) {
         expect(`promoted.${action}: ${flags[action]}`).toBe(`promoted.${action}: false`);
+      }
+      // Out of MODERATION reach, not out of reach: the appointer keeps the
+      // regiment's service record for the peer they just made (T-0211).
+      for (const action of DECORATION_ACTIONS) {
+        expect(`promoted.${action}: ${flags[action]}`).toBe(`promoted.${action}: true`);
       }
     });
   });

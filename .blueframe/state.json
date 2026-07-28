@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
-  "lastSyncedAt": "2026-07-28T14:45:00Z",
-  "notesForNextSession": "T-0209 is the live thread: the Discord bot was purging members' roles on ordinary admin actions and the fix is open as a PR into dev in BOTH repos (backend fix/discord-role-scoped-sync, frontend fix/admin-modal-peer-lockout-copy). Read T-0209's summary before touching anything in src/discord - the one rule that must not be undone is that a member MUTATION may never enqueue a job whose strip scope comes from the catalogue rather than from its own payload. There is deliberately no `syncMemberRoles` helper in MembersService any more; re-introducing one re-opens the bug, because a single shared call has nowhere to put the delta. Note the enum member RoleGrant keeps the WIRE VALUE 'role.sync' on purpose (queued rows drain under the safe semantics) - do not 'tidy' that up, it would strand every pending job. Two things left open: T-0210 (what suspension and unban do to Discord roles - the owner deferred it, and applyBanRoleOnBan is still OFF in production so the whole ban->Discord path remains untested against the real guild), and the resync fan-out having no batchId, so the only destructive path is also the one that cannot be cancelled or polled (T-0209 risk 4). Still true from last session: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank, and the first unattended 03:30 UTC backup run has not been confirmed.",
-  "nextIdCounter": 211,
+  "lastSyncedCommit": "17d99fa5dfcf0aa954ea47241d2a73b8255cc254",
+  "lastSyncedAt": "2026-07-28T16:45:00Z",
+  "notesForNextSession": "T-0211 is the live thread: an edit_ranks_medals holder can now set the rank and medals of ANY member except themselves - peers, seniors and the regiment owner included - while role/suspend/ban keep the full hierarchy untouched. Open as a PR into dev in BOTH repos (feat/rank-medal-decoration-exemption in each; frontend task id T-0285). The one rule that must not be undone: in member-hierarchy.ts `denyReason`, the SELF check sits ABOVE the `isDecorationAction` short-circuit and the owner/outrank checks sit BELOW it. Self is now the ONLY target guard on changeRank/awardMedal/removeMedal/deriveFromDiscord, so reordering those three lines re-opens self-promotion to anyone holding the capability. Do not hand-write ModerationAction (it is Exclude<MemberAdminAction, DecorationAction>, which is what makes a NEW action fail closed into the strict rule) and do not widen OWNER_REFUSALS beyond ModerationAction. Note member-hierarchy.e2e now writes the shared seeded owner row and restores it in afterAll - if that suite ever crashes mid-run, re-create the e2e database rather than trusting the owner's rank. Still open from last session: T-0209 (merged to dev) left the resync fan-out with no batchId, so the only destructive path is also the one that cannot be cancelled or polled; T-0210 (what suspension and unban do to Discord roles - the owner deferred it, and applyBanRoleOnBan is still OFF in production so the whole ban->Discord path remains untested against the real guild). Still true: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank, and the first unattended 03:30 UTC backup run has not been confirmed.",
+  "nextIdCounter": 212,
   "connections": [],
   "tasks": [
     {
@@ -14810,6 +14810,150 @@
           "to": "planned",
           "by": "claude",
           "note": "split out of T-0209 - owner chose 'Leave suspension alone this PR' when asked."
+        }
+      ]
+    },
+    {
+      "id": "T-0211",
+      "title": "Make rank and medal writes answer to edit_ranks_medals alone",
+      "summary": "Owner report: a Moderator (and an Admin) granted the rank/medal capability still could not record a promotion for a peer, a senior or the Owner - every rank and medal write was behind the same target guard as a ban, so the dialog answered \"You don't have permission to manage this member.\" The member admin actions now split in two in member-hierarchy.ts. MODERATION (changeRole, suspend, unsuspend, ban, unban) keeps the whole rule unchanged: not yourself, not the regiments.owner_member_id pointer, and only strictly below you; canGrantRole's own-tier ceiling is untouched. DECORATION (changeRank, awardMedal, removeMedal, deriveFromDiscord) has NO target rule at all - `denyReason` returns null for them on its first line, before self, owner and standing are ever consulted. The capability grant is the whole control. Both SELF_REFUSALS and OWNER_REFUSALS are keyed on ModerationAction, so a decoration action cannot be given refusal wording it can never show; ModerationAction is Exclude<MemberAdminAction, DecorationAction>, so a tenth action is a moderation action by default and fails closed. permittedActions is computed per action, so one member's block can now mix true and false - the frontend half of the task exists because of exactly that, and the caller's OWN row is one of the targets that mixes.",
+      "status": "review",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 5,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "role-hierarchy",
+      "repo": "",
+      "paths": [
+        "src/members/member-hierarchy.ts",
+        "src/members/members.service.ts",
+        "src/members/members.controller.ts",
+        "src/members/dto/member.dto.ts",
+        "test/member-hierarchy.e2e-spec.ts",
+        "SCHEMA.md",
+        "README.md"
+      ],
+      "dependsOn": [
+        "T-0150",
+        "T-0176",
+        "T-0177",
+        "T-0203",
+        "T-0204"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should the regiment owner's rank and medals be editable by any edit_ranks_medals holder?",
+          "askedAt": "2026-07-28T16:45:00Z",
+          "answeredAt": "2026-07-28T16:45:00Z",
+          "answer": "Yes - owner included. The owner pointer guards the SEAT (role, suspension, ban), not the service record."
+        },
+        {
+          "q": "Does 'Derive data from Discord' follow the same relaxation, given it writes a rank and medal awards in bulk?",
+          "askedAt": "2026-07-28T16:45:00Z",
+          "answeredAt": "2026-07-28T16:45:00Z",
+          "answer": "Yes - it writes exactly a rank and medals and draws on the same capability."
+        },
+        {
+          "q": "Should a capability holder be able to change their OWN rank and medals - and which capability unlocks it, manage_roles or edit_ranks_medals?",
+          "askedAt": "2026-07-28T18:30:00Z",
+          "answeredAt": "2026-07-28T18:30:00Z",
+          "answer": "Anyone with edit_ranks_medals, and self-derive comes with it. Asked with the LDA-H1 consequence spelled out (a derive credits whatever the caller's own Discord roles say) and the more conservative manage_roles-only option offered; the owner chose the fully-open rule."
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "member-hierarchy.spec: the two families partition MEMBER_ADMIN_ACTIONS; decoration permitted against owner/peer/superior/SELF; moderation still refused on all four",
+          "status": "passed"
+        },
+        {
+          "desc": "member-hierarchy.spec: the capability is the only gate left on the decoration half - edit_ranks_medals alone turns the flag on for an identity-only Applicant caller",
+          "status": "passed"
+        },
+        {
+          "desc": "members.service.spec: 'cannot' fans narrowed to MODERATION_ACTIONS with a permitted twin each (owner, peer, superior, self); a decoration against a superior leaves save + service-record + audit trace",
+          "status": "passed"
+        },
+        {
+          "desc": "member-hierarchy.e2e: a Moderator may decorate an Admin, a peer Moderator, the Owner and their own record; may still not moderate any of them; the permittedActions block mixes per family on one target",
+          "status": "passed"
+        },
+        {
+          "desc": "discord.e2e: the self-derive test inverted - it asserts NOT 403, and says why re-tightening it would be a decision rather than a fix",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e teardown proven idempotent: suite run twice against the same database, then checked for leaked owner service-record rows, leaked owner medals and a leaked Moderator grant (all zero)",
+          "status": "passed"
+        },
+        {
+          "desc": "full suites green: 1047 unit, 155 e2e",
+          "status": "passed"
+        },
+        {
+          "desc": "the permittedActions-vs-endpoint sweep carries an explicit 60s timeout: T-0211 grew it from three targets to five (45 serial HTTP round-trips), which straddled Jest's 5s default and passed on one CI runner while timing out on the other",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "\u26a0\ufe0f SELF-PROMOTION IS NOW REACHABLE BY DESIGN, and this is the entry to read before touching any of it. edit_ranks_medals holders may set their own rank, pin their own medal, and run deriveFromDiscord on their own record - which credits whatever their own Discord roles say they have earned, a trigger that lives in the guild rather than in this application. That was LDA-H1's last defence. What still bounds it: the capability (Owner+Admin by default in role-permissions.seed.ts), the promotion-only rank floor and additive-only medal diff in the derive path, DiscordRolePolicyService refusing to bind a role the bot cannot manage, and the audit row on every write. What does NOT bound it is member-hierarchy.ts.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "ModerationAction is DERIVED (Exclude<MemberAdminAction, DecorationAction>) and BOTH SELF_REFUSALS and OWNER_REFUSALS are keyed on it with exactly five entries. Replacing either with a hand-written literal union, or widening a refusal map to Record<MemberAdminAction, string> 'for symmetry', turns a compile error into a runtime 'You cannot undefined' and opts new actions out of the moderation guards.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "assertMayActOn still reads the owner pointer on the decoration paths even though the guard no longer consults it - the read is handed to the projection that follows the write. It now looks removable; removing it reintroduces a per-call regiments.findOne and lets the returned flags be computed against a second, possibly different read. Pinned by the changeRank counterpart of the 'reads the owner pointer once per action' spec.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "member-hierarchy.e2e now really writes the SHARED seeded owner row: changeRank lands, removeMedal can delete an award the suite never created, and a rank change appends service-record entries that cannot cascade because the owner row is never deleted. afterAll restores all three, snapshots them AFTER cleanup() (a snapshot taken before it can capture rows cleanup is about to delete, and re-inserting one throws on the FK), and wraps the restore in try/catch so the FLIPPED_GRANTS revert always runs.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:10:00Z"
+        },
+        {
+          "desc": "member-hierarchy.e2e's 'never advertises an action the endpoint then refuses' sweep is the only test in the repo with an explicit timeout, because it is the only one doing ~45 serial HTTP calls. Adding a sixth target, or an action to MEMBER_ADMIN_ACTIONS, grows it multiplicatively - re-check the budget rather than trimming the sweep, which is what makes it an invariant.",
+          "status": "open",
+          "notedAt": "2026-07-28T19:35:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not touch canGrantRole or the role-grant ceiling - the owner confirmed that half already behaves as intended (admins appoint admins, moderators appoint moderators, nobody appoints an Owner).",
+        "Did not widen the seeded permission matrix: EditRanksMedals is still Owner+Admin by default (role-permissions.seed.ts is tier-1 and refreshes on every prod deploy). A regiment that wants Moderators keeping the service record grants it in the settings UI - and, since T-0211, grants them their own rank with it.",
+        "Did not narrow the self relaxation to manage_roles holders, which was offered as the more conservative option and declined.",
+        "Left the suspension/unsuspend Discord role question to T-0210 - untouched here.",
+        "The adversarial review workflow's verify phase lost 39 of 47 agents to a session limit, so its 'nothing confirmed' verdict is not evidence. The candidate findings were checked by hand instead; two were real and are fixed (e2e snapshot ordering, and a tautological capability assertion), the rest were the owner's stated decisions or pre-existing behaviour."
+      ],
+      "lastTouchedCommit": "",
+      "createdAt": "2026-07-28T16:45:00Z",
+      "updatedAt": "2026-07-28T19:10:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T16:45:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "Owner report: an edit_ranks_medals holder could not record a rank or medal for a peer, a senior or the Owner. Split the member admin actions into moderation vs decoration; decorations keep the self refusal alone. Backend on feat/rank-medal-decoration-exemption, frontend companion on the same branch name in lords-regiment-dashboard (its T-0285). 1047 unit + 150 e2e + 630 frontend tests green. Owner decisions this session: the regiment owner IS decoratable; deriveFromDiscord follows the same rule."
+        },
+        {
+          "at": "2026-07-28T19:10:00Z",
+          "from": "review",
+          "to": "review",
+          "by": "claude",
+          "note": "Owner follow-up mid-review: capability holders must also be able to change their OWN rank and medals. The self refusal came out of the decoration half entirely (self-derive included), so the short-circuit moved to the FIRST line of denyReason and SELF_REFUSALS is now keyed on ModerationAction alongside OWNER_REFUSALS. Also fixed two real defects the review surfaced in the e2e teardown. 1047 unit + 155 e2e + 633 frontend green. PRs open into dev: this repo #69, frontend [lords-regiment-dashboard #59](https://github.com/Amitoj02/lords-regiment-dashboard/pull/59)."
+        },
+        {
+          "at": "2026-07-28T19:35:00Z",
+          "from": "review",
+          "to": "review",
+          "by": "claude",
+          "note": "CI on #69 caught a flake I introduced: the widened permittedActions sweep exceeded Jest's 5s default on the slower runner (it passed on the pull_request run and failed on the push run for the same commit). Given an explicit 60s budget rather than fewer targets - the exhaustiveness is the test."
         }
       ]
     }
