@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "28388a9eae45dfce03f3d972caa625f4d6ae424e",
-  "lastSyncedAt": "2026-07-28T01:40:00Z",
-  "notesForNextSession": "BACKUPS NOW WORK - and had never worked before 2026-07-27. r2:lords-backups was empty from go-live until this session; T-0208 has the whole story (rclone in ~/bin, absent from a systemd user unit's PATH, and a 127 swallowed by `|| fail \"rclone upload failed\"`). Production is running the fixed scripts already - they were installed to ~/bin and ~/lords/deploy by hand and md5-match the repo. THE REPO IS THE HALF THAT IS BEHIND: branch fix/backup-rclone-path is committed locally and not pushed, so open the PR into dev before anything else touches deploy/. Two things to actually finish: (1) SET BACKUP_HEARTBEAT_URL in ~/lords/backup.env - it is blank, and its blankness is why a week of failures was invisible; the code fix cannot report a timer that does not run. (2) Confirm the first UNATTENDED 03:30 UTC run succeeded - a manual `systemctl --user start` shares nothing with the timer but the unit file. Also note ~/lords/backup.env now has BACKUP_MIN_BYTES=50000 (real dump is ~107 KB); that file is operator-owned and not in git, so a box rebuild reverts it to 20000. Recorded RTO: 1-2s. The avatar upload round-trip is now the only never-verified item from go-live.",
-  "nextIdCounter": 209,
+  "lastSyncedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
+  "lastSyncedAt": "2026-07-28T14:45:00Z",
+  "notesForNextSession": "T-0209 is the live thread: the Discord bot was purging members' roles on ordinary admin actions and the fix is open as a PR into dev in BOTH repos (backend fix/discord-role-scoped-sync, frontend fix/admin-modal-peer-lockout-copy). Read T-0209's summary before touching anything in src/discord - the one rule that must not be undone is that a member MUTATION may never enqueue a job whose strip scope comes from the catalogue rather than from its own payload. There is deliberately no `syncMemberRoles` helper in MembersService any more; re-introducing one re-opens the bug, because a single shared call has nowhere to put the delta. Note the enum member RoleGrant keeps the WIRE VALUE 'role.sync' on purpose (queued rows drain under the safe semantics) - do not 'tidy' that up, it would strand every pending job. Two things left open: T-0210 (what suspension and unban do to Discord roles - the owner deferred it, and applyBanRoleOnBan is still OFF in production so the whole ban->Discord path remains untested against the real guild), and the resync fan-out having no batchId, so the only destructive path is also the one that cannot be cancelled or polled (T-0209 risk 4). Still true from last session: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank, and the first unattended 03:30 UTC backup run has not been confirmed.",
+  "nextIdCounter": 211,
   "connections": [],
   "tasks": [
     {
@@ -10898,8 +10898,11 @@
       "regressionRisk": [
         {
           "desc": "Touches reconcileRoles, the shared convergence routine used by every rank change, medal award and post-approval sync - an over-broad strip set would remove roles the app does not own",
-          "status": "open",
-          "notedAt": "2026-07-22T19:30:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-22T19:30:00Z",
+          "resolvedAt": "2026-07-28T14:45:00Z",
+          "resolvedBy": "T-0209",
+          "note": "Retired by T-0209: reconcileRoles is no longer shared by rank changes, medal awards or the post-approval sync. Those enqueue a scoped or additive job; the over-broad strip survives only behind POST /api/discord/resync."
         }
       ],
       "skippedByClaude": [],
@@ -13186,7 +13189,10 @@
       "regressionRisk": [
         {
           "note": "reconcileRoles no longer exempts the membership role from stripping. Any guild member holding the OLD join role who is not an enrolled member loses it on their next reconcile \u2014 intended, but it is a real role removal against real people the first time the bot runs with syncRolesOnChange on.",
-          "status": "open"
+          "status": "resolved",
+          "resolvedAt": "2026-07-28T14:45:00Z",
+          "resolvedBy": "T-0209",
+          "resolutionNote": "Narrowed by T-0209: the membership role is still revoked from a non-enrolled member, but only by a scoped sync naming that one id or by the operator resync - no longer as collateral of an unrelated mutation, and never via the (now removed) blind sweep."
         },
         {
           "note": "Visitors with no member row are never reconciled at all, so a stale join-role grant on a non-member is NOT cleaned up by this change and needs a manual sweep in Discord.",
@@ -14203,8 +14209,11 @@
         },
         {
           "desc": "The derive enqueues a reconcile, which will STRIP a managed role the roster deliberately did not adopt (a protected-rank role, or a rank role below the member's current one). That is the same reconcile any rank change already triggers, but a button labelled 'derive FROM Discord' also writing TO Discord is not obvious from its name or its hint.",
-          "status": "open",
-          "notedAt": "2026-07-27T16:40:00Z"
+          "status": "resolved",
+          "notedAt": "2026-07-27T16:40:00Z",
+          "resolvedAt": "2026-07-28T14:45:00Z",
+          "resolvedBy": "T-0209",
+          "note": "Retired by T-0209: the derive now enqueues a two-id rank swap plus an ADDITIVE grant, so a managed role the adoption deliberately declined (a protected-rank role, a rank below the floor) is no longer taken off after the fact."
         }
       ],
       "skippedByClaude": [
@@ -14614,6 +14623,195 @@
           "note": "found while the owner was checking whether backups worked at all; diagnosed, fixed, and verified against real R2 in the same session"
         }
       ]
+    },
+    {
+      "id": "T-0209",
+      "title": "Stop ordinary admin actions purging a member's Discord roles",
+      "summary": "Owner report: 'the bot is randomly deleting people's discord roles which are correct' - reproduced by promoting a Moderator to Admin, which succeeded and took the member's decorations off. ROOT CAUSE: all five member mutations (changeRank/changeRole/awardMedal/removeMedal/deriveFromDiscord) funnelled into one `syncMemberRoles` helper enqueuing a RoleSync job whose payload carried {memberId, discordUserId} and nothing else. The DELTA was discarded at the enqueue boundary and unrecoverable at drain time, so the worker had no choice but to recompute the member's whole desired set and strip every MANAGED role (any role linked to any rank or medal, plus the membership role) the roster could not account for. For a regiment that lived on Discord before it had a dashboard that is every decoration handed out by hand - and a Moderator->Admin promotion cannot legitimately change a single rank or medal role, so 100% of what that job removed was collateral. FIX: convergence splits into three modes with disjoint reach. RoleGrant (wire value stays 'role.sync' so queued rows drain under the new rule with no pre-deploy SQL) adds and is structurally unable to remove - approval, rejoin and derive use it. RoleScopedSync converges ONLY the ids named in its payload, so a rank change is two roles, a medal award/removal is one, and an app-role change is the membership role alone; direction is decided at DRAIN time by re-deriving what the member should hold, which is what makes a repeatable medal's surviving duplicate award keep its role for free. RoleFullResync keeps the old destructive diff and is reachable ONLY from POST /api/discord/resync. Also: the blind sweep is gone (fetchMember returns null identically for 'left the guild' and 'Discord did not answer', so a transient failure escalated a diff into a catalogue-wide purge issued against a member nobody had read); every role job now re-checks botEnabled/syncRolesOnChange at drain time, so the switch means 'stop' rather than 'stop enqueuing'; resyncAll honours syncRolesOnChange; and RoleRelinkApply forwards incomingRoleId and drains as a two-id scoped sync. The 'Permission denied' half was NOT a 403: an Admin who promotes a Moderator to Admin can no longer moderate that peer, so the returned projection zeroes every permittedAction and the modal replaced its controls with 'You don't have permission to manage this member' in the same tick as the success toast. The notice now names the rule instead.",
+      "status": "review",
+      "type": "bug",
+      "size": "M",
+      "sizeWeight": 5,
+      "area": "discord-bot",
+      "feature": "role-sync",
+      "subfeature": "scoped-convergence",
+      "repo": "",
+      "paths": [
+        "src/common/enums/index.ts",
+        "src/discord/discord-job-payloads.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord-sync.worker.spec.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "src/discord/discord-onboarding.service.ts",
+        "src/members/members.service.ts",
+        "src/members/members.service.spec.ts",
+        "src/applications/applications.service.ts",
+        "test/discord.e2e-spec.ts",
+        "lords-regiment-dashboard:src/app/core/models/member.model.ts",
+        "lords-regiment-dashboard:src/app/features/member/admin-action-modal/admin-action-modal.component.ts",
+        "lords-regiment-dashboard:src/app/features/member/admin-action-modal/admin-action-modal.component.html"
+      ],
+      "dependsOn": [
+        "T-0159",
+        "T-0191",
+        "T-0202",
+        "T-0204"
+      ],
+      "blocks": [],
+      "questions": [],
+      "resolvesRisk": "T-0159#0",
+      "testPlan": [
+        {
+          "desc": "a rank change converges exactly the two rank roles; an unrecorded medal role and an unmanaged role survive",
+          "status": "passed"
+        },
+        {
+          "desc": "a Moderator->Admin promotion issues ZERO Discord calls (both tiers hold the membership role)",
+          "status": "passed"
+        },
+        {
+          "desc": "removing one award of a repeatable medal KEEPS the role while another award survives",
+          "status": "passed"
+        },
+        {
+          "desc": "RoleGrant removes nothing, not even a managed role the roster cannot account for",
+          "status": "passed"
+        },
+        {
+          "desc": "an unreadable member (fetchMember null) gets the additive half only - no blind strip, in any mode",
+          "status": "passed"
+        },
+        {
+          "desc": "every role job re-checks botEnabled/syncRolesOnChange at drain time",
+          "status": "passed"
+        },
+        {
+          "desc": "a relink payload queued before this change degrades to the strip-only swap T-0159 shipped",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: rank change swaps only the rank roles, with the mock gateway seeded and an unmanaged control role",
+          "status": "passed"
+        },
+        {
+          "desc": "frontend: the peer-appointment lockout is explained by name, not as 'no permission'",
+          "status": "passed"
+        },
+        {
+          "desc": "a relink row queued before T-0209 still APPLIES the incoming role (additive pass), not just the strip",
+          "status": "passed"
+        },
+        {
+          "desc": "the operator resync still runs with syncRolesOnChange off, and stops when the bot is off",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Renames the DiscordSyncJobType member RoleSync -> RoleGrant while KEEPING the wire value 'role.sync'. Deliberate (queued rows drain under the safe new semantics with no pre-deploy SQL), but code and database now disagree on the name: anyone reading discord_sync_jobs.job_type sees 'role.sync' for what the code calls a grant. The bot-operations ledger stores job.jobType verbatim, so historical rows mix the old destructive meaning and the new additive one under one string.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "The blind sweep is gone, so a superseded rank role on a member the gateway cannot read is no longer removed by that member's own sync. It is removed by the next successful scoped sync or by POST /api/discord/resync. On a regiment whose gateway is persistently unreachable, strips now never happen at all - the intended direction to fail in, but a behaviour change from 'strip anyway'.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "resyncAll is gated on botEnabled ALONE, deliberately not on syncRolesOnChange - a manual Resync is neither automatic nor 'on change', and it is now the only path that clears a managed role the roster cannot account for. Consequence: turning role syncing off does NOT stop an operator-triggered resync from stripping roles. The bot master switch is the only thing that does.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "A resync fan-out is one RoleFullResync job per linked member (~576 in production) and is NOT in BULK_JOB_TYPES, so it takes the full tick budget ahead of announcements/DMs and writes one operations-ledger row each. It also carries no batchId, so it cannot be cancelled or polled. Pre-existing, but it matters more now that this is the ONLY destructive path.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "desc": "'Only the operator resync strips broadly' is true of the reconcile family but NOT absolutely: MemberBanRole -> applyBanRole still removes every managed role the member wears and IS produced by a member mutation (members.service ban). Pre-existing and owner-gated behind applyBanRoleOnBan (default off), and it is the one strip the owner explicitly wants - but the claim needs that caveat wherever it is repeated.",
+          "status": "open",
+          "notedAt": "2026-07-28T14:45:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Suspension still does NOT touch Discord - owner chose to leave it out of this PR (see T-0210).",
+        "applyBanRoleOnBan left at its default OFF; the owner asked to re-review that flow before enabling, and this change does not touch it.",
+        "unban/unsuspend still do not restore roles or remove the Ban role; deferred with T-0210 since the ban strip is inert in production today.",
+        "resyncAll was NOT given a batchId or moved into BULK_JOB_TYPES - the batch progress/cancel endpoints are keyed to the RoleRelinkApply/Expand job types and would report total=0 for a resync batch. Recorded as a regression risk instead.",
+        "No migration written: discord_sync_jobs.job_type is varchar(40), not an enum column, so the two new values need no schema change.",
+        "An adversarial review caught three real defects in the first cut, all fixed before commit: legacy relink rows (no incomingRoleId) would have stripped the outgoing role without ever applying the incoming one; gating resyncAll on syncRolesOnChange silently disabled the manual Resync button; and the new lockout notice claimed 'only the Owner can' when the server rule is strict precedence, which is wrong for any target below Admin."
+      ],
+      "lastTouchedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
+      "createdAt": "2026-07-28T14:45:00Z",
+      "updatedAt": "2026-07-28T14:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T14:45:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "owner bug report: promoting a moderator to admin succeeded, showed 'Permission denied', and destroyed the member's Discord roles. Both halves diagnosed and fixed on fix/discord-role-scoped-sync (backend) + fix/admin-modal-peer-lockout-copy (frontend). 1000 unit + 140 e2e + 618 frontend tests green. Owner decisions this session: leave suspension alone this PR; never strip blind. PRs open and CI green: backend #67, frontend Amitoj02/lords-regiment-dashboard#57."
+        }
+      ]
+    },
+    {
+      "id": "T-0210",
+      "title": "Decide and wire what suspension + unban do to Discord roles",
+      "summary": "Owner stated the intended policy as 'remove all the discord roles when the user is banned OR suspended, to give him the ban discord role'. Today only BAN enqueues the strip-all + Ban-role job, and even that is inert: applyBanRoleOnBan defaults OFF and the owner asked to re-review the flow before enabling it. suspend() touches Discord not at all. The reverse legs are missing too - unban and unsuspend neither remove the Ban role nor restore the member's rank/medal/membership roles, so once the ban strip IS enabled a lifted ban leaves the member stripped and still wearing the Ban role. Open question the owner deferred in T-0209: does suspension reuse applyBanRoleOnBan + banRoleId (simple, but a suspended member visibly wears a role labelled 'Ban'), or get its own settings column, role picker and copy? Deciding that decides whether a migration and frontend settings work are in scope.",
+      "status": "planned",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 3,
+      "area": "discord-bot",
+      "feature": "role-sync",
+      "subfeature": "ban-and-suspension-roles",
+      "repo": "",
+      "paths": [
+        "src/members/members.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/entities/discord-bot-settings.entity.ts"
+      ],
+      "dependsOn": [
+        "T-0209"
+      ],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Should suspension reuse the existing applyBanRoleOnBan switch and Ban role, or get its own setting and role?",
+          "status": "open",
+          "askedAt": "2026-07-28T14:45:00Z"
+        },
+        {
+          "q": "When should applyBanRoleOnBan actually be turned on in production? It has been OFF since go-live, so the whole ban->Discord path is untested against the real guild.",
+          "status": "open",
+          "askedAt": "2026-07-28T14:45:00Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "suspending strips managed roles and applies the configured role, behind whichever switch is chosen",
+          "status": "pending"
+        },
+        {
+          "desc": "unsuspend/unban remove the Ban role AND restore rank/medal/membership roles via the additive grant",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "",
+      "createdAt": "2026-07-28T14:45:00Z",
+      "updatedAt": "2026-07-28T14:45:00Z",
+      "history": [
+        {
+          "at": "2026-07-28T14:45:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "split out of T-0209 - owner chose 'Leave suspension alone this PR' when asked."
+        }
+      ]
     }
   ],
   "history": [
@@ -14626,6 +14824,11 @@
       "at": "2026-07-28T01:40:00Z",
       "by": "claude",
       "note": "T-0208 created and fixed in one session: nightly backups had never once succeeded in production; verified with a real upload and a full restore drill."
+    },
+    {
+      "at": "2026-07-28T14:45:00Z",
+      "by": "claude",
+      "note": "T-0209 (Discord role purge + the 'Permission denied' the owner saw) implemented and opened for review in both repos; T-0210 split out for the deferred suspension/unban policy. Retired T-0159#0 and T-0204#2, narrowed T-0191#0."
     }
   ]
 }

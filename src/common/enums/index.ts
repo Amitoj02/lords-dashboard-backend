@@ -138,7 +138,32 @@ export enum DiscordSyncJobStatus {
 export enum DiscordSyncJobType {
   RoleAssign = 'role.assign',
   RoleRemove = 'role.remove',
-  RoleSync = 'role.sync',
+  /**
+   * ADD every managed role the roster says this member should hold. Removes
+   * NOTHING, ever (T-0209).
+   *
+   * ⚠️ THE WIRE VALUE IS DELIBERATELY UNCHANGED. This member used to be called
+   * `RoleSync` and drained as a full destructive reconcile; keeping
+   * `'role.sync'` means every row queued by the previous release drains under
+   * the NEW, additive semantics instead of needing pre-deploy SQL. The NAME
+   * changed because the behaviour did — a job type that meant "converge" to one
+   * caller and "grant" to another is exactly how the strip escaped its scope.
+   */
+  RoleGrant = 'role.sync',
+  /**
+   * Converge a NAMED SET of role ids and nothing else (T-0209): each id in the
+   * payload is assigned when the roster says it belongs and removed when it does
+   * not. The scope is the payload, so no read failure and no catalogue growth can
+   * widen it — this is what a rank change, a medal award/removal and a re-link
+   * fan-out enqueue.
+   */
+  RoleScopedSync = 'role.scoped_sync',
+  /**
+   * The FULL destructive reconcile: every managed role the member holds but the
+   * roster does not account for is stripped. Reachable ONLY from the operator's
+   * explicit `POST /api/discord/resync` — no member mutation may produce one.
+   */
+  RoleFullResync = 'role.full_resync',
   /** Strip managed roles + apply the configured Ban role on an app-side ban. */
   MemberBanRole = 'member.ban_role',
   Announce = 'announce',
@@ -204,12 +229,13 @@ export enum DiscordSyncJobType {
    */
   RoleRelinkExpand = 'role.relink_expand',
   /**
-   * Apply one member's share of a re-link (T-0158/T-0159). Deliberately NOT a
-   * plain RoleSync job: `reconcileRoles` recomputes the desired role set from
-   * the CURRENT rank/medal rows, so by the time it runs the outgoing role is
-   * already gone from the mapping and is structurally unknowable. This job type
-   * carries `outgoingRoleId` in its payload so the previously-linked role can be
-   * stripped as well as the new one applied.
+   * Apply one member's share of a re-link (T-0158/T-0159). Its own type because
+   * the outgoing role is structurally unknowable at drain time: the desired set
+   * is recomputed from the CURRENT rank/medal rows, and by then the previous
+   * role has already left the mapping. The payload carries BOTH ends —
+   * `outgoingRoleId` and (since T-0209) `incomingRoleId` — and drains as a
+   * two-id {@link RoleScopedSync}, so re-pointing one catalogue row's role can
+   * never disturb a member's other roles.
    */
   RoleRelinkApply = 'role.relink_apply',
 }

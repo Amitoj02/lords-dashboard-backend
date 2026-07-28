@@ -99,7 +99,10 @@ permission.
 
 ## 5. Post-go-live smoke test
 - Real Discord sign-in → `/auth/me` resolves the Owner.
-- Change a linked member's rank → a `role.sync` job drains and the Discord role changes.
+- Change a linked member's rank → a `role.scoped_sync` job drains, carrying exactly the two
+  rank role ids; the old rank role comes off and the new one goes on, and **nothing else the
+  member wears changes** (T-0209). If any other role moves, stop and investigate — that is the
+  bug this job type exists to make impossible.
 - Compose an announcement → it posts to the configured channel.
 - A test member joins the guild → welcome + Guest role fire.
 - (Only if `applyBanRoleOnBan` is intentionally enabled) ban a throwaway member → their

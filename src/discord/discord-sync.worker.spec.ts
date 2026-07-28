@@ -342,150 +342,323 @@ describe('DiscordSyncWorker', () => {
     expect(gateway.assignRole).toHaveBeenCalledTimes(1);
   });
 
-  describe('role reconcile (RoleSync)', () => {
-    const roleSyncJob = () =>
-      job({
-        jobType: DiscordSyncJobType.RoleSync,
-        payload: { memberId: 'm1', discordUserId: 'u1' },
-      });
+  /**
+   * T-0209. The three role-convergence modes, and the ONE property that
+   * separates them: how far each is allowed to reach.
+   *
+   * Before this there was one mode. Every rank change, role change, medal award
+   * and medal removal ran a full destructive reconcile, so the blast radius of
+   * awarding a medal was "every managed role in the catalogue the roster cannot
+   * account for" — which, for a regiment that lived on Discord before it had a
+   * dashboard, is every decoration its veterans were ever handed by hand.
+   */
+  describe('role convergence modes (T-0209)', () => {
+    /** The gate every role job re-checks at DRAIN time, not only at enqueue. */
+    const BOT_ON = { botEnabled: true, syncRolesOnChange: true, membershipRoleId: 'member-1' };
 
-    it('assigns the rank role AND every held-medal role', async () => {
-      queue([roleSyncJob()]);
-      membersRepo.findOne.mockResolvedValue({
-        id: 'm1',
-        regimentId: 'regiment-1',
-        rankId: 'rank-1',
-        bannedAt: null,
-      });
-      ranksRepo.findOne.mockResolvedValue({ id: 'rank-1', discordRoleId: 'rank-role-1' });
-      memberMedalsRepo.find.mockResolvedValue([{ medal: { discordRoleId: 'medal-role-1' } }]);
-      settingsRepo.findOne.mockResolvedValue({ membershipRoleId: 'member-1' });
-      gateway.fetchMember.mockResolvedValue({ roles: [] });
-
-      await worker.drain();
-
-      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
-      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'medal-role-1');
-    });
-
-    it('never re-grants roles to a BANNED member (would undo the ban strip)', async () => {
-      queue([roleSyncJob()]);
-      membersRepo.findOne.mockResolvedValue({
-        id: 'm1',
-        regimentId: 'regiment-1',
-        rankId: 'rank-1',
-        bannedAt: new Date(),
-      });
-
-      const processed = await worker.drain();
-
-      expect(processed).toBe(1);
-      expect(gateway.assignRole).not.toHaveBeenCalled();
-      expect(gateway.removeRole).not.toHaveBeenCalled();
-    });
+    const roleJob = (jobType: DiscordSyncJobType, payload: Record<string, unknown> = {}) =>
+      job({ jobType, payload: { memberId: 'm1', discordUserId: 'u1', ...payload } });
 
     /**
-     * T-0191. The Membership role replaced the old join role and INVERTED its
-     * rule. The join role was assign-only and explicitly excluded from every
-     * strip, because the guild-join flow owned it. The Membership role is owned
-     * by roster state, so the reconcile both grants and revokes it — that is the
-     * only thing that makes it mean "enrolled", which is the whole point of a
-     * regiment hanging its channel permissions off one role.
+     * A member the roster credits with `rank-role-1` and nothing else, wearing
+     * `currentRoles` in the guild. `null` means the gateway could not tell us.
      */
-    const enrolled = (role: MemberRole, currentRoles: string[]) => {
+    const roster = (
+      currentRoles: string[] | null,
+      over: Record<string, unknown> = {},
+      medalRoles: string[] = [],
+    ) => {
       membersRepo.findOne.mockResolvedValue({
         id: 'm1',
         regimentId: 'regiment-1',
         rankId: 'rank-1',
-        role,
+        role: MemberRole.Member,
         bannedAt: null,
+        ...over,
       });
       ranksRepo.findOne.mockResolvedValue({ id: 'rank-1', discordRoleId: 'rank-role-1' });
-      ranksRepo.find.mockResolvedValue([{ discordRoleId: 'rank-role-1' }]);
-      medalsRepo.find.mockResolvedValue([]);
-      memberMedalsRepo.find.mockResolvedValue([]);
-      settingsRepo.findOne.mockResolvedValue({ membershipRoleId: 'member-1' });
-      gateway.fetchMember.mockResolvedValue({ roles: currentRoles });
-    };
-
-    it('grants the Membership role to an enrolled member', async () => {
-      queue([roleSyncJob()]);
-      enrolled(MemberRole.Member, ['rank-role-1']);
-
-      await worker.drain();
-
-      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'member-1');
-    });
-
-    it('keeps the Membership role on a member who already has it', async () => {
-      queue([roleSyncJob()]);
-      enrolled(MemberRole.Member, ['rank-role-1', 'member-1']);
-
-      await worker.drain();
-
-      expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'member-1');
-      expect(gateway.assignRole).not.toHaveBeenCalledWith('u1', 'member-1');
-    });
-
-    it('STRIPS the Membership role from a Mercenary — they are not of the regiment', async () => {
-      // The distinction the role exists to draw. A mercenary carrying it (from
-      // the old join-time grant, or from having been a member once) loses it on
-      // their next reconcile.
-      queue([roleSyncJob()]);
-      enrolled(MemberRole.Mercenary, ['rank-role-1', 'member-1']);
-
-      await worker.drain();
-
-      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'member-1');
-      expect(gateway.assignRole).not.toHaveBeenCalledWith('u1', 'member-1');
-    });
-
-    it('never grants the Membership role to a Mercenary who lacks it', async () => {
-      queue([roleSyncJob()]);
-      enrolled(MemberRole.Mercenary, ['rank-role-1']);
-
-      await worker.drain();
-
-      expect(gateway.assignRole).not.toHaveBeenCalledWith('u1', 'member-1');
-    });
-
-    it('strips the Membership role from a Mercenary even when roles cannot be listed', async () => {
-      // The blind-sweep arm. Without the Membership role in that sweep, a
-      // mercenary kept it forever on any regiment whose gateway cannot read
-      // current roles.
-      queue([roleSyncJob()]);
-      enrolled(MemberRole.Mercenary, []);
-      gateway.fetchMember.mockResolvedValue(null);
-
-      await worker.drain();
-
-      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'member-1');
-    });
-
-    it('strips a superseded RANK role even when the gateway cannot list current roles', async () => {
-      // Without this the fallback only swept medal roles, so every promotion
-      // left the old rank role in place whenever fetchMember returned null.
-      queue([roleSyncJob()]);
-      membersRepo.findOne.mockResolvedValue({
-        id: 'm1',
-        regimentId: 'regiment-1',
-        rankId: 'rank-2',
-        bannedAt: null,
-      });
-      ranksRepo.findOne.mockResolvedValue({ id: 'rank-2', discordRoleId: 'rank-role-2' });
       ranksRepo.find.mockResolvedValue([
         { discordRoleId: 'rank-role-1' },
         { discordRoleId: 'rank-role-2' },
       ]);
-      memberMedalsRepo.find.mockResolvedValue([]);
-      settingsRepo.findOne.mockResolvedValue({ membershipRoleId: 'member-1' });
-      gateway.fetchMember.mockResolvedValue(null);
+      medalsRepo.find.mockResolvedValue([{ discordRoleId: 'medal-role-1' }]);
+      memberMedalsRepo.find.mockResolvedValue(
+        medalRoles.map((discordRoleId) => ({ medal: { discordRoleId } })),
+      );
+      settingsRepo.findOne.mockResolvedValue(BOT_ON);
+      gateway.fetchMember.mockResolvedValue(currentRoles === null ? null : { roles: currentRoles });
+      // clearAllMocks() keeps implementations, so a rejection set by a previous
+      // case would leak into this one.
+      gateway.assignRole.mockResolvedValue(undefined);
+      gateway.removeRole.mockResolvedValue(undefined);
+    };
 
-      await worker.drain();
+    describe('grant (RoleGrant) — adds, and is structurally unable to remove', () => {
+      it('assigns the rank role AND every held-medal role', async () => {
+        queue([roleJob(DiscordSyncJobType.RoleGrant)]);
+        roster([], {}, ['medal-role-1']);
 
-      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-2');
-      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'rank-role-1');
-      expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'rank-role-2');
+        await worker.drain();
+
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'medal-role-1');
+      });
+
+      it('grants the Membership role to an enrolled member', async () => {
+        queue([roleJob(DiscordSyncJobType.RoleGrant)]);
+        roster(['rank-role-1']);
+
+        await worker.drain();
+
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'member-1');
+      });
+
+      it('never grants the Membership role to a Mercenary who lacks it', async () => {
+        queue([roleJob(DiscordSyncJobType.RoleGrant)]);
+        roster(['rank-role-1'], { role: MemberRole.Mercenary });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).not.toHaveBeenCalledWith('u1', 'member-1');
+      });
+
+      /**
+       * THE HEADLINE GUARANTEE. Enlistment approval, a rejoin and a Discord
+       * derive all drain as this, and each is a moment where the roster has just
+       * learned something and may still be incomplete. A veteran wearing a
+       * managed role the roster cannot explain — and one it deliberately
+       * declined to adopt — keeps both.
+       */
+      it('removes NOTHING, not even a managed role the roster cannot account for', async () => {
+        queue([roleJob(DiscordSyncJobType.RoleGrant)]);
+        roster(['rank-role-2', 'medal-role-1', 'member-1', 'some-manual-role']);
+
+        await worker.drain();
+
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+
+      it('never re-grants roles to a BANNED member (would undo the ban strip)', async () => {
+        queue([roleJob(DiscordSyncJobType.RoleGrant)]);
+        roster([], { bannedAt: new Date() });
+
+        const processed = await worker.drain();
+
+        expect(processed).toBe(1);
+        expect(gateway.assignRole).not.toHaveBeenCalled();
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+
+      it('does NOT touch Discord when role syncing was turned off after enqueue', async () => {
+        // The plain per-member sync never re-checked this, so an admin watching
+        // the bot misbehave could switch it off and still have every queued job
+        // — and everything sitting in a 30-minute backoff — drain anyway.
+        queue([roleJob(DiscordSyncJobType.RoleGrant)]);
+        roster([]);
+        settingsRepo.findOne.mockResolvedValue({ botEnabled: true, syncRolesOnChange: false });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).not.toHaveBeenCalled();
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('scoped (RoleScopedSync) — converges the named ids and nothing else', () => {
+      const scoped = (roleIds: string[]) => roleJob(DiscordSyncJobType.RoleScopedSync, { roleIds });
+
+      it('a rank change swaps the two rank roles and touches nothing else', async () => {
+        queue([scoped(['rank-role-2', 'rank-role-1'])]);
+        // Wearing the OLD rank role plus a decoration the roster never recorded.
+        roster(['rank-role-2', 'medal-role-1', 'some-manual-role', 'member-1']);
+
+        await worker.drain();
+
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'rank-role-2');
+        // The whole bug, in one assertion: the unaccounted-for medal role and
+        // the manual role survive a promotion.
+        expect(gateway.removeRole).toHaveBeenCalledTimes(1);
+      });
+
+      it('removes a medal role once the last award of it is gone', async () => {
+        queue([scoped(['medal-role-1'])]);
+        roster(['rank-role-1', 'medal-role-1', 'member-1'], {}, []);
+
+        await worker.drain();
+
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'medal-role-1');
+      });
+
+      /**
+       * Medals are REPEATABLE and `removeMedal` deletes only the most recent
+       * award, so "remove the role" is the wrong instruction to freeze into a
+       * payload. Re-deriving at drain time answers it correctly for free.
+       */
+      it('KEEPS a medal role when another award of the same medal survives', async () => {
+        queue([scoped(['medal-role-1'])]);
+        roster(['rank-role-1', 'medal-role-1', 'member-1'], {}, ['medal-role-1']);
+
+        await worker.drain();
+
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+        expect(gateway.assignRole).not.toHaveBeenCalled();
+      });
+
+      it('issues ZERO Discord calls for a role change that stays inside the enrolled tiers', async () => {
+        // Moderator -> Admin: the ONE role `members.role` maps onto is the
+        // Membership role, and both tiers hold it. The user's exact repro.
+        queue([scoped(['member-1'])]);
+        roster(['rank-role-1', 'medal-role-1', 'member-1', 'some-manual-role'], {
+          role: MemberRole.Admin,
+        });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).not.toHaveBeenCalled();
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+
+      it('strips the Membership role when a member becomes a Mercenary', async () => {
+        queue([scoped(['member-1'])]);
+        roster(['rank-role-1', 'member-1'], { role: MemberRole.Mercenary });
+
+        await worker.drain();
+
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'member-1');
+        expect(gateway.removeRole).toHaveBeenCalledTimes(1);
+      });
+
+      /**
+       * An unreadable member cannot widen a scoped sync, because the scope is
+       * the payload rather than the catalogue. That is the difference between
+       * this and the resync below, where the same failure used to escalate a
+       * diff into a catalogue-wide purge.
+       */
+      it('still touches ONLY its payload when the gateway cannot list current roles', async () => {
+        queue([scoped(['rank-role-2', 'rank-role-1'])]);
+        roster(null);
+
+        await worker.drain();
+
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'rank-role-2');
+        expect(gateway.removeRole).toHaveBeenCalledTimes(1);
+      });
+
+      it('skips a BANNED member entirely', async () => {
+        queue([scoped(['rank-role-2'])]);
+        roster(['rank-role-2'], { bannedAt: new Date() });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).not.toHaveBeenCalled();
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+
+      it('does NOT touch Discord when role syncing was turned off after enqueue', async () => {
+        queue([scoped(['rank-role-2'])]);
+        roster(['rank-role-2']);
+        settingsRepo.findOne.mockResolvedValue({ botEnabled: false, syncRolesOnChange: true });
+
+        await worker.drain();
+
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('full resync (RoleFullResync) — the operator-only destructive mode', () => {
+      const resync = () => roleJob(DiscordSyncJobType.RoleFullResync);
+
+      it('strips a managed role the roster does not account for', async () => {
+        // The behaviour that used to fire on every member mutation. It still
+        // exists, but now ONLY an admin pressing Resync can cause it.
+        queue([resync()]);
+        roster(['rank-role-1', 'rank-role-2', 'member-1', 'some-manual-role']);
+
+        await worker.drain();
+
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'rank-role-2');
+        // An unmanaged role is still never touched, in any mode.
+        expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'some-manual-role');
+      });
+
+      /**
+       * T-0191. The Membership role replaced the old join role and INVERTED its
+       * rule: it is owned by roster state, so the resync both grants and revokes
+       * it. That is the only thing that makes it mean "enrolled", which is the
+       * point of a regiment hanging its channel permissions off one role.
+       */
+      it('STRIPS the Membership role from a Mercenary — they are not of the regiment', async () => {
+        queue([resync()]);
+        roster(['rank-role-1', 'member-1'], { role: MemberRole.Mercenary });
+
+        await worker.drain();
+
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'member-1');
+        expect(gateway.assignRole).not.toHaveBeenCalledWith('u1', 'member-1');
+      });
+
+      it('keeps the Membership role on a member who already has it', async () => {
+        queue([resync()]);
+        roster(['rank-role-1', 'member-1']);
+
+        await worker.drain();
+
+        expect(gateway.removeRole).not.toHaveBeenCalledWith('u1', 'member-1');
+        expect(gateway.assignRole).not.toHaveBeenCalledWith('u1', 'member-1');
+      });
+
+      /**
+       * ⚠️ THIS REVERSES TWO EARLIER TESTS ON PURPOSE. They pinned a BLIND SWEEP:
+       * when `fetchMember` returned null the worker stripped the linked role of
+       * every rank and medal in the catalogue anyway, reasoning that `removeRole`
+       * is a no-op for a role the member never had. But the gateway returns null
+       * identically for "left the guild" and "Discord did not answer", so a
+       * transient failure escalated a diff into a purge issued against a member
+       * whose roles nobody had actually read. A role is now only ever removed
+       * against a CONFIRMED reading; the next resync completes the strip.
+       */
+      it('never strips blind: an unreadable member gets the additive half only', async () => {
+        queue([resync()]);
+        roster(null, { role: MemberRole.Mercenary, rankId: 'rank-1' });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
+
+      it('STILL runs when syncRolesOnChange is off — it is not an automatic sync', async () => {
+        // That switch is labelled "push rank/role changes to Discord
+        // automatically", and a human pressing Resync is neither automatic nor
+        // "on change". Since this became the only path that clears a managed
+        // role the roster cannot account for, gating it on that toggle would
+        // take away the repair tool along with the automation.
+        queue([resync()]);
+        roster(['rank-role-2']);
+        settingsRepo.findOne.mockResolvedValue({
+          botEnabled: true,
+          syncRolesOnChange: false,
+          membershipRoleId: 'member-1',
+        });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'rank-role-1');
+        expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'rank-role-2');
+      });
+
+      it('does NOT touch Discord when the BOT was turned off after enqueue', async () => {
+        queue([resync()]);
+        roster(['rank-role-2']);
+        settingsRepo.findOne.mockResolvedValue({ botEnabled: false, syncRolesOnChange: true });
+
+        await worker.drain();
+
+        expect(gateway.assignRole).not.toHaveBeenCalled();
+        expect(gateway.removeRole).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -498,6 +671,10 @@ describe('DiscordSyncWorker', () => {
           memberId: 'm1',
           discordUserId: 'u1',
           outgoingRoleId: 'old-role',
+          // Forwarded since T-0209, so the drain is a two-id scoped sync rather
+          // than a whole-member reconcile. Rows queued before it lack the field
+          // — see the legacy-payload case at the end of this block.
+          incomingRoleId: 'new-role',
           ...overrides,
         },
       });
@@ -599,6 +776,21 @@ describe('DiscordSyncWorker', () => {
 
       expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'old-role');
       expect(gateway.removeRole).toHaveBeenCalledTimes(1);
+    });
+
+    it('still applies the incoming role on a payload queued before T-0209', async () => {
+      // Rows written by the previous release carry `outgoingRoleId` and no
+      // `incomingRoleId`, so the scope is the outgoing role alone. The reconcile
+      // this replaced assigned every desired role BEFORE it stripped anything,
+      // so those rows did deliver the new role — a member caught mid-fan-out by
+      // the deploy must not end up wearing neither.
+      queue([applyJob({ incomingRoleId: undefined })]);
+      holder(['old-role']);
+
+      await worker.drain();
+
+      expect(gateway.removeRole).toHaveBeenCalledWith('u1', 'old-role');
+      expect(gateway.assignRole).toHaveBeenCalledWith('u1', 'new-role');
     });
 
     it('treats Unknown Role (10011) on the strip as permanent — no retries', async () => {
@@ -1040,7 +1232,7 @@ describe('DiscordSyncWorker', () => {
       const roleSync = job({
         id: 'j-role',
         status: DiscordSyncJobStatus.Processing,
-        jobType: DiscordSyncJobType.RoleSync,
+        jobType: DiscordSyncJobType.RoleGrant,
       });
       // An announce is non-idempotent (re-sending duplicates a message), so it
       // must NOT be auto-retried — it is surfaced as resolvable instead.

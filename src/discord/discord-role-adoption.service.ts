@@ -48,20 +48,27 @@ export type AdoptionRead =
  *
  * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
  * Sync ran one way. A rank or medal recorded on the dashboard became a Discord
- * role, and `DiscordSyncWorker.reconcileRoles` then treats the dashboard as the
- * only record there is: on the first reconcile of a member's life it strips
- * every MANAGED role they hold that the roster does not account for.
+ * role, and the worker treated the dashboard as the only record there is: on
+ * the first reconcile of a member's life it stripped every MANAGED role they
+ * held that the roster did not account for.
  *
  * For a regiment that existed on Discord before this dashboard did, that first
- * reconcile lands at the exact worst moment — enlistment approval. A veteran
- * who has been decorated by hand in the guild for two years signs up, an
- * officer approves them, and the bot takes every medal role off them, because a
+ * reconcile landed at the exact worst moment — enlistment approval. A veteran
+ * who had been decorated by hand in the guild for two years signed up, an
+ * officer approved them, and the bot took every medal role off them, because a
  * brand-new member row credits them with nothing. The roles were the only place
  * that history was ever written down, and the strip erased it.
  *
  * So before the roster becomes the record, the roster LEARNS from what is
- * already there. What comes back here is written to the member row, which makes
- * the reconcile that follows agree with Discord instead of overruling it.
+ * already there, and what comes back here is written to the member row.
+ *
+ * ⚠️ SINCE T-0209 THIS IS NO LONGER THE ONLY THING STANDING BETWEEN A VETERAN
+ * AND THAT LOSS. Approval now enqueues an ADDITIVE sync, which cannot remove a
+ * role at all, so a carry-over that comes back empty — an unreachable gateway,
+ * a role the adoption rules deliberately decline — costs the roster some
+ * accuracy rather than costing the member their decorations. This still earns
+ * its place: it is what makes the roster agree with the guild, and the operator
+ * resync (the one remaining destructive path) reads the roster.
  *
  * Best-effort in the strictest sense: every failure path returns
  * {@link NOTHING} rather than throwing, because a gateway hiccup must never
