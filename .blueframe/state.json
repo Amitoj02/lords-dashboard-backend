@@ -14937,7 +14937,7 @@
           "from": "review",
           "to": "review",
           "by": "claude",
-          "note": "Owner follow-up mid-review: capability holders must also be able to change their OWN rank and medals. The self refusal came out of the decoration half entirely (self-derive included), so the short-circuit moved to the FIRST line of denyReason and SELF_REFUSALS is now keyed on ModerationAction alongside OWNER_REFUSALS. Also fixed two real defects the review surfaced in the e2e teardown. 1047 unit + 155 e2e + 633 frontend green."
+          "note": "Owner follow-up mid-review: capability holders must also be able to change their OWN rank and medals. The self refusal came out of the decoration half entirely (self-derive included), so the short-circuit moved to the FIRST line of denyReason and SELF_REFUSALS is now keyed on ModerationAction alongside OWNER_REFUSALS. Also fixed two real defects the review surfaced in the e2e teardown. 1047 unit + 155 e2e + 633 frontend green. PRs open into dev: this repo #69, frontend [lords-regiment-dashboard #59](https://github.com/Amitoj02/lords-regiment-dashboard/pull/59)."
         }
       ]
     }
