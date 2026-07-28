@@ -1,7 +1,7 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "4cbc25b1",
+  "lastSyncedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
   "lastSyncedAt": "2026-07-28T14:45:00Z",
   "notesForNextSession": "T-0209 is the live thread: the Discord bot was purging members' roles on ordinary admin actions and the fix is open as a PR into dev in BOTH repos (backend fix/discord-role-scoped-sync, frontend fix/admin-modal-peer-lockout-copy). Read T-0209's summary before touching anything in src/discord - the one rule that must not be undone is that a member MUTATION may never enqueue a job whose strip scope comes from the catalogue rather than from its own payload. There is deliberately no `syncMemberRoles` helper in MembersService any more; re-introducing one re-opens the bug, because a single shared call has nowhere to put the delta. Note the enum member RoleGrant keeps the WIRE VALUE 'role.sync' on purpose (queued rows drain under the safe semantics) - do not 'tidy' that up, it would strand every pending job. Two things left open: T-0210 (what suspension and unban do to Discord roles - the owner deferred it, and applyBanRoleOnBan is still OFF in production so the whole ban->Discord path remains untested against the real guild), and the resync fan-out having no batchId, so the only destructive path is also the one that cannot be cancelled or polled (T-0209 risk 4). Still true from last session: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank, and the first unattended 03:30 UTC backup run has not been confirmed.",
   "nextIdCounter": 211,
@@ -14742,7 +14742,7 @@
         "No migration written: discord_sync_jobs.job_type is varchar(40), not an enum column, so the two new values need no schema change.",
         "An adversarial review caught three real defects in the first cut, all fixed before commit: legacy relink rows (no incomingRoleId) would have stripped the outgoing role without ever applying the incoming one; gating resyncAll on syncRolesOnChange silently disabled the manual Resync button; and the new lockout notice claimed 'only the Owner can' when the server rule is strict precedence, which is wrong for any target below Admin."
       ],
-      "lastTouchedCommit": "",
+      "lastTouchedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
       "createdAt": "2026-07-28T14:45:00Z",
       "updatedAt": "2026-07-28T14:45:00Z",
       "history": [
@@ -14751,7 +14751,7 @@
           "from": null,
           "to": "review",
           "by": "claude",
-          "note": "owner bug report: promoting a moderator to admin succeeded, showed 'Permission denied', and destroyed the member's Discord roles. Both halves diagnosed and fixed on fix/discord-role-scoped-sync (backend) + fix/admin-modal-peer-lockout-copy (frontend). 1000 unit + 140 e2e + 618 frontend tests green. Owner decisions this session: leave suspension alone this PR; never strip blind."
+          "note": "owner bug report: promoting a moderator to admin succeeded, showed 'Permission denied', and destroyed the member's Discord roles. Both halves diagnosed and fixed on fix/discord-role-scoped-sync (backend) + fix/admin-modal-peer-lockout-copy (frontend). 1000 unit + 140 e2e + 618 frontend tests green. Owner decisions this session: leave suspension alone this PR; never strip blind. PRs open and CI green: backend #67, frontend Amitoj02/lords-regiment-dashboard#57."
         }
       ]
     },
