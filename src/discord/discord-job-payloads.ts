@@ -100,15 +100,41 @@ export interface RoleTargetPayload {
   roleId: string;
 }
 
-/** Reconcile every managed role for one member. */
+/** Reconcile the managed roles of one member (which ones depends on the job type). */
 export interface RoleSyncPayload {
   memberId: string;
   discordUserId: string;
 }
 
-/** One member's share of a bulk re-link (carries the role that left the mapping). */
+/**
+ * The role ids ONE scoped sync is allowed to touch (T-0209).
+ *
+ * ⚠️ THIS LIST IS THE ENTIRE PERMISSION. The worker re-derives what the member
+ * *should* hold at drain time and then converges only these ids — assigning the
+ * ones that belong and removing the ones that do not. Nothing outside the list
+ * is read, compared or written, which is what makes the blast radius of a rank
+ * change exactly two roles however large the catalogue grows.
+ *
+ * Re-deriving at DRAIN time rather than baking add/remove into the payload is
+ * load-bearing, not stylistic: retry backoff reaches thirty minutes, and a
+ * second award of a repeatable medal can land inside that window. A frozen
+ * "remove this role" would then strip a medal the member had just re-earned; a
+ * scope plus a fresh derivation cannot.
+ */
+export interface ScopedRoleSyncPayload extends RoleSyncPayload {
+  roleIds: string[];
+}
+
+/**
+ * One member's share of a bulk re-link. Carries BOTH ends of the mapping change,
+ * so the drain is a two-id scoped sync rather than a whole-member reconcile.
+ *
+ * `incomingRoleId` is absent on rows queued before T-0209; the worker degrades to
+ * stripping the outgoing role alone, which is exactly T-0159's original contract.
+ */
 export interface RoleRelinkApplyPayload extends RoleSyncPayload {
   outgoingRoleId?: string | null;
+  incomingRoleId?: string | null;
 }
 
 /** Strip managed roles and apply the Ban role. */
@@ -150,7 +176,9 @@ export interface RoleRelinkExpandPayload extends Record<string, unknown> {
 export interface DiscordJobPayloadMap {
   [DiscordSyncJobType.RoleAssign]: RoleTargetPayload;
   [DiscordSyncJobType.RoleRemove]: RoleTargetPayload;
-  [DiscordSyncJobType.RoleSync]: RoleSyncPayload;
+  [DiscordSyncJobType.RoleGrant]: RoleSyncPayload;
+  [DiscordSyncJobType.RoleScopedSync]: ScopedRoleSyncPayload;
+  [DiscordSyncJobType.RoleFullResync]: RoleSyncPayload;
   [DiscordSyncJobType.MemberBanRole]: MemberBanRolePayload;
   [DiscordSyncJobType.Announce]: EventAnnouncePayload;
   [DiscordSyncJobType.EventReminder]: ChannelMessagePayload;

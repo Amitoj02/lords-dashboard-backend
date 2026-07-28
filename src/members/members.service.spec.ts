@@ -137,7 +137,13 @@ describe('MembersService', () => {
   // Best-effort Discord side effects — mocked so admin actions can assert they
   // are enqueued without a real bot.
   const discordSync = {
-    enqueueRoleSync: jest.fn().mockResolvedValue(null),
+    // ⚠️ EVERY enqueue this service can reach must be listed. A missing key is
+    // not a compile error here (the mock is a literal cast at the provider), so
+    // it would make `expectRefusedWithoutTrace` pass vacuously while a refused
+    // action quietly leaked a Discord job.
+    enqueueRoleGrant: jest.fn().mockResolvedValue(null),
+    enqueueScopedRoleSync: jest.fn().mockResolvedValue(null),
+    enqueueMembershipRoleSync: jest.fn().mockResolvedValue(null),
     enqueueMemberBanRole: jest.fn().mockResolvedValue(null),
   };
   // The guild read behind "Derive data from Discord" (T-0204). Defaults to a
@@ -604,7 +610,11 @@ describe('MembersService', () => {
         }),
       );
       expect(sessionContext.invalidate).toHaveBeenCalledTimes(1);
-      expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+      // An app-level role maps onto ONE Discord role — the Membership role
+      // (T-0209). Anything wider was how a promotion stripped a member's medals.
+      expect(discordSync.enqueueMembershipRoleSync).toHaveBeenCalledTimes(1);
+      expect(discordSync.enqueueScopedRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
     });
 
     it('changeRole peer appointment is one-way: the new peer is then untouchable (T-0203)', async () => {
@@ -639,7 +649,9 @@ describe('MembersService', () => {
       expect(serviceRecordRepo.save).not.toHaveBeenCalled();
       expect(audit.record).not.toHaveBeenCalled();
       expect(sessionContext.invalidate).not.toHaveBeenCalled();
-      expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueScopedRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueMembershipRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
     });
 
     it('changeRole applies a real change and records service/audit + invalidation + role sync', async () => {
@@ -659,7 +671,11 @@ describe('MembersService', () => {
         expect.objectContaining({ action: 'member.role.change', regimentId: REGIMENT }),
       );
       expect(sessionContext.invalidate).toHaveBeenCalledTimes(1);
-      expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+      // An app-level role maps onto ONE Discord role — the Membership role
+      // (T-0209). Anything wider was how a promotion stripped a member's medals.
+      expect(discordSync.enqueueMembershipRoleSync).toHaveBeenCalledTimes(1);
+      expect(discordSync.enqueueScopedRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
     });
 
     it('awardMedal inserts a member_medal row and audits medal.award', async () => {
@@ -691,9 +707,18 @@ describe('MembersService', () => {
 
       it('adopts the rank and awards the medals, recording service entries + audit + sync', async () => {
         memberRepo.findOne.mockResolvedValue(
-          buildMember({ rank: { id: 'rank-1', name: 'Corporal', precedence: 7 } as Rank }),
+          // LINKED, so the enqueues below carry a real snowflake — a derive on an
+          // unlinked member no-ops in the enqueuer and would assert nothing.
+          linked({
+            rank: {
+              id: 'rank-1',
+              name: 'Corporal',
+              precedence: 7,
+              discordRoleId: 'role-corporal',
+            } as Rank,
+          }),
         );
-        found({ id: 'rank-9', name: 'Sergeant', precedence: 6 }, [
+        found({ id: 'rank-9', name: 'Sergeant', precedence: 6, discordRoleId: 'role-sergeant' }, [
           { id: 'medal-1', title: 'Medal of Valor' },
           { id: 'medal-2', title: "Marksman's Cross" },
         ]);
@@ -718,8 +743,17 @@ describe('MembersService', () => {
             after: { rank: 'Sergeant', medalCount: 2 },
           }),
         );
-        // The member wears their OLD rank role in the guild; the reconcile strips it.
-        expect(discordSync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+        // The member wears their OLD rank role in the guild, so the rank roles
+        // are converged as a two-id swap; everything the derive ADOPTED is
+        // granted. Neither can strip a role the roster declined to adopt
+        // (T-0209) — which the destructive reconcile this replaced did.
+        expect(discordSync.enqueueScopedRoleSync).toHaveBeenCalledWith(
+          REGIMENT,
+          'member-1',
+          'discord-9',
+          ['role-corporal', 'role-sergeant'],
+        );
+        expect(discordSync.enqueueRoleGrant).toHaveBeenCalledTimes(1);
       });
 
       it("uses the member's CURRENT rank as the floor, so a derive can never demote", async () => {
@@ -777,7 +811,9 @@ describe('MembersService', () => {
         expect(txRepo.update).not.toHaveBeenCalled();
         expect(txRepo.save).not.toHaveBeenCalled();
         expect(audit.record).not.toHaveBeenCalled();
-        expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+        expect(discordSync.enqueueScopedRoleSync).not.toHaveBeenCalled();
+        expect(discordSync.enqueueMembershipRoleSync).not.toHaveBeenCalled();
+        expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
       });
 
       /**
@@ -802,7 +838,9 @@ describe('MembersService', () => {
 
           expect(txRepo.save).not.toHaveBeenCalled();
           expect(audit.record).not.toHaveBeenCalled();
-          expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+          expect(discordSync.enqueueScopedRoleSync).not.toHaveBeenCalled();
+          expect(discordSync.enqueueMembershipRoleSync).not.toHaveBeenCalled();
+          expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
         },
       );
 
@@ -1031,7 +1069,9 @@ describe('MembersService', () => {
         expect(audit.record).not.toHaveBeenCalled();
         expect(sessionContext.invalidate).not.toHaveBeenCalled();
         expect(sessionContext.invalidateSessions).not.toHaveBeenCalled();
-        expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+        expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
+        expect(discordSync.enqueueScopedRoleSync).not.toHaveBeenCalled();
+        expect(discordSync.enqueueMembershipRoleSync).not.toHaveBeenCalled();
         expect(discordSync.enqueueMemberBanRole).not.toHaveBeenCalled();
       };
 

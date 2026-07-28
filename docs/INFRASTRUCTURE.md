@@ -141,13 +141,16 @@ row's own channel/switch is set; otherwise the enqueue silently no-ops.
 | Event lead-time reminder | `event_announcement_channel_id` | channel embed | `event.reminder` | `event-reminder.scheduler.ts` sweep → `enqueueEventReminder` |
 | Audit entry mirrored | `audit_log_channel_id` | channel embed | `audit.log` | `audit.service.ts` `mirrorToDiscord` → `enqueueAuditLog` |
 | Member joined the guild — welcome | `welcome_channel_id`, **falls back to a DM when unset** | channel embed *or* DM embed | `welcome` | `discord-onboarding.service.ts` → `enqueueWelcome` |
-| Member joined the guild — role restore | — | role mutation | `role.sync` (or `member.ban_role`) | `discord-onboarding.service.ts` `restoreRoles` → `enqueueRoleSync` |
+| Member joined the guild — role restore | — | role mutation (**additive**) | `role.sync` (or `member.ban_role`) | `discord-onboarding.service.ts` `restoreRoles` → `enqueueRoleGrant` |
 | Application submitted — Applicant marker | — (the `Applicant` rank's role link) | role mutation | `role.assign` | `applications.service.ts` `submit` → `enqueueApplicantRole` |
-| Application approved — enlistment | — (the `Applicant` rank's role link) | role mutation | `role.remove`, then `role.sync` | `applications.service.ts` `approve` → `enqueueApplicantRole` + `enqueueRoleSync` |
-| Rank / role / medal changed | — | role mutation | `role.sync` | `members.service.ts` `syncMemberRoles` → `enqueueRoleSync` |
+| Application approved — enlistment | — (the `Applicant` rank's role link) | role mutation (**additive**) | `role.remove`, then `role.sync` | `applications.service.ts` `approve` → `enqueueApplicantRole` + `enqueueRoleGrant` |
+| Rank changed | — | role mutation (**scoped: 2 ids**) | `role.scoped_sync` | `members.service.ts` `changeRank` → `enqueueScopedRoleSync` |
+| Medal awarded / removed | — | role mutation (**scoped: 1 id**) | `role.scoped_sync` | `members.service.ts` `awardMedal` / `removeMedal` → `enqueueScopedRoleSync` |
+| App role changed (Admin/Moderator/…) | — (`membership_role_id`) | role mutation (**scoped: 1 id**) | `role.scoped_sync` | `members.service.ts` `changeRole` → `enqueueMembershipRoleSync` |
+| Derived from Discord | — | role mutation (scoped swap + **additive**) | `role.scoped_sync`, `role.sync` | `members.service.ts` `deriveFromDiscord` |
 | Member banned in the app | — (`ban_role_id`) | role mutation | `member.ban_role` | `members.service.ts` `ban` → `enqueueMemberBanRole` ⚠️ owner-gated, default off |
 | Rank/medal Discord role re-pointed | — | role mutation (bulk) | `role.relink_expand` → `role.relink_apply` | `ranks.service.ts` / `medals.service.ts` `fanOutRelink` → `enqueueRoleRelink` |
-| Manual "resync roles" | — | role mutation (bulk) | `role.sync` per member | `POST /api/discord/resync` → `resyncAll` |
+| Manual "resync roles" | — | role mutation (bulk, **destructive**) | `role.full_resync` per member | `POST /api/discord/resync` → `resyncAll` |
 
 Notes:
 
@@ -155,16 +158,28 @@ Notes:
   clamped to Discord's real embed limits before they are written to the outbox,
   so an over-long answer is shortened rather than becoming a job that fails on
   every retry forever.
-- Role removal is otherwise always reached through a reconcile (`role.sync` /
-  `role.relink_apply`) — the Applicant marker is the one `role.remove` with a
+- **How far each role job may reach is the load-bearing distinction (T-0209).**
+  `role.scoped_sync` converges ONLY the ids listed in its payload — a rank change
+  is two roles, a medal is one — so a mutation's blast radius is a property of
+  the action rather than of the catalogue's size. `role.sync` is **additive**: it
+  assigns what the roster says is owed and can never remove anything. Only
+  `role.full_resync`, produced solely by the operator's Resync button, strips
+  every managed role the roster cannot account for. `role.relink_apply` is a
+  two-id scoped sync. The Applicant marker is the one `role.remove` with a
   producer of its own, because there is no roster state to reconcile it against.
+- **No role is removed against an unread member.** When the gateway cannot list
+  someone's current roles, every mode does the additive half and removes nothing
+  — `fetchMember` returns null identically for "left the guild" and "Discord did
+  not answer", so stripping on that signal purged members over transient
+  failures.
 - **Roles flow BOTH ways at enlistment, and only there.** Every other producer
   treats the roster as the record and Discord as the copy. An approval reads the
   applicant's guild roles FIRST (`discord-role-adoption.service.ts`) and writes
   the rank and medals they already wear onto the new member row, because a
   regiment that ran on Discord before it ran on this dashboard has that history
-  recorded nowhere else — and the reconcile queued moments later would strip
-  every managed role the roster could not account for.
+  recorded nowhere else. The sync queued moments later is additive (T-0209), so
+  the carry-over is no longer the only thing standing between a veteran and
+  losing every decoration the roster had not caught up with.
 - An event's **server password is never announced**. It is gated behind an RSVP
   in the app, and the projection the announcement is built from has no field
   that could carry it.

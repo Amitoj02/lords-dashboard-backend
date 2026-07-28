@@ -157,31 +157,152 @@ describe('DiscordSyncService', () => {
       settingsRepo.findOne.mockResolvedValue(
         settings({ botEnabled: false, eventAnnouncementChannelId: 'evt-1' }),
       );
-      expect(await service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).toBeNull();
+      expect(await service.enqueueRoleGrant(REGIMENT, 'm1', USER_ID)).toBeNull();
       expect(await service.enqueueEventAnnounce(REGIMENT, EVENT_ID)).toBeNull();
       expect(jobsRepo.save).not.toHaveBeenCalled();
     });
   });
 
-  describe('enqueueRoleSync', () => {
-    it('enqueues a role.sync when enabled + syncRolesOnChange + linked', async () => {
+  describe('enqueueRoleGrant', () => {
+    it('enqueues an additive role sync when enabled + syncRolesOnChange + linked', async () => {
       settingsRepo.findOne.mockResolvedValue(settings());
-      const job = await service.enqueueRoleSync(REGIMENT, 'm1', USER_ID);
+      const job = await service.enqueueRoleGrant(REGIMENT, 'm1', USER_ID);
       expect(job).not.toBeNull();
       expect(jobsRepo.create).toHaveBeenCalledWith(
-        expect.objectContaining({ jobType: DiscordSyncJobType.RoleSync, regimentId: REGIMENT }),
+        expect.objectContaining({ jobType: DiscordSyncJobType.RoleGrant, regimentId: REGIMENT }),
       );
     });
 
     it('no-ops when the member has no linked Discord identity', async () => {
       settingsRepo.findOne.mockResolvedValue(settings());
-      expect(await service.enqueueRoleSync(REGIMENT, 'm1', null)).toBeNull();
+      expect(await service.enqueueRoleGrant(REGIMENT, 'm1', null)).toBeNull();
       expect(jobsRepo.save).not.toHaveBeenCalled();
     });
 
     it('no-ops when syncRolesOnChange is off', async () => {
       settingsRepo.findOne.mockResolvedValue(settings({ syncRolesOnChange: false }));
-      expect(await service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).toBeNull();
+      expect(await service.enqueueRoleGrant(REGIMENT, 'm1', USER_ID)).toBeNull();
+    });
+  });
+
+  /**
+   * T-0209. The producer that lets a caller say WHAT CHANGED instead of "this
+   * member changed" — which is the difference between a rank swap touching two
+   * roles and a rank swap stripping every managed role the roster cannot explain.
+   */
+  describe('enqueueScopedRoleSync', () => {
+    it('writes the scope onto the payload, de-duplicated and null-free', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+
+      const job = await service.enqueueScopedRoleSync(REGIMENT, 'm1', USER_ID, [
+        'old-rank-role',
+        null,
+        'new-rank-role',
+        'old-rank-role',
+        undefined,
+      ]);
+
+      expect(job).not.toBeNull();
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.RoleScopedSync,
+          regimentId: REGIMENT,
+          payload: {
+            memberId: 'm1',
+            discordUserId: USER_ID,
+            roleIds: ['old-rank-role', 'new-rank-role'],
+          },
+        }),
+      );
+    });
+
+    it('no-ops when nothing in scope is actually linked to a Discord role', async () => {
+      // An unlinked rank on both ends of a swap has nothing to converge, so the
+      // outbox must not carry a job that would do nothing.
+      settingsRepo.findOne.mockResolvedValue(settings());
+      expect(await service.enqueueScopedRoleSync(REGIMENT, 'm1', USER_ID, [null, null])).toBeNull();
+      expect(jobsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('no-ops when the member has no linked Discord identity', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      expect(await service.enqueueScopedRoleSync(REGIMENT, 'm1', null, ['r1'])).toBeNull();
+    });
+
+    it('no-ops when syncRolesOnChange is off', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ syncRolesOnChange: false }));
+      expect(await service.enqueueScopedRoleSync(REGIMENT, 'm1', USER_ID, ['r1'])).toBeNull();
+    });
+  });
+
+  describe('enqueueMembershipRoleSync', () => {
+    it('scopes an app-level role change to the Membership role alone', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ membershipRoleId: '222' }));
+
+      await service.enqueueMembershipRoleSync(REGIMENT, 'm1', USER_ID);
+
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.RoleScopedSync,
+          payload: expect.objectContaining({ roleIds: ['222'] }),
+        }),
+      );
+    });
+
+    it('no-ops for a regiment with no Membership role configured', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ membershipRoleId: null }));
+      expect(await service.enqueueMembershipRoleSync(REGIMENT, 'm1', USER_ID)).toBeNull();
+      expect(jobsRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The operator's "make the guild match the roster" button — and, since T-0209,
+   * the ONLY producer of a strip that is not bounded to named roles.
+   */
+  describe('resyncAll', () => {
+    const linked = [
+      { id: 'm1', discordIdentity: { discordUserId: '1' } },
+      { id: 'm2', discordIdentity: { discordUserId: '2' } },
+    ];
+
+    it('enqueues the destructive full-resync job type, one per linked member', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      membersRepo.find.mockResolvedValue(linked);
+
+      expect(await service.resyncAll(REGIMENT)).toBe(2);
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ jobType: DiscordSyncJobType.RoleFullResync }),
+      );
+    });
+
+    it('skips a member whose identity carries no snowflake', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings());
+      membersRepo.find.mockResolvedValue([...linked, { id: 'm3', discordIdentity: null }]);
+
+      expect(await service.resyncAll(REGIMENT)).toBe(2);
+    });
+
+    it('no-ops when the bot is disabled', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ botEnabled: false }));
+      expect(await service.resyncAll(REGIMENT)).toBe(0);
+      expect(jobsRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('STILL runs when syncRolesOnChange is off — it is not an automatic sync', async () => {
+      // That switch is labelled "push rank/role changes to Discord
+      // automatically". A human pressing Resync is neither automatic nor "on
+      // change", and this is the only path that clears a managed role the roster
+      // cannot account for — so gating it here would take the repair tool away
+      // with the automation, silently, since the endpoint just reports 0.
+      settingsRepo.findOne.mockResolvedValue(settings({ syncRolesOnChange: false }));
+      membersRepo.find.mockResolvedValue(linked);
+      expect(await service.resyncAll(REGIMENT)).toBe(2);
+    });
+
+    it('never throws — a failed lookup returns zero enqueued', async () => {
+      settingsRepo.findOne.mockRejectedValue(new Error('db down'));
+      await expect(service.resyncAll(REGIMENT)).resolves.toBe(0);
     });
   });
 
@@ -522,8 +643,8 @@ describe('DiscordSyncService', () => {
     });
 
     it('carries the outgoing role on the payload — it is unknowable at drain time', async () => {
-      // reconcileRoles recomputes the desired set from the CURRENT rank/medal
-      // rows, where the previous role no longer appears; if it is not on the
+      // The desired set is recomputed from the CURRENT rank/medal rows at drain
+      // time, and the previous role no longer appears there; if it is not on the
       // payload, nothing can ever strip it.
       settingsRepo.findOne.mockResolvedValue(settings());
       holdersQb.getCount.mockResolvedValue(3);
@@ -1018,7 +1139,7 @@ describe('DiscordSyncService', () => {
     it('never throws even when the settings lookup fails', async () => {
       settingsRepo.findOne.mockRejectedValue(new Error('db down'));
       await expect(service.enqueueMemberBanRole(REGIMENT, USER_ID, null)).resolves.toBeNull();
-      await expect(service.enqueueRoleSync(REGIMENT, 'm1', USER_ID)).resolves.toBeNull();
+      await expect(service.enqueueRoleGrant(REGIMENT, 'm1', USER_ID)).resolves.toBeNull();
     });
   });
 });

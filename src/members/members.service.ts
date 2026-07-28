@@ -299,6 +299,10 @@ export class MembersService {
     // Resolved BEFORE the row is mutated — the old rank is what decides whether
     // this move reads as a promotion or a demotion.
     const type = this.rankChangeType(member.rank ?? null, rank);
+    // Captured pre-mutation for the same reason (T-0209): the outgoing rank's
+    // Discord role is half the scope of the sync below, and once `member.rank`
+    // is reassigned there is nothing left to read it from.
+    const previousRankRoleId = member.rank?.discordRoleId ?? null;
     member.rankId = rank.id;
     member.rank = rank;
     await this.members.save(member);
@@ -314,7 +318,13 @@ export class MembersService {
       detail: dto.note ?? null,
     });
 
-    await this.syncMemberRoles(member);
+    // A rank change moves the rank role and NOTHING else (T-0209).
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [previousRankRoleId, rank.discordRoleId],
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -379,7 +389,16 @@ export class MembersService {
     // so the new role takes effect on their next request without a re-login.
     this.sessionContext.invalidate(member.discordIdentityId);
 
-    await this.syncMemberRoles(member);
+    // The ONLY Discord role an app-level role maps onto is the Membership role
+    // (T-0209). A move that stays inside the enrolled tiers — Moderator to Admin,
+    // say — therefore converges one id that was desired before and is desired
+    // after, and touches Discord not at all. This used to be a whole-member
+    // reconcile, which is how a promotion came to strip a member's decorations.
+    await this.discordSync.enqueueMembershipRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -415,7 +434,13 @@ export class MembersService {
       detail: `Awarded ${medal.title}`,
     });
 
-    await this.syncMemberRoles(member);
+    // Only this medal's role is in scope (T-0209).
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [medal.discordRoleId],
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -450,7 +475,15 @@ export class MembersService {
       detail: `Removed ${title}`,
     });
 
-    await this.syncMemberRoles(member);
+    // Only this medal's role is in scope (T-0209) — and because the worker
+    // re-derives what the member should hold at drain time, a member who still
+    // has ANOTHER award of the same repeatable medal keeps the role.
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [award.medal?.discordRoleId ?? null],
+    );
     return this.project(member, user, ownerMemberId);
   }
 
@@ -465,9 +498,9 @@ export class MembersService {
    * LEARNING what the guild already knows. Enlistment does that now (T-0202) —
    * but every approval taken before it did, and any taken while the gateway was
    * unreachable, enlisted a veteran at the entry rank with none of their
-   * decorations. The reconcile that follows then strips the roles that were the
-   * only place that history was written down. This is the repair, run one member
-   * at a time by someone who can see the result.
+   * decorations — and until T-0209 the reconcile that followed then stripped the
+   * roles that were the only place that history was written down. This is the
+   * repair, run one member at a time by someone who can see the result.
    *
    * ── WHAT IT WILL AND WILL NOT DO ────────────────────────────────────────────
    *  - PROMOTION ONLY. The member's current rank is the floor, so a derive can
@@ -596,9 +629,26 @@ export class MembersService {
     });
 
     // Push the derived state back out to Discord. Mostly a no-op by construction
-    // (these roles came FROM the guild), but a rank change leaves the member
-    // wearing their old rank role, and that is the reconcile's job to strip.
-    await this.syncMemberRoles(member);
+    // — these roles came FROM the guild — plus a targeted swap when the derive
+    // promoted them, so the superseded rank role does not linger.
+    //
+    // ⚠️ ADDITIVE, DELIBERATELY (T-0209). A derive adopts what the guild already
+    // says, and it adopts SELECTIVELY: a protected rank's role and any rank below
+    // the member's current one are excluded by design. Following it with a
+    // destructive reconcile — which is what this did — took those very roles back
+    // off, so the button advertised as "pull their history in" quietly deleted
+    // the parts of it the roster had declined to adopt.
+    await this.discordSync.enqueueScopedRoleSync(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+      [previousRank?.discordRoleId ?? null, rank?.discordRoleId ?? null],
+    );
+    await this.discordSync.enqueueRoleGrant(
+      member.regimentId,
+      member.id,
+      member.discordIdentity?.discordUserId ?? null,
+    );
 
     return {
       member: await this.project(member, user, ownerMemberId),
@@ -1003,18 +1053,18 @@ export class MembersService {
 
   // ── Internal helpers ─────────────────────────────────────────────────────────
 
-  /**
-   * Best-effort: enqueue a Discord role reconciliation for a member after a
-   * rank/role/medal change. No-ops when the bot is disabled or the member has no
-   * linked Discord identity; never throws (the enqueuer swallows failures).
-   */
-  private async syncMemberRoles(member: Member): Promise<void> {
-    await this.discordSync.enqueueRoleSync(
-      member.regimentId,
-      member.id,
-      member.discordIdentity?.discordUserId ?? null,
-    );
-  }
+  // ⚠️ THERE IS NO `syncMemberRoles` HELPER ANY MORE, AND ITS ABSENCE IS THE FIX
+  // (T-0209). Every mutation here used to funnel into one "sync this member"
+  // call, which threw away WHAT had changed at the enqueue boundary — leaving
+  // the worker no choice but to recompute the member's whole desired set and
+  // strip every managed role the roster could not account for. Awarding a medal
+  // and promoting a Moderator to Admin both ran that, so either could take a
+  // veteran's hand-granted decorations off.
+  //
+  // Each mutation now names its own scope at the call site
+  // (`enqueueScopedRoleSync` / `enqueueMembershipRoleSync`) or asks for the
+  // additive sync (`enqueueRoleGrant`). Bringing the helper back would re-open
+  // the bug, because a single shared call has nowhere to put the delta.
 
   /** Load a regiment-scoped, non-deleted member with its rank + identity, or 404. */
   private async loadMember(id: string, regimentId: string): Promise<Member> {

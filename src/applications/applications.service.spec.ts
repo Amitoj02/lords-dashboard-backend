@@ -96,7 +96,7 @@ describe('ApplicationsService', () => {
     enqueueApplicationSubmitted: jest.Mock;
     enqueueApplicationDecision: jest.Mock;
     enqueueApplicantRole: jest.Mock;
-    enqueueRoleSync: jest.Mock;
+    enqueueRoleGrant: jest.Mock;
   };
   // What the applicant's existing guild roles say they already are (T-0202).
   let roleAdoption: { resolveFromGuild: jest.Mock };
@@ -150,7 +150,7 @@ describe('ApplicationsService', () => {
       enqueueApplicationDecision: jest.fn().mockResolvedValue(null),
       // The Applicant marker (T-0192) and the enlistment role sync (T-0194).
       enqueueApplicantRole: jest.fn().mockResolvedValue(null),
-      enqueueRoleSync: jest.fn().mockResolvedValue(null),
+      enqueueRoleGrant: jest.fn().mockResolvedValue(null),
     };
     // Default: the applicant wears no rank/medal role worth carrying over, so
     // every pre-T-0202 expectation (enlist at Recruit, award nothing) still holds.
@@ -966,7 +966,7 @@ describe('ApplicationsService', () => {
       await service.submit(APPLICANT, validCreateDto());
 
       expect(txMembers.create).not.toHaveBeenCalled();
-      expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
     });
 
     it('APPROVE enqueues a role sync — the bug was that it enqueued nothing', async () => {
@@ -976,9 +976,9 @@ describe('ApplicationsService', () => {
       await service.approve(STAFF, 'app-1', {}, null);
 
       // The member id from the transaction, and the SNOWFLAKE — not the identity
-      // id. enqueueRoleSync returns null on a falsy third argument, so passing
+      // id. enqueueRoleGrant returns null on a falsy third argument, so passing
       // the wrong one would have been a silent no-op forever.
-      expect(discordSync.enqueueRoleSync).toHaveBeenCalledWith(
+      expect(discordSync.enqueueRoleGrant).toHaveBeenCalledWith(
         'regiment-1',
         'member-new',
         '900900900900900901',
@@ -998,7 +998,7 @@ describe('ApplicationsService', () => {
       );
       // Order matters: the marker comes off, then the roster's roles go on.
       const removeAt = discordSync.enqueueApplicantRole.mock.invocationCallOrder[0];
-      const syncAt = discordSync.enqueueRoleSync.mock.invocationCallOrder[0];
+      const syncAt = discordSync.enqueueRoleGrant.mock.invocationCallOrder[0];
       expect(removeAt).toBeLessThan(syncAt);
     });
 
@@ -1014,7 +1014,7 @@ describe('ApplicationsService', () => {
         'remove',
       );
       // The whole difference from approve: no membership, no rank, no sync.
-      expect(discordSync.enqueueRoleSync).not.toHaveBeenCalled();
+      expect(discordSync.enqueueRoleGrant).not.toHaveBeenCalled();
     });
 
     it('HOLD leaves the Applicant role on — the application is still in flight', async () => {
@@ -1034,7 +1034,7 @@ describe('ApplicationsService', () => {
       const result = await service.approve(STAFF, 'app-1', {}, null);
 
       expect(result.status).toBe(ApplicationStatus.Approved);
-      expect(discordSync.enqueueRoleSync).toHaveBeenCalledWith('regiment-1', 'member-new', null);
+      expect(discordSync.enqueueRoleGrant).toHaveBeenCalledWith('regiment-1', 'member-new', null);
     });
   });
 
@@ -1101,7 +1101,7 @@ describe('ApplicationsService', () => {
       await service.approve(STAFF, 'app-1', {}, null);
 
       const commitAt = dataSource.transaction.mock.invocationCallOrder[0];
-      const syncAt = discordSync.enqueueRoleSync.mock.invocationCallOrder[0];
+      const syncAt = discordSync.enqueueRoleGrant.mock.invocationCallOrder[0];
       expect(txMemberMedals.save).toHaveBeenCalledTimes(2);
       expect(commitAt).toBeLessThan(syncAt);
     });

@@ -23,8 +23,8 @@ import { Member } from '../members/entities/member.entity';
  * bare identity), but `members.role` DEFAULTS to `Applicant`, so a row written
  * without an explicit role would otherwise be granted membership by omission.
  *
- * A banned member never reaches here: the reconcile returns early on `bannedAt`
- * so a ban strip is not undone. That is deliberately NOT restated as a clause
+ * A banned member never reaches here: `desiredRoleIds` returns null on
+ * `bannedAt`, in every convergence mode, so a ban strip is not undone. That is deliberately NOT restated as a clause
  * below — a predicate that silently depended on a caller's early return would
  * be wrong the first time someone called it from anywhere else, so it is
  * checked here too.

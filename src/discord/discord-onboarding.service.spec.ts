@@ -27,7 +27,7 @@ describe('DiscordOnboardingService', () => {
   const gateway = { registerMemberJoinHandler: jest.fn() };
   const sync = {
     enqueueWelcome: jest.fn().mockResolvedValue(null),
-    enqueueRoleSync: jest.fn().mockResolvedValue(null),
+    enqueueRoleGrant: jest.fn().mockResolvedValue(null),
     enqueueMemberBanRole: jest.fn().mockResolvedValue(null),
   };
   const regiments = { find: jest.fn() };
@@ -72,7 +72,7 @@ describe('DiscordOnboardingService', () => {
 
     await service.onMemberJoin(SNOWFLAKE);
 
-    expect(sync.enqueueRoleSync).not.toHaveBeenCalled();
+    expect(sync.enqueueRoleGrant).not.toHaveBeenCalled();
     expect(sync.enqueueMemberBanRole).not.toHaveBeenCalled();
   });
 
@@ -81,7 +81,7 @@ describe('DiscordOnboardingService', () => {
 
     await service.onMemberJoin(SNOWFLAKE);
 
-    expect(sync.enqueueRoleSync).toHaveBeenCalledWith(REGIMENT, 'member-1', SNOWFLAKE);
+    expect(sync.enqueueRoleGrant).toHaveBeenCalledWith(REGIMENT, 'member-1', SNOWFLAKE);
   });
 
   it('gives a BANNED member the Ban role, never their rank and medals back', async () => {
@@ -92,7 +92,7 @@ describe('DiscordOnboardingService', () => {
     await service.onMemberJoin(SNOWFLAKE);
 
     expect(sync.enqueueMemberBanRole).toHaveBeenCalledWith(REGIMENT, SNOWFLAKE, expect.any(String));
-    expect(sync.enqueueRoleSync).not.toHaveBeenCalled();
+    expect(sync.enqueueRoleGrant).not.toHaveBeenCalled();
   });
 
   it('restores NOTHING to an actively suspended member', async () => {
@@ -103,7 +103,7 @@ describe('DiscordOnboardingService', () => {
 
     await service.onMemberJoin(SNOWFLAKE);
 
-    expect(sync.enqueueRoleSync).not.toHaveBeenCalled();
+    expect(sync.enqueueRoleGrant).not.toHaveBeenCalled();
     expect(sync.enqueueMemberBanRole).not.toHaveBeenCalled();
   });
 
@@ -114,7 +114,7 @@ describe('DiscordOnboardingService', () => {
 
     await service.onMemberJoin(SNOWFLAKE);
 
-    expect(sync.enqueueRoleSync).toHaveBeenCalledWith(REGIMENT, 'member-1', SNOWFLAKE);
+    expect(sync.enqueueRoleGrant).toHaveBeenCalledWith(REGIMENT, 'member-1', SNOWFLAKE);
   });
 
   it('suppresses a repeat join inside the dedupe window', async () => {
@@ -124,7 +124,7 @@ describe('DiscordOnboardingService', () => {
     await service.onMemberJoin(SNOWFLAKE);
 
     expect(sync.enqueueWelcome).toHaveBeenCalledTimes(1);
-    expect(sync.enqueueRoleSync).toHaveBeenCalledTimes(1);
+    expect(sync.enqueueRoleGrant).toHaveBeenCalledTimes(1);
   });
 
   it('never throws — a failing lookup must not reject into the gateway emitter', async () => {

@@ -302,22 +302,99 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .expect(409);
   });
 
-  it('enqueues a role sync on rank change and drains it successfully', async () => {
+  /**
+   * T-0209 — THE REPORTED BUG, END TO END.
+   *
+   * A member of a regiment that lived on Discord before it had a dashboard: they
+   * wear their rank role, a medal role the roster has no award row for, and a
+   * role nobody ever linked to anything. Promote them, and before this fix the
+   * whole-member reconcile took the medal role off — because the roster could
+   * not account for it — even though a rank change cannot legitimately touch a
+   * medal. The scoped sync moves the two rank roles and leaves the rest alone.
+   */
+  it('a rank change swaps ONLY the rank roles and leaves everything else on', async () => {
+    const OLD_RANK_ROLE = '900000000000000071';
+    const NEW_RANK_ROLE = '900000000000000072';
+    const UNACCOUNTED_MEDAL_ROLE = '900000000000000073';
+    const MANUAL_ROLE = '900000000000000074';
+
+    await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+
     const ranks = await request(server()).get('/api/ranks').set(bearer(ownerToken)).expect(200);
     const targetRank =
       ranks.body.find((r: { name: string }) => r.name === 'Captain') ?? ranks.body[0];
+    const member = await dataSource
+      .getRepository(Member)
+      .findOneOrFail({ where: { id: memberId } });
 
-    await request(server())
-      .post(`/api/members/${memberId}/rank`)
-      .set(bearer(ownerToken))
-      .send({ rankId: targetRank.id })
-      .expect(201);
+    // Link both ends of the swap, plus a medal whose role the member wears but
+    // holds no award for — the collateral the old reconcile destroyed.
+    const currentRank = await dataSource
+      .getRepository(Rank)
+      .findOneOrFail({ where: { id: member.rankId } });
+    await dataSource
+      .getRepository(Rank)
+      .update({ id: member.rankId }, { discordRoleId: OLD_RANK_ROLE });
+    await dataSource
+      .getRepository(Rank)
+      .update({ id: targetRank.id as string }, { discordRoleId: NEW_RANK_ROLE });
+    const medal = await dataSource.getRepository(Medal).findOneOrFail({ where: {} });
+    await dataSource
+      .getRepository(Medal)
+      .update({ id: medal.id }, { discordRoleId: UNACCOUNTED_MEDAL_ROLE });
+    // Restore the PRIOR values, not null — this catalogue is shared, and blanking
+    // a link some other suite had set would be its own cross-test bug.
+    const previousRankRole = currentRank.discordRoleId;
+    const targetRankRole = (targetRank as { discordRoleId?: string | null }).discordRoleId ?? null;
+    const medalRole = medal.discordRoleId;
 
-    const syncs = await jobsOfType(DiscordSyncJobType.RoleSync);
-    expect(syncs.length).toBeGreaterThanOrEqual(1);
-    await drainAll();
-    const drained = await jobsOfType(DiscordSyncJobType.RoleSync);
-    expect(drained.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+    // Seed what the member actually wears — an unseeded member has NO roles in
+    // the mock gateway, which would make every survival assertion vacuous.
+    await mockGateway.assignRole(APPLICANT_DISCORD_ID, OLD_RANK_ROLE);
+    await mockGateway.assignRole(APPLICANT_DISCORD_ID, UNACCOUNTED_MEDAL_ROLE);
+    await mockGateway.assignRole(APPLICANT_DISCORD_ID, MANUAL_ROLE);
+
+    // try/finally, not a trailing restore: these suites share one MySQL database,
+    // and a failed assertion that left `Captain` linked to a snowflake would hand
+    // the T-0204 block a role bound to two catalogue rows.
+    try {
+      await request(server())
+        .post(`/api/members/${memberId}/rank`)
+        .set(bearer(ownerToken))
+        .send({ rankId: targetRank.id })
+        .expect(201);
+
+      // The blast radius is visible in the payload rather than implied by the
+      // catalogue: exactly the two rank roles are in scope.
+      const syncs = await jobsOfType(DiscordSyncJobType.RoleScopedSync);
+      expect(syncs).toHaveLength(1);
+      expect((syncs[0].payload as { roleIds: string[] }).roleIds.sort()).toEqual([
+        OLD_RANK_ROLE,
+        NEW_RANK_ROLE,
+      ]);
+      // The destructive whole-member reconcile is unreachable from a mutation.
+      expect(await jobsOfType(DiscordSyncJobType.RoleFullResync)).toHaveLength(0);
+
+      await drainAll();
+      const drained = await jobsOfType(DiscordSyncJobType.RoleScopedSync);
+      expect(drained.every((j) => j.status === DiscordSyncJobStatus.Succeeded)).toBe(true);
+
+      const ref = await mockGateway.fetchMember(APPLICANT_DISCORD_ID);
+      expect(ref!.roles).toContain(NEW_RANK_ROLE);
+      expect(ref!.roles).not.toContain(OLD_RANK_ROLE);
+      // *** THE REGRESSION GUARD. *** Neither the unrecorded decoration nor the
+      // unmanaged role may be collateral of a promotion.
+      expect(ref!.roles).toContain(UNACCOUNTED_MEDAL_ROLE);
+      expect(ref!.roles).toContain(MANUAL_ROLE);
+    } finally {
+      await dataSource
+        .getRepository(Rank)
+        .update({ id: member.rankId }, { discordRoleId: previousRankRole });
+      await dataSource
+        .getRepository(Rank)
+        .update({ id: targetRank.id }, { discordRoleId: targetRankRole });
+      await dataSource.getRepository(Medal).update({ id: medal.id }, { discordRoleId: medalRole });
+    }
   });
 
   /**
@@ -339,7 +416,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
 
     expect((await jobsOfType(DiscordSyncJobType.Welcome)).length).toBeGreaterThanOrEqual(1);
     expect(await jobsOfType(DiscordSyncJobType.RoleAssign)).toHaveLength(0);
-    expect(await jobsOfType(DiscordSyncJobType.RoleSync)).toHaveLength(0);
+    expect(await jobsOfType(DiscordSyncJobType.RoleGrant)).toHaveLength(0);
 
     await drainAll();
     const welcomes = await jobsOfType(DiscordSyncJobType.Welcome);
@@ -358,7 +435,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       .send({ discordUserId: APPLICANT_DISCORD_ID })
       .expect(200);
 
-    const syncs = await jobsOfType(DiscordSyncJobType.RoleSync);
+    const syncs = await jobsOfType(DiscordSyncJobType.RoleGrant);
     expect(syncs).toHaveLength(1);
     expect((syncs[0].payload as { memberId: string }).memberId).toBe(memberId);
   });
@@ -838,7 +915,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       );
     });
 
-    it('APPROVE strips the marker and enqueues a full role reconcile', async () => {
+    it('APPROVE strips the marker and enqueues an ADDITIVE role sync', async () => {
       await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
       ownerToken = (await signIn(ownerProfile)).token;
 
@@ -850,7 +927,9 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
       // *** THE REGRESSION GUARD. *** Before this, approve() enqueued only the
       // decision DM: the member got the Recruit rank in the database and no
       // Discord role for it until an unrelated later change happened to sync.
-      const syncs = await jobsOfType(DiscordSyncJobType.RoleSync);
+      // T-0209: additive, so an approval can add the Recruit role it owes them
+      // without taking off a decoration the roster has not caught up with.
+      const syncs = await jobsOfType(DiscordSyncJobType.RoleGrant);
       expect(syncs.length).toBeGreaterThan(0);
       expect((syncs[0].payload as { discordUserId: string }).discordUserId).toBe(APPLICANT_TWO);
 
@@ -866,10 +945,11 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
    *
    * This is the case the roster-derived reconcile got wrong. The regiment ran on
    * Discord for years before it ran on this dashboard, so a veteran's rank and
-   * medals live ONLY as guild roles. `reconcileRoles` strips every managed role
-   * the roster cannot account for, and a brand-new member row accounts for
+   * medals live ONLY as guild roles. The reconcile stripped every managed role
+   * the roster could not account for, and a brand-new member row accounts for
    * nothing — so approval, the first reconcile of that member's life, wiped years
-   * of history off the person it had just admitted.
+   * of history off the person it had just admitted. Doubly guarded since T-0209:
+   * approval now drains as an ADDITIVE sync that cannot remove a role at all.
    *
    * The assertion that matters is the LAST one: after a full drain, the veteran
    * still wears every role they walked in with. Checking only the database rows

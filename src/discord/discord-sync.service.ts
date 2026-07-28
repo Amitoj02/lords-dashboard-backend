@@ -150,16 +150,88 @@ export class DiscordSyncService {
     };
   }
 
-  /** Enqueue a full role reconciliation for one member (rank/role/medal change). */
-  async enqueueRoleSync(
+  /**
+   * Enqueue an ADDITIVE role sync for one member: every managed role the roster
+   * says they should hold is assigned, and nothing is ever removed (T-0209).
+   *
+   * For the paths where the roster has just learned something and must not
+   * overrule the guild — enlistment approval, a rejoin, a Discord derive.
+   *
+   * ⚠️ This was `enqueueRoleSync`, and the job it wrote used to drain as a FULL
+   * destructive reconcile. The wire value of the job type is unchanged so rows
+   * already in the outbox drain under the new additive rule; only the name and
+   * the behaviour moved. Callers that genuinely need a role taken OFF use
+   * {@link enqueueScopedRoleSync} and name the roles.
+   */
+  async enqueueRoleGrant(
     regimentId: string,
     memberId: string,
     discordUserId: string | null,
   ): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
       if (!discordUserId || !s.syncRolesOnChange) return null;
-      return this.insertJob(regimentId, DiscordSyncJobType.RoleSync, { memberId, discordUserId });
+      return this.insertJob(regimentId, DiscordSyncJobType.RoleGrant, { memberId, discordUserId });
     });
+  }
+
+  /**
+   * Enqueue a sync BOUNDED to the given role ids (T-0209) — the shape every
+   * member mutation that can legitimately remove a role now uses.
+   *
+   * The caller names the roles their action could possibly have changed (a rank
+   * swap: the two rank roles; a medal award or removal: that medal's role; a
+   * member-role change: the Membership role). The worker decides the DIRECTION
+   * at drain time by re-deriving what the member should hold, so the caller
+   * never has to reason about whether a role also arrives via some other route —
+   * a repeatable medal awarded twice, or one snowflake linked to two catalogue
+   * rows — and cannot get it wrong.
+   *
+   * No-ops when nothing is in scope: a rank with no linked Discord role, or a
+   * regiment that has not configured a Membership role, has nothing to converge.
+   */
+  async enqueueScopedRoleSync(
+    regimentId: string,
+    memberId: string,
+    discordUserId: string | null,
+    roleIds: readonly (string | null | undefined)[],
+  ): Promise<DiscordSyncJob | null> {
+    return this.guarded(regimentId, async (s) => {
+      if (!discordUserId || !s.syncRolesOnChange) return null;
+      const scope = [...new Set(roleIds.filter((id): id is string => !!id))];
+      if (scope.length === 0) return null;
+      return this.insertJob(regimentId, DiscordSyncJobType.RoleScopedSync, {
+        memberId,
+        discordUserId,
+        roleIds: scope,
+      });
+    });
+  }
+
+  /**
+   * Enqueue the one role an app-level role change can move: the regiment's
+   * Membership role (T-0209).
+   *
+   * The Membership role is the ONLY Discord role `members.role` maps onto — it
+   * marks "enrolled", which Owner/Admin/Moderator/Member all are and Mercenary
+   * and Applicant are not (see `holdsMembershipRole`). So a promotion from
+   * Moderator to Admin converges a single id that is desired both before and
+   * after, i.e. it does nothing at all. That is the correct answer, and before
+   * this it was a whole-member reconcile that could strip a veteran's every
+   * decoration.
+   *
+   * Resolved from settings HERE rather than by the caller so the members module
+   * never has to know which column carries it.
+   */
+  async enqueueMembershipRoleSync(
+    regimentId: string,
+    memberId: string,
+    discordUserId: string | null,
+  ): Promise<DiscordSyncJob | null> {
+    const membershipRoleId = await this.guarded(regimentId, (s) =>
+      Promise.resolve(s.membershipRoleId),
+    );
+    if (!membershipRoleId) return null;
+    return this.enqueueScopedRoleSync(regimentId, memberId, discordUserId, [membershipRoleId]);
   }
 
   /**
@@ -638,6 +710,10 @@ export class DiscordSyncService {
           memberId: row.memberId,
           discordUserId: row.discordUserId,
           outgoingRoleId: p.outgoingRoleId,
+          // Carried since T-0209 so the drain is a two-id scoped sync rather
+          // than a whole-member reconcile. The cursor payload has always held
+          // it; it was simply never forwarded to the per-member job.
+          incomingRoleId: p.incomingRoleId,
         },
         job.batchId,
       );
@@ -745,7 +821,22 @@ export class DiscordSyncService {
     }
   }
 
-  /** Enqueue a role sync for every member with a linked Discord identity. */
+  /**
+   * Enqueue the FULL destructive reconcile for every member with a linked
+   * Discord identity — the operator's "make the guild match the roster" button.
+   *
+   * ⚠️ SINCE T-0209 THIS IS THE ONLY PRODUCER OF A STRIP THAT IS NOT BOUNDED TO
+   * NAMED ROLES. Every member mutation enqueues a scoped or additive sync
+   * instead, so an admin who wants managed roles the roster does not account for
+   * taken off has to ask for it here, deliberately, for the whole regiment.
+   *
+   * Gated on `botEnabled` ALONE, deliberately. `syncRolesOnChange` is labelled
+   * "push rank/role changes to Discord automatically" and governs the automatic
+   * producers; a human pressing Resync is neither automatic nor "on change". And
+   * since this became the only path that clears a managed role the roster cannot
+   * account for, letting that toggle disable it would take the repair tool away
+   * with the automation — silently, since the endpoint would just report 0.
+   */
   async resyncAll(regimentId: string): Promise<number> {
     try {
       const s = await this.getSettings(regimentId);
@@ -758,7 +849,7 @@ export class DiscordSyncService {
       for (const member of members) {
         const discordUserId = member.discordIdentity?.discordUserId;
         if (!discordUserId) continue;
-        const job = await this.insertJob(regimentId, DiscordSyncJobType.RoleSync, {
+        const job = await this.insertJob(regimentId, DiscordSyncJobType.RoleFullResync, {
           memberId: member.id,
           discordUserId,
         });
