@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "17d99fa5dfcf0aa954ea47241d2a73b8255cc254",
-  "lastSyncedAt": "2026-07-28T16:45:00Z",
-  "notesForNextSession": "T-0211 is the live thread: an edit_ranks_medals holder can now set the rank and medals of ANY member except themselves - peers, seniors and the regiment owner included - while role/suspend/ban keep the full hierarchy untouched. Open as a PR into dev in BOTH repos (feat/rank-medal-decoration-exemption in each; frontend task id T-0285). The one rule that must not be undone: in member-hierarchy.ts `denyReason`, the SELF check sits ABOVE the `isDecorationAction` short-circuit and the owner/outrank checks sit BELOW it. Self is now the ONLY target guard on changeRank/awardMedal/removeMedal/deriveFromDiscord, so reordering those three lines re-opens self-promotion to anyone holding the capability. Do not hand-write ModerationAction (it is Exclude<MemberAdminAction, DecorationAction>, which is what makes a NEW action fail closed into the strict rule) and do not widen OWNER_REFUSALS beyond ModerationAction. Note member-hierarchy.e2e now writes the shared seeded owner row and restores it in afterAll - if that suite ever crashes mid-run, re-create the e2e database rather than trusting the owner's rank. Still open from last session: T-0209 (merged to dev) left the resync fan-out with no batchId, so the only destructive path is also the one that cannot be cancelled or polled; T-0210 (what suspension and unban do to Discord roles - the owner deferred it, and applyBanRoleOnBan is still OFF in production so the whole ban->Discord path remains untested against the real guild). Still true: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank, and the first unattended 03:30 UTC backup run has not been confirmed.",
-  "nextIdCounter": 212,
+  "lastSyncedCommit": "8375880b546f6337a863ee9b348af186a2e9b02e",
+  "lastSyncedAt": "2026-07-29T22:20:00Z",
+  "notesForNextSession": "T-0212 is the live thread and it is HALF A TASK ON ITS OWN \u2014 the frontend half is lords-regiment-dashboard T-0286, open as feat/medal-precedence-ordering in both repos. A member's medals now come back in MEDAL CABINET order (medal.precedence ASC, then awardedAt DESC, then id ASC) instead of newest-award-first, and every award carries the catalogue `description` next to its per-award `detail`. Three things not to undo: (1) medalsByMember stays on `repo.find` \u2014 the unit spec's memberMedalRepo mock has no createQueryBuilder, so a QueryBuilder rewrite TypeErrors across the whole roster suite; (2) both tiebreakers stay, because precedence defaults to 0, is not unique, and repeatable medals always tie on it; (3) removeMedal's own `order: { awardedAt: 'DESC' }` is SEMANTIC (it picks which repeated award to delete) \u2014 a find-and-replace on that string changes which row gets removed. The ordering is now a stated API contract because no client sorts: roster, profile, dashboard and the admin dialog chips all render MemberDto.medals verbatim. Still open from before: T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts `denyReason`); T-0209 left the resync fan-out with no batchId, so the only destructive path is also the one that cannot be cancelled or polled; T-0210 (what suspension and unban do to Discord roles) is still deferred and applyBanRoleOnBan is still OFF in production. Still true: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank and the first unattended 03:30 UTC backup run has not been confirmed. Housekeeping: the live medal cabinet has a medal whose description reads 'Please update the description' \u2014 that text now shows on every holder's profile, so it is worth an owner edit on /admin/ranks.",
+  "nextIdCounter": 213,
   "connections": [],
   "tasks": [
     {
@@ -14954,6 +14954,98 @@
           "to": "review",
           "by": "claude",
           "note": "CI on #69 caught a flake I introduced: the widened permittedActions sweep exceeded Jest's 5s default on the slower runner (it passed on the pull_request run and failed on the push run for the same commit). Given an explicit 60s budget rather than fewer targets - the exhaustiveness is the test."
+        }
+      ]
+    },
+    {
+      "id": "T-0212",
+      "title": "Order a member's medals by the cabinet, and send the medal's own description",
+      "summary": "Owner report: the roster, the profile's Honours & Decorations panel and the dashboard's Decorations strip listed a member's medals oldest-award-first, so the same five medals came out in a different order on every member and nothing lined up with the Medal Cabinet on /admin/ranks. `medalsByMember` was ordering `{ awardedAt: 'DESC' }`; it now orders `{ medal: { precedence: 'ASC' }, awardedAt: 'DESC', id: 'ASC' }` on the same `find` (TypeORM 0.3.31 reuses the join `relations: { medal: true }` already pushed, so it stays one LEFT JOIN and the unit spec's repository mock keeps working \u2014 a QueryBuilder rewrite would have broken every test that reaches `project()`). Both tiebreakers are load-bearing: `precedence` defaults to 0 and is rewritten wholesale by the drag-reorder, and medals are repeatable, so two awards of the SAME medal always tie. This is the only place a MemberMedalSummary is built, so the roster, profile, dashboard, admin dialog chips and the GDPR self-export all inherit it. MemberMedalSummary also gains `description` \u2014 the CATALOGUE text (what the medal is awarded FOR, identical for every holder, the same string /admin/ranks edits) \u2014 alongside the existing per-award `detail` citation. Both are sent; they are two fields, not a rename. `removeMedal`'s own `order: { awardedAt: 'DESC' }` is deliberately untouched: there it picks WHICH award to delete and is semantics, not display.",
+      "status": "review",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "roster",
+      "feature": "medals",
+      "subfeature": "award-display",
+      "repo": "",
+      "paths": [
+        "src/members/members.service.ts",
+        "src/members/dto/member.dto.ts",
+        "src/members/members.service.spec.ts",
+        "test/mvp.e2e-spec.ts"
+      ],
+      "dependsOn": [
+        "T-0003",
+        "T-0204"
+      ],
+      "blocks": [
+        "lords-regiment-dashboard:T-0286"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "unit: medalsByMember passes the precedence-ASC order with both tiebreakers",
+          "status": "passed"
+        },
+        {
+          "desc": "unit: the catalogue description and the per-award citation both survive the projection, under distinct names",
+          "status": "passed"
+        },
+        {
+          "desc": "unit: a medal with no catalogue description projects null, and the key is still present",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e (real MySQL): awarding a junior medal LAST still returns it last \u2014 cabinet order beats calendar order",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: the award carries the catalogue description, and it differs from the citation",
+          "status": "passed"
+        },
+        {
+          "desc": "the e2e assertion was proved to discriminate: restoring `order: { awardedAt: 'DESC' }` fails it",
+          "status": "passed"
+        },
+        {
+          "desc": "full suite green: 1050 unit + 155 e2e, lint + prettier clean",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "This is the repo's FIRST use of TypeORM nested relation ordering (`order: { medal: { precedence: 'ASC' } }`); every other `order:` here is flat. It works because `relations: { medal: true }` already pushed the join and buildOrder reuses that alias \u2014 verified against the installed 0.3.31 source and against real MySQL in mvp.e2e. Adding `take`/`skip` to this find would move it onto TypeORM's distinct-alias pagination path, where relation ordering behaves differently.",
+          "status": "open",
+          "notedAt": "2026-07-29T22:20:00Z"
+        },
+        {
+          "desc": "`removeMedal` (members.service.ts) carries its own `order: { awardedAt: 'DESC' }` which selects WHICH repeated award to delete. It looks like the ordering this task changed and is not \u2014 a find-and-replace across the file silently changes which row a removal deletes.",
+          "status": "open",
+          "notedAt": "2026-07-29T22:20:00Z"
+        },
+        {
+          "desc": "The medal ORDER is now a documented API contract (MemberDto.medals ApiProperty), because no client sorts: roster, profile, dashboard and the admin dialog chips all render the array verbatim. Anything that rebuilds this list without the order silently reverts four screens at once.",
+          "status": "open",
+          "notedAt": "2026-07-29T22:20:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not put `precedence` on MemberMedalSummary. Exposing it would invite a client-side sort and let four render sites drift; ordering stays decided once, on the server.",
+        "Did not touch the medal catalogue read (medals.service.findAll) \u2014 it was already precedence-ASC, which is the order this change mirrors.",
+        "Did not add the catalogue description to the hf-medal tooltip on the roster/dashboard tiles; only the profile panel asked for descriptive text.",
+        "Did not backfill the seeded medal descriptions on production \u2014 the live cabinet is admin-authored and one medal there still reads 'Please update the description'. That is an owner edit on /admin/ranks, not a code change."
+      ],
+      "lastTouchedCommit": "8375880b546f6337a863ee9b348af186a2e9b02e",
+      "createdAt": "2026-07-29T22:20:00Z",
+      "updatedAt": "2026-07-29T22:20:00Z",
+      "history": [
+        {
+          "at": "2026-07-29T22:20:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "medal ordering + catalogue description on the award projection; PR into dev"
         }
       ]
     }
