@@ -374,6 +374,81 @@ describe('MembersService', () => {
       expect(medal.imageUrl).toBeNull();
       expect(medal.glyph).toBe('S');
     });
+
+    it('carries the catalogue description alongside the per-award citation', async () => {
+      // Two different things that both read as "the medal's description": what
+      // the medal is awarded FOR (catalogue, same for every holder) and why
+      // THIS award was given. The profile page shows the former, so both have
+      // to survive the projection under distinct names.
+      const member = buildMember();
+      memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
+      memberMedalRepo.find.mockResolvedValue([
+        {
+          id: 'award-3',
+          memberId: 'member-1',
+          medalId: 'medal-3',
+          detail: 'Derived from their existing Discord roles',
+          awardedAt: new Date('2024-05-03T00:00:00.000Z'),
+          medal: {
+            title: 'Marksman',
+            glyph: 'M',
+            imageUrl: null,
+            description: 'Top 5% accuracy across three or more events.',
+          },
+        },
+      ]);
+
+      const medal = (await service.findAll({ page: 1, limit: 20, skip: 0 }, user())).data[0]
+        .medals[0];
+      expect(medal.description).toBe('Top 5% accuracy across three or more events.');
+      expect(medal.detail).toBe('Derived from their existing Discord roles');
+    });
+
+    it('nulls the description rather than dropping it when the medal has none', async () => {
+      // `description` is nullable in the catalogue. Coalescing to null (not
+      // leaving it undefined) keeps the key in the JSON, so the client can tell
+      // "no description" apart from "this build predates the field".
+      const member = buildMember();
+      memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
+      memberMedalRepo.find.mockResolvedValue([
+        {
+          id: 'award-4',
+          memberId: 'member-1',
+          medalId: 'medal-4',
+          detail: null,
+          awardedAt: new Date('2024-05-04T00:00:00.000Z'),
+          medal: { title: 'Nameless', glyph: 'N', imageUrl: null, description: null },
+        },
+      ]);
+
+      const medal = (await service.findAll({ page: 1, limit: 20, skip: 0 }, user())).data[0]
+        .medals[0];
+      expect(medal.description).toBeNull();
+      expect('description' in medal).toBe(true);
+    });
+
+    it('orders awards by the medal cabinet, with a total-order tiebreak', async () => {
+      // The roster, the profile and the dashboard all render this array
+      // verbatim — no client sorts — so the ordering here IS the display order
+      // (T-0212). It must be the cabinet's `precedence`, not the calendar.
+      //
+      // Both tiebreaks are load-bearing: precedence defaults to 0 and is not
+      // unique, and medals are repeatable, so two awards of the SAME medal
+      // always tie on precedence. Without `awardedAt` + `id` the roster can
+      // reshuffle between two identical requests.
+      const member = buildMember();
+      memberQb.getManyAndCount.mockResolvedValue([[member], 1]);
+      memberMedalRepo.find.mockResolvedValue([]);
+
+      await service.findAll({ page: 1, limit: 20, skip: 0 }, user());
+
+      expect(memberMedalRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          relations: { medal: true },
+          order: { medal: { precedence: 'ASC' }, awardedAt: 'DESC', id: 'ASC' },
+        }),
+      );
+    });
   });
 
   describe('findOne', () => {
