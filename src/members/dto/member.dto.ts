@@ -32,7 +32,21 @@ export class MemberMedalSummary {
   })
   imageUrl: string | null;
 
-  @ApiProperty({ nullable: true })
+  @ApiProperty({
+    nullable: true,
+    description:
+      'The CATALOGUE description — what the medal is awarded FOR, copied from the ' +
+      'medals row and identical for every holder. This is what a viewer reads to ' +
+      'learn what it takes to earn the medal. Not to be confused with `detail`.',
+  })
+  description: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      "This award's own citation — why THIS member received it on THIS occasion. " +
+      'Per-award, so two holders of the same medal have different `detail`.',
+  })
   detail: string | null;
 
   @ApiProperty({ description: 'ISO timestamp the medal was awarded' })
@@ -151,7 +165,10 @@ export class MemberDto {
 
   @ApiProperty({
     type: [MemberMedalSummary],
-    description: "The member's medal awards (repeatable — same medal may appear more than once)",
+    description:
+      "The member's medal awards (repeatable — same medal may appear more than once), " +
+      'ordered by the medal cabinet: `precedence` ascending, then newest award first. ' +
+      'Clients render this array as delivered — the order is part of the contract.',
   })
   medals: MemberMedalSummary[];
 

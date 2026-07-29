@@ -1253,7 +1253,21 @@ export class MembersService {
 
   /**
    * One query mapping memberId -> its medal award summaries (medal joined), for
-   * the given page of members. Ordered newest award first. Empty map for [].
+   * the given page of members. Empty map for [].
+   *
+   * ORDERED BY THE MEDAL CABINET, NOT BY THE CALENDAR (T-0212). Every surface
+   * that renders a member's medals — the roster row, the profile's Honours &
+   * Decorations panel, the dashboard's Decorations strip and the admin dialog's
+   * chips — renders this array verbatim, so this ordering IS the display order
+   * and no client sorts. Sorting by `medal.precedence` ASC is the same order
+   * `medals.findAll` gives the cabinet on /admin/ranks, which makes a member's
+   * decorations read senior-first and line up column-wise across roster rows.
+   *
+   * The two tiebreakers are load-bearing, not decoration. `precedence` is
+   * neither unique nor stable (it defaults to 0 and the drag-reorder rewrites
+   * it), and medals are repeatable, so two awards of the SAME medal always tie.
+   * `awardedAt` then `id` make the sort total, which is what keeps the roster
+   * from reshuffling between two requests.
    */
   private async medalsByMember(memberIds: string[]): Promise<Map<string, MemberMedalSummary[]>> {
     const map = new Map<string, MemberMedalSummary[]>();
@@ -1262,7 +1276,7 @@ export class MembersService {
     const awards = await this.memberMedals.find({
       where: { memberId: In(memberIds) },
       relations: { medal: true },
-      order: { awardedAt: 'DESC' },
+      order: { medal: { precedence: 'ASC' }, awardedAt: 'DESC', id: 'ASC' },
     });
 
     for (const award of awards) {
@@ -1273,6 +1287,7 @@ export class MembersService {
         title: award.medal.title,
         glyph: award.medal.glyph,
         imageUrl: award.medal.imageUrl,
+        description: award.medal.description ?? null,
         detail: award.detail,
         awardedAt: award.awardedAt.toISOString(),
       };

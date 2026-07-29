@@ -205,6 +205,34 @@ describe('MVP core loop (e2e)', () => {
       second.body.medals.filter((m: { medalId: string }) => m.medalId === medalId),
     ).toHaveLength(2);
 
+    // 5b) A member's medals come back in MEDAL CABINET order, not award order
+    // (T-0212). /api/medals is already precedence-ASC, so index 3 is junior to
+    // index 0 — awarding it LAST makes the calendar and the cabinet disagree,
+    // and the response has to follow the cabinet. Under the old
+    // `order: { awardedAt: 'DESC' }` this array came back junior-medal-first.
+    const juniorMedal = medals.body[3] as { id: string; description: string | null };
+    expect(juniorMedal.description).toBeTruthy(); // the seeded catalogue describes every medal
+    const withJunior = await request(server)
+      .post(`/api/members/${memberId}/medals`)
+      .set(bearer(owner.token))
+      .send({ medalId: juniorMedal.id, detail: 'For the redoubt at Ostend' })
+      .expect(201);
+
+    const awardedOrder = withJunior.body.medals.map((m: { medalId: string }) => m.medalId);
+    expect(awardedOrder).toEqual([medalId, medalId, juniorMedal.id]);
+
+    // Each award carries BOTH the catalogue description (what the medal is
+    // awarded FOR — the same text /admin/ranks shows, identical for every
+    // holder) and its own citation (why THIS member got THIS one). The profile
+    // page reads `description`; they must not be conflated.
+    const juniorAward = withJunior.body.medals[2] as {
+      description: string | null;
+      detail: string | null;
+    };
+    expect(juniorAward.description).toBe(juniorMedal.description);
+    expect(juniorAward.detail).toBe('For the redoubt at Ostend');
+    expect(juniorAward.description).not.toBe(juniorAward.detail);
+
     const ranks = await request(server).get('/api/ranks').set(bearer(owner.token)).expect(200);
     const captainId = ranks.body.find((r: { name: string }) => r.name === 'Captain').id as string;
     const ranked = await request(server)
