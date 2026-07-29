@@ -15045,7 +15045,7 @@
           "from": null,
           "to": "review",
           "by": "claude",
-          "note": "medal ordering + catalogue description on the award projection; PR into dev"
+          "note": "medal ordering + catalogue description on the award projection; PR into dev. PRs open into dev: this repo #70, frontend [lords-regiment-dashboard #60](https://github.com/Amitoj02/lords-regiment-dashboard/pull/60). Merge this one FIRST \u2014 the frontend renders a blank description until the API sends it."
         }
       ]
     }
