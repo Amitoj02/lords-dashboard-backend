@@ -97,12 +97,14 @@ export class CreateApplicationDto {
   @Equals(true, { message: 'interestConfirmed must be true' })
   interestConfirmed: boolean;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
+    minLength: 1,
     maxLength: 500,
-    description: 'Optional note if a representative/guest is applying on someone’s behalf.',
+    description: 'Why do you want to join the Lords Regiment?',
+    example: 'I have played alongside the regiment for months and want to make it official.',
   })
-  @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(500)
-  representativeNote?: string;
+  representativeNote: string;
 }

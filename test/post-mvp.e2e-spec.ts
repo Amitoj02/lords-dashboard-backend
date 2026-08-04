@@ -761,6 +761,7 @@ describe('Post-MVP feature modules (e2e)', () => {
       preferredClasses: 'Line Infantry',
       skillsToImprove: 'Aim',
       interestConfirmed: true,
+      representativeNote: 'To fight in a line that actually holds.',
     };
     let selfToken: string;
     let appId: string;
@@ -815,6 +816,36 @@ describe('Post-MVP feature modules (e2e)', () => {
       await request(server()).get('/api/applications').set(bearer(selfToken)).expect(403);
     });
 
+    /**
+     * "Why do you want to join the Lords Regiment?" is REQUIRED at intake
+     * (T-0213) — it used to be an optional note to the recruiting officer. This
+     * runs before the submit case below because the identity may hold only one
+     * open application, and a rejected submit must leave no row behind.
+     */
+    it('rejects a submission with no answer to "why do you want to join" (T-0213)', async () => {
+      const { representativeNote: _omitted, ...withoutNote } = validApp;
+
+      await request(server())
+        .post('/api/applications')
+        .set(bearer(selfToken))
+        .send(withoutNote)
+        .expect(400);
+
+      // An empty string is not an answer either — @MinLength(1) catches it.
+      await request(server())
+        .post('/api/applications')
+        .set(bearer(selfToken))
+        .send({ ...validApp, representativeNote: '' })
+        .expect(400);
+
+      // Neither attempt created anything.
+      const mine = await request(server())
+        .get('/api/applications/mine')
+        .set(bearer(selfToken))
+        .expect(200);
+      expect(mine.body.application).toBeNull();
+    });
+
     it('submit → GET /mine reflects the pending application', async () => {
       const created = await request(server())
         .post('/api/applications')
@@ -829,6 +860,8 @@ describe('Post-MVP feature modules (e2e)', () => {
         .expect(200);
       expect(mine.body.application.status).toBe('pending');
       expect(mine.body.application.inGameName).toBe('SelfService1');
+      // The answer round-trips to the applicant's own projection.
+      expect(mine.body.application.representativeNote).toBe(validApp.representativeNote);
     });
 
     it('PATCH /mine edits the pending application', async () => {
@@ -1061,6 +1094,7 @@ describe('Post-MVP feature modules (e2e)', () => {
       preferredClasses: 'Line Infantry',
       skillsToImprove: 'Aim',
       interestConfirmed: true,
+      representativeNote: 'To fight in a line that actually holds.',
     };
     let mercToken: string;
     let appId: string;

@@ -156,6 +156,7 @@ describe('MVP core loop (e2e)', () => {
         preferredClasses: 'Line Infantry',
         skillsToImprove: 'Melee duelling',
         interestConfirmed: true,
+        representativeNote: 'To fight in a line that actually holds.',
       })
       .expect(201);
     const applicationId = created.body.id as string;

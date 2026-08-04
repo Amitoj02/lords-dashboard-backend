@@ -799,7 +799,7 @@ describe('DiscordSyncService', () => {
       howFound: 'Discord',
       preferredClasses: 'Line',
       skillsToImprove: 'Melee',
-      representativeNote: null,
+      representativeNote: 'I want to fight in a line that holds.',
       ...overrides,
     });
 
@@ -826,17 +826,22 @@ describe('DiscordSyncService', () => {
         'How they found us',
         'Preferred classes',
         'Wants to improve',
+        'Why do you want to join the Lords Regiment?',
       ]);
     });
 
-    it('OMITS an empty optional answer rather than rendering a blank field', async () => {
-      // Discord rejects a field with an empty value (50035), so a blank optional
-      // answer would fail the whole post — omission is correctness, not polish.
+    it('OMITS a blank answer rather than rendering an empty field', async () => {
+      // Discord rejects a field with an empty value (50035), so a blank answer
+      // would fail the whole post — omission is correctness, not polish. Intake
+      // requires this answer now (T-0213), but applications submitted before
+      // that carry null and the composer must still survive them.
       settingsRepo.findOne.mockResolvedValue(settings({ enlistmentChannelId: 'enl-1' }));
 
       await service.enqueueApplicationSubmitted(REGIMENT, summary({ representativeNote: '   ' }));
 
-      expect((savedEmbed().fields ?? []).map((f) => f.name)).not.toContain('Representative note');
+      expect((savedEmbed().fields ?? []).map((f) => f.name)).not.toContain(
+        'Why do you want to join the Lords Regiment?',
+      );
     });
 
     it('degrades to NO thumbnail when the applicant has no avatar', async () => {
