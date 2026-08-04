@@ -50,7 +50,7 @@ const validCreateDto = (): CreateApplicationDto => ({
   preferredClasses: 'Line Infantry, Rifleman',
   skillsToImprove: 'Melee duelling.',
   interestConfirmed: true,
-  representativeNote: undefined,
+  representativeNote: 'I want to fight in a line that actually holds.',
 });
 
 const baseApplication = (overrides: Partial<Application> = {}): Application => ({

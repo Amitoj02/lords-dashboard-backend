@@ -641,7 +641,7 @@ the OAuth session, not the form.
 | `platform` | enum `platform` NOT NULL | unified from loose string |
 | `applicant_type` | enum `applicant_type` NOT NULL DEFAULT `'Applicant'` | |
 | `timezone` | varchar(40) NULL | IANA tz |
-| `why_join` | text NOT NULL | min 30, max 800 |
+| `representative_note` | varchar(500) NULL | **"Why do you want to join the Lords Regiment?"** — required at intake since T-0213; nullable because pre-T-0213 rows (when it was an optional representative note) have no answer |
 | `how_found` | enum `how_found` NOT NULL | stored enum value (the human label is derived in code — no stored `source` column, which would be a 3NF transitive dependency) |
 | `prior_experience` | varchar(600) NULL | optional |
 | `age_confirmed` | boolean NOT NULL DEFAULT false | required true (≥16 consent) |
@@ -657,6 +657,12 @@ the OAuth session, not the form.
 | `submitted_at` | timestamp NOT NULL | |
 | `decided_at` | timestamp NULL | |
 | `created_at` / `updated_at` | timestamp | |
+
+> ⚠️ **This table has known drift from T-0039**, which reshaped intake to the live "Application for
+> Enlistment" form. `applications.entity.ts` is authoritative: T-0039 dropped `platform`, `timezone`,
+> `prior_experience`, `age_confirmed`/`age_confirmed_at`, turned `how_found` from an enum into free
+> text, and added `current_regiment`, `preferred_classes`, `skills_to_improve` and
+> `interest_confirmed`. The rows above have not been re-synced — see T-0214.
 
 Indexes: `INDEX(regiment_id, status)`, `INDEX(discord_identity_id)`.
 Cardinality: a Discord identity may submit **many** applications over time (decline → reapply), so it

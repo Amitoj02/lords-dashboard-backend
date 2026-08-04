@@ -17,7 +17,7 @@ import { Regiment } from '../../regiments/entities/regiment.entity';
  * A recruitment application, shaped to the regiment's live "Application for
  * Enlistment" form (T-0039): in-game name, current regiment, how they found us
  * (free text), preferred classes, skills to improve, an interest/enlist-in-game
- * confirmation, and an optional representative/guest note. Identity 1—*
+ * confirmation, and why they want to join. Identity 1—*
  * applications; *—0..1 member on approval. Age is a client-side terms
  * attestation only and is intentionally NOT stored here (T-0039 Q2).
  */
@@ -87,7 +87,13 @@ export class Application extends ShortIdEntity {
   @Column({ default: false })
   interestConfirmed: boolean;
 
-  /** Optional note when a representative/guest applies on someone's behalf. */
+  /**
+   * "Why do you want to join the Lords Regiment?" — required at intake since
+   * T-0213. The
+   * column stays nullable because applications submitted before that (when this
+   * was an optional representative/guest note) have no answer, and the property
+   * keeps its original name so the rename needed no schema migration.
+   */
   @Column({ type: 'varchar', length: 500, nullable: true })
   representativeNote: string | null;
 

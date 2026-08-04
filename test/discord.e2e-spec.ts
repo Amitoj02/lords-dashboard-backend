@@ -118,6 +118,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
         preferredClasses: 'Line Infantry',
         skillsToImprove: 'Melee',
         interestConfirmed: true,
+        representativeNote: 'To fight in a line that actually holds.',
       })
       .expect(201);
     ownerToken = (await signIn(ownerProfile)).token;
@@ -469,6 +470,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
           preferredClasses: 'Line Infantry',
           skillsToImprove: 'Melee',
           interestConfirmed: true,
+          representativeNote: 'To fight in a line that actually holds.',
         })
         .expect(201);
 
@@ -557,6 +559,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
           // Exactly the DTO ceiling — one more character is a 400.
           skillsToImprove: 'M'.repeat(1000),
           interestConfirmed: true,
+          representativeNote: 'To fight in a line that actually holds.',
         })
         .expect(201);
 
@@ -646,6 +649,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
           preferredClasses: 'Line Infantry',
           skillsToImprove: 'Melee',
           interestConfirmed: true,
+          representativeNote: 'To fight in a line that actually holds.',
         })
         .expect(201);
       applicationId = created.body.id as string;
@@ -905,6 +909,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
           preferredClasses: 'Line Infantry',
           skillsToImprove: 'Melee',
           interestConfirmed: true,
+          representativeNote: 'To fight in a line that actually holds.',
         })
         .expect(201);
       applicationId = created.body.id as string;
@@ -1036,6 +1041,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
           preferredClasses: 'Line Infantry',
           skillsToImprove: 'Nothing, frankly',
           interestConfirmed: true,
+          representativeNote: 'To fight in a line that actually holds.',
         })
         .expect(201);
 
@@ -1134,6 +1140,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
           preferredClasses: 'Line Infantry',
           skillsToImprove: 'Nothing',
           interestConfirmed: true,
+          representativeNote: 'To fight in a line that actually holds.',
         })
         .expect(201);
       ownerToken = (await signIn(ownerProfile)).token;
