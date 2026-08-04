@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "8375880b546f6337a863ee9b348af186a2e9b02e",
-  "lastSyncedAt": "2026-07-29T22:20:00Z",
-  "notesForNextSession": "T-0212 is the live thread and it is HALF A TASK ON ITS OWN \u2014 the frontend half is lords-regiment-dashboard T-0286, open as feat/medal-precedence-ordering in both repos. A member's medals now come back in MEDAL CABINET order (medal.precedence ASC, then awardedAt DESC, then id ASC) instead of newest-award-first, and every award carries the catalogue `description` next to its per-award `detail`. Three things not to undo: (1) medalsByMember stays on `repo.find` \u2014 the unit spec's memberMedalRepo mock has no createQueryBuilder, so a QueryBuilder rewrite TypeErrors across the whole roster suite; (2) both tiebreakers stay, because precedence defaults to 0, is not unique, and repeatable medals always tie on it; (3) removeMedal's own `order: { awardedAt: 'DESC' }` is SEMANTIC (it picks which repeated award to delete) \u2014 a find-and-replace on that string changes which row gets removed. The ordering is now a stated API contract because no client sorts: roster, profile, dashboard and the admin dialog chips all render MemberDto.medals verbatim. Still open from before: T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts `denyReason`); T-0209 left the resync fan-out with no batchId, so the only destructive path is also the one that cannot be cancelled or polled; T-0210 (what suspension and unban do to Discord roles) is still deferred and applyBanRoleOnBan is still OFF in production. Still true: BACKUP_HEARTBEAT_URL in ~/lords/backup.env is blank and the first unattended 03:30 UTC backup run has not been confirmed. Housekeeping: the live medal cabinet has a medal whose description reads 'Please update the description' \u2014 that text now shows on every holder's profile, so it is worth an owner edit on /admin/ranks.",
-  "nextIdCounter": 213,
+  "lastSyncedCommit": "034462e1ac573dd632231d986193ca5216d0aad7",
+  "lastSyncedAt": "2026-08-04T00:30:00Z",
+  "notesForNextSession": "T-0213 is the live thread and it is HALF A TASK ON ITS OWN \u2014 the frontend half is lords-regiment-dashboard's companion commit, open as feat/why-join-required in BOTH repos (PRs into dev, not main). The optional \"Note to the recruiting officer\" is now the REQUIRED question \"Why do you want to join the Lords Regiment?\". Four things not to undo: (1) the property is still `representativeNote` and the column is still `representative_note` \u2014 the user explicitly chose a labels-only rename so there is NO migration, so do not \"finish the job\" by renaming it to whyJoin without asking; (2) the column stays NULLable even though intake requires it, because applications submitted before this have no answer \u2014 the admin page's @if guard and the embed composer's blank-field omission are what keep those rows renderable, and Discord rejects an empty field value (50035) so the omission is correctness, not polish; (3) UpdateMyApplicationDto is PartialType(CreateApplicationDto), so PATCH /applications/mine stays optional per-field \u2014 that is deliberate; (4) the READ models on the frontend keep `representativeNote?` for the same legacy-null reason, only CreateApplicationPayload went required. T-0214 is newly filed: SCHEMA.md section 3.5 still documents the PRE-T-0039 applications table (phantom why_join, platform, timezone, prior_experience, age_confirmed, how_found-as-enum; missing the four columns T-0039 added). T-0213 fixed only the one row it touched and left a drift warning. Local-env gotchas worth keeping: port 3000 is an unrelated capybara Grafana container, so run the API on 3001 and set DISCORD_CALLBACK_URL through the 4200 proxy or the OAuth state cookie is lost; `nest start` wipes dist but a stale tsconfig.build.tsbuildinfo then makes tsc emit nothing, so rm it before a dev start; the dev DB's Owner member is bound to a REAL Discord snowflake, so the mock `owner` persona is only an Applicant there \u2014 point the API at lords_dashboard_e2e to get a real mock owner. Still open from before: T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts `denyReason`); T-0209 left the resync fan-out with no batchId; T-0210 (suspension/unban vs Discord roles) still deferred and applyBanRoleOnBan still OFF in production; BACKUP_HEARTBEAT_URL in ~/lords/backup.env is still blank and the first unattended 03:30 UTC backup run is still unconfirmed; the live medal cabinet still has a medal whose description reads 'Please update the description'.",
+  "nextIdCounter": 215,
   "connections": [],
   "tasks": [
     {
@@ -15046,6 +15046,117 @@
           "to": "review",
           "by": "claude",
           "note": "medal ordering + catalogue description on the award projection; PR into dev. PRs open into dev: this repo #70, frontend [lords-regiment-dashboard #60](https://github.com/Amitoj02/lords-regiment-dashboard/pull/60). Merge this one FIRST \u2014 the frontend renders a blank description until the API sends it."
+        }
+      ]
+    },
+    {
+      "id": "T-0213",
+      "title": "Require \"Why do you want to join the Lords Regiment?\" at intake",
+      "summary": "Renamed the optional \"Note to the recruiting officer\" to the required question \"Why do you want to join the Lords Regiment?\" on every surface: apply form, officer applicant page, the #new-enlistments Discord embed field, and the Swagger descriptions. Property stays representativeNote and the column stays representative_note varchar(500) NULL, so NO migration \u2014 nullable is deliberate so pre-T-0213 applications (which have no answer) still render. Only intake tightened: CreateApplicationDto @IsOptional -> @MinLength(1); PartialType keeps PATCH /applications/mine optional.",
+      "status": "review",
+      "type": "feature",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "applications",
+      "feature": "intake",
+      "subfeature": "why-join-question",
+      "repo": "",
+      "paths": [
+        "src/applications/dto/create-application.dto.ts",
+        "src/applications/dto/application.dto.ts",
+        "src/applications/dto/applicant-application.dto.ts",
+        "src/applications/entities/application.entity.ts",
+        "src/discord/embeds/notification-embeds.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [
+        "T-0039"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "POST /applications 400s when the answer is missing or empty (e2e)",
+          "status": "passed"
+        },
+        {
+          "desc": "the answer round-trips to GET /applications/mine (e2e)",
+          "status": "passed"
+        },
+        {
+          "desc": "enlistment embed carries the new field name and omits it when blank (unit)",
+          "status": "passed"
+        },
+        {
+          "desc": "verified live: form blocks submit inline, embed payload, admin page label",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "representativeNote is now required at intake but the column stays NULLable for pre-T-0213 rows \u2014 any consumer that assumes a non-null answer (admin page @if guard, the embed composer's blank-field omission) must keep tolerating null",
+          "status": "open",
+          "notedAt": "2026-08-04T00:30:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did NOT rename representativeNote/representative_note to whyJoin/why_join \u2014 user chose labels-only to avoid a production schema migration and an API contract break.",
+        "Did NOT re-sync the rest of SCHEMA.md applications table (platform/timezone/prior_experience/age_confirmed/how_found enum/id width and the four T-0039 columns) \u2014 logged as T-0214.",
+        "Left the max length at 500 (unchanged), so no migration was needed even though the question now invites a longer answer.",
+        "Left a test application submitted by the mock owner persona in the local lords_dashboard dev DB during verification (inert: that identity only exists under DISCORD_MOCK=true)."
+      ],
+      "lastTouchedCommit": "034462e1ac573dd632231d986193ca5216d0aad7",
+      "createdAt": "2026-08-04T00:30:00Z",
+      "updatedAt": "2026-08-04T00:30:00Z",
+      "history": [
+        {
+          "at": "2026-08-04T00:30:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "label rename + required validation across both repos; unit 1050 + e2e 156 green, verified live against a mocked-Discord stack"
+        }
+      ]
+    },
+    {
+      "id": "T-0214",
+      "title": "Re-sync SCHEMA.md applications table with the T-0039 entity",
+      "summary": "SCHEMA.md section 3.5 still documents the pre-T-0039 intake shape: it lists platform, timezone, prior_experience, age_confirmed/age_confirmed_at and how_found-as-enum (all removed), gives id as char(36) when ShortIdEntity makes it char(12), and omits current_regiment, preferred_classes, skills_to_improve and interest_confirmed. T-0213 fixed only the one row it touched and added a drift warning; the rest still needs verifying row by row against application.entity.ts and the InitialSchema migration.",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 1,
+      "area": "applications",
+      "feature": "intake",
+      "subfeature": "schema-docs",
+      "repo": "",
+      "paths": [
+        "SCHEMA.md",
+        "src/applications/entities/application.entity.ts"
+      ],
+      "dependsOn": [
+        "T-0213"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "every documented column matches the entity + migration DDL",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "034462e1ac573dd632231d986193ca5216d0aad7",
+      "createdAt": "2026-08-04T00:30:00Z",
+      "updatedAt": "2026-08-04T00:30:00Z",
+      "history": [
+        {
+          "at": "2026-08-04T00:30:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "discovered during T-0213 \u2014 SCHEMA.md documented a phantom why_join column"
         }
       ]
     }
