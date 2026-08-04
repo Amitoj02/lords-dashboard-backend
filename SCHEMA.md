@@ -5,6 +5,12 @@ MySQL 8 (the Docker Compose `db` service), database **`lords_dashboard`**, chars
 camelCase in code, columns/tables are `snake_case` in MySQL). Schema is owned exclusively by
 **migrations** — `synchronize` is permanently off.
 
+That collation is **case-insensitive, accent-insensitive and PAD SPACE**, and every unique index
+inherits it. For `UQ_members_username` (§3.2) that is load-bearing rather than incidental: `Panda`
+cannot be claimed while `panda` exists, `pánda` cannot either, and neither can `panda ` — deliberate
+anti-impersonation behaviour, obtained with no lower-cased shadow column, no generated column and no
+functional index. Nothing overrides it with a per-column `COLLATE`, on purpose.
+
 This document is the normalized (3NF) data model derived from the Angular frontend
 (`lords-regiment-dashboard`): its `core/models`, `core/services`, every feature component, and the
 `design-reference/` wireframes (the canonical UI/UX source). It is the single source of truth for the
@@ -257,6 +263,8 @@ The authoritative person record. Replaces the frontend's denormalized `rank`/`ch
 | `rank_id` | char(36) NOT NULL | FK → `ranks.id` (**replaces free-string rank**; chevrons derive from rank) |
 | `name` | varchar(120) NOT NULL | display/full name |
 | `in_game_name` | varchar(120) NULL | min 2 |
+| `username` | varchar(32) NULL UNIQUE | optional vanity handle behind `/u/@panda`; NULL = never claimed (MySQL treats NULLs as distinct in a unique index, so "optional AND unique" needs no shadow column). Column is wider than the 3–20 char format so the ceiling can move without a migration |
+| `username_changed_at` | datetime(6) NULL | last rename, for the 30-day cooldown — **not** `updated_at`, which every self-edit bumps |
 | `role` | enum `member_role` NOT NULL DEFAULT `'Applicant'` | authorization |
 | `status` | enum `member_status` NOT NULL DEFAULT `'Pending'` | |
 | `platform` | enum `platform` NULL | |
@@ -274,12 +282,47 @@ The authoritative person record. Replaces the frontend's denormalized `rank`/`ch
 | `deleted_at` | timestamp NULL | soft-delete (GDPR) |
 
 Indexes: `INDEX(regiment_id)`, `INDEX(rank_id)`, `INDEX(role)`, `INDEX(status)`,
-`UNIQUE(discord_identity_id)`.
+`UNIQUE(discord_identity_id)`, `UNIQUE(username)` (named `UQ_members_username`).
 Derived (not columns): `events_attended_count`, `attendance_percent`, `chevrons` (← rank).
 Relationships: *—1 `ranks`, *—1 `regiments`, **0..1—1 `discord_identities`** (a member optionally maps
 to one OAuth identity), *—* `medals` via `member_medals`, 1—* `event_rsvps` / `gallery_items` (author)
 / `service_record_entries`. Applications attach to the **identity** (1—*), not the member; the approved
 one points back via `applications.promoted_member_id`.
+
+#### `username_reservations`
+A handle nobody holds that nobody may claim. `UQ_members_username` answers *"is someone using this?"*;
+it cannot answer *"did someone just **stop** using this?"* — and that gap is precisely the window an
+impersonator polls for.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `username` | varchar(32) PK | the normalised (lowercase) handle — no surrogate id, the handle **is** the key |
+| `reason` | enum(`cooldown`, `blocked`) NOT NULL | why the hold exists (below) |
+| `former_member_id` | char(12) NULL | who held it, for support questions — **deliberately not an FK** |
+| `held_until` | datetime(6) NULL | when the hold lapses; **NULL = never** |
+| `created_at` | datetime(6) NOT NULL DEFAULT `CURRENT_TIMESTAMP(6)` | |
+
+Two reasons, one table:
+
+- **`cooldown`** — the holder renamed. The old handle stays live in Discord messages, event embeds and
+  bookmarks for a while, so `held_until` is 30 days out (`USERNAME_COOLDOWN_DAYS`) instead of being
+  handed to whoever was polling. After that the row is dead weight and the next claim just wins — the
+  hold expires by comparison, so no sweeper job has to exist for correctness.
+- **`blocked`** — the holder deleted their account. `held_until` is `NULL`, i.e. forever: the handle
+  survives in the audit ledger and in the regiment's memory, and impersonating a departed member is
+  the one squat with an actual victim.
+
+`former_member_id` carries **no foreign key**, and that is the design rather than an omission. A
+`blocked` row has to outlive the member row it names — that is the entire point of it — so a FK would
+either block the GDPR erasure (`RESTRICT`) or delete the protection along with the person (`CASCADE`);
+`SET NULL` would keep the block but throw away the only answer to "whose handle was this?".
+
+Reserved *words* (`admin`, `api`, `roster`, `support`, …) are **not** rows here. They live in
+`src/common/ids/username.ts` because they are a property of the routing table and of what a handle
+implies when printed next to a face, so a deploy must be able to add one without a migration.
+
+No `regiment_id`: unlike every other domain table (design principle 3) the public handle namespace is
+global, because the URL space it reserves is.
 
 #### `ranks` (lookup table, per regiment)
 | Column | Type | Notes |
@@ -817,6 +860,7 @@ ranks ─1:*─ members
 members ─*:*─ medals            (via member_medals: detail, awarded_at, awarded_by)
 members ─1:*─ service_record_entries
 members ─1:*─ account_deletion_requests
+members ─1:*─ username_reservations  (by former_member_id — NO FK: a blocked row outlives the member)
 
 events ─1:*─ event_rsvps ─*:1─ members
 events ─*:*─ members            (via event_attendees)

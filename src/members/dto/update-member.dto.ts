@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsOptional, IsString, MaxLength, MinLength, ValidateIf } from 'class-validator';
+import { IsUsername, normalizeUsername } from '../../common/ids/username';
 
 /**
  * Self-service profile patch. Deliberately restricted to a small set of fields a
@@ -19,6 +21,27 @@ export class UpdateMemberDto {
   @MinLength(1)
   @MaxLength(120)
   inGameName?: string;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    minLength: 3,
+    maxLength: 20,
+    description:
+      'Vanity handle backing /u/@handle. Lowercase letters, numbers and underscore, 3-20 ' +
+      'characters. Send null to release the handle and fall back to the short-id URL. ' +
+      'Changing it is limited to once every 30 days.',
+  })
+  @IsOptional()
+  // `null` is a meaningful value here (release the handle), so the format check
+  // has to be skipped for it rather than folded into @IsOptional — which only
+  // skips `undefined`.
+  @ValidateIf((_, value) => value !== null)
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? normalizeUsername(value) : value,
+  )
+  @IsString()
+  @IsUsername()
+  username?: string | null;
 
   @ApiPropertyOptional({
     maxLength: 512,

@@ -9,11 +9,18 @@ import { MemberMedal } from '../medals/entities/member-medal.entity';
 import { Rank } from '../ranks/entities/rank.entity';
 import { Regiment } from '../regiments/entities/regiment.entity';
 import { StorageModule } from '../storage/storage.module';
+import { GalleryModule } from '../gallery/gallery.module';
+import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { Member } from './entities/member.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
+import { UsernameReservation } from './entities/username-reservation.entity';
 import { MembersController } from './members.controller';
 import { MembersService } from './members.service';
+import { MemberAvatarService } from './public/member-avatar.service';
+import { PublicMembersController } from './public/public-members.controller';
+import { PublicMembersService } from './public/public-members.service';
+import { UsernameService } from './username.service';
 
 /**
  * Roster module. Registers the repositories the service reads from/writes to:
@@ -34,6 +41,10 @@ import { MembersService } from './members.service';
       ServiceRecordEntry,
       AccountDeletionRequest,
       Regiment,
+      // Vanity handles: the reservation ledger, plus the settings row the
+      // anonymous surface resolves the single-tenant regiment from (T-0215).
+      UsernameReservation,
+      RegimentSettings,
     ]),
     // For enqueuing Discord role syncs on rank/role/medal changes and the
     // (flag-gated) kick on ban. DiscordModule exports DiscordSyncService.
@@ -42,9 +53,14 @@ import { MembersService } from './members.service';
     StorageModule,
     // Reuses the events projection for the per-member events/RSVP profile tabs.
     EventsModule,
+    // The public profile lists a member's approved gallery contributions, and
+    // the avatar proxy reuses MediaEmbedService's capped reader.
+    GalleryModule,
   ],
-  controllers: [MembersController],
-  providers: [MembersService],
-  exports: [MembersService],
+  controllers: [MembersController, PublicMembersController],
+  providers: [MembersService, PublicMembersService, UsernameService, MemberAvatarService],
+  // PublicMembersService and MemberAvatarService are exported for the SEO module,
+  // which renders the same data as crawler-facing HTML from the same predicate.
+  exports: [MembersService, PublicMembersService, MemberAvatarService],
 })
 export class MembersModule {}

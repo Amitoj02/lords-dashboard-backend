@@ -81,6 +81,17 @@
 
 	encode zstd gzip
 
+	# ── One canonical hostname (T-0215) ────────────────────────────────────────
+	#
+	# SITE_ADDRESS lists BOTH hostnames, so apex and www have always served
+	# identical content at 200 with no canonical link between them. That is
+	# harmless while nothing is indexed and a real problem the moment it is:
+	# Google sees two complete copies of every profile and splits the ranking
+	# signals between them. 301 rather than 302 — the hostname choice is
+	# permanent in a way a vanity handle is not.
+	@www host www.{$APEX_HOST}
+	redir @www https://{$APEX_HOST}{uri} permanent
+
 	# ── Link unfurlers only: server-rendered Open Graph cards (T-0197) ──────────
 	#
 	# A share link is an SPA route, and the SPA is a static client-side build, so
@@ -105,6 +116,45 @@
 	}
 	handle @unfurler {
 		rewrite * /api/share{uri}
+		reverse_proxy api:3000
+	}
+
+	# ── The public roster and member profiles, for search engines (T-0215) ──────
+	#
+	# Same trick as @unfurler above, different destination and a different reason.
+	# /roster and /u/* are SPA routes, so a crawler receives one <app-root></app-root>
+	# that is byte-identical for every member on the roster — no name, no rank, no
+	# medals, nothing to index. These requests are rewritten to /api/seo/*, which
+	# renders the same facts the SPA renders, as real HTML with rel=canonical,
+	# og:*, JSON-LD, crawlable <a href> links, and — crucially — HONEST STATUS
+	# CODES. The SPA cannot return one: its wildcard route redirects every unknown
+	# URL to /home and nginx 200s everything, so a deleted profile is a soft-404.
+	#
+	# ⚠️ WHAT IS SERVED HERE MUST STAY EQUIVALENT TO WHAT A HUMAN SEES. Both come
+	# from PublicMembersService and its one exclusion predicate, which is what
+	# keeps this dynamic rendering rather than cloaking. Do not "optimise" the
+	# shell down to bare meta tags.
+	#
+	# ⚠️ MUST STAY ABOVE `handle /api/*`, like @unfurler, and for the same reason.
+	#
+	# ⚠️ Same UA-varying caveat: if a Cloudflare cache rule is ever added for
+	# /roster or /u/*, this needs `Vary: User-Agent` or humans get the shell.
+	@crawler {
+		path /u/* /roster /roster/*
+		header_regexp User-Agent "(?i)(discordbot|facebookexternalhit|twitterbot|whatsapp|slackbot|telegrambot|linkedinbot|redditbot|skypeuripreview|iframely|embedly|googlebot|bingbot|applebot|duckduckbot|yandexbot|mastodon|matrix|signal)"
+	}
+	handle @crawler {
+		rewrite * /api/seo{uri}
+		reverse_proxy api:3000
+	}
+
+	# The sitemap is generated from live data (it has to enumerate every public
+	# profile), so it cannot be a static file in the frontend image. Without this
+	# block /sitemap.xml falls into the SPA handle below and returns 200 text/html
+	# — an invalid sitemap that Search Console rejects without explaining why.
+	# robots.txt IS static and ships in the web image; it does not belong here.
+	handle /sitemap.xml {
+		rewrite * /api/sitemap.xml
 		reverse_proxy api:3000
 	}
 

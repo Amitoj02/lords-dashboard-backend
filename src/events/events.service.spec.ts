@@ -522,12 +522,20 @@ describe('EventsService', () => {
       expect(result.data[0].serverName).toBeUndefined();
       expect(result.data[0].serverRegion).toBeUndefined();
       expect(result.data[0]).not.toHaveProperty('serverPassword');
-      expect(result.data[0].rsvpCounts).toEqual({
-        interested: 0,
-        tentative: 0,
-        declined: 0,
-        neutral: 0,
-      });
+      // Turnout left the public projection in T-0215: on an indexed calendar,
+      // RSVP tallies and attendance counts publish unit strength and turnout
+      // history to any rival with one anonymous GET.
+      //
+      // Asserted as `toBeUndefined`, not `not.toHaveProperty`, for the same
+      // reason `serverName` above is: this tsconfig defines declared class
+      // fields even without an initializer, so an unassigned optional is an OWN
+      // property holding undefined. JSON.stringify drops it, so it is absent on
+      // the wire — which is the thing that actually matters.
+      expect(result.data[0].rsvpCounts).toBeUndefined();
+      expect(result.data[0].attendeesCount).toBeUndefined();
+      expect(result.data[0].expectedAttendance).toBeUndefined();
+      expect(result.data[0].attendanceGoal).toBeUndefined();
+      expect(JSON.parse(JSON.stringify(result.data[0]))).not.toHaveProperty('rsvpCounts');
     });
 
     it('still exposes the server presence flags publicly (T-0151)', async () => {

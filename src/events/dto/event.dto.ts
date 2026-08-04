@@ -80,12 +80,6 @@ export class EventDto {
   isRecurring: boolean;
 
   @ApiProperty({ nullable: true })
-  expectedAttendance: number | null;
-
-  @ApiProperty({ nullable: true })
-  attendanceGoal: number | null;
-
-  @ApiProperty({ nullable: true })
   outcome: string | null;
 
   @ApiProperty({ nullable: true })
@@ -96,12 +90,6 @@ export class EventDto {
 
   @ApiProperty({ type: [String] })
   tags: string[];
-
-  @ApiProperty({ type: RsvpCountsDto })
-  rsvpCounts: RsvpCountsDto;
-
-  @ApiProperty({ description: 'Number of confirmed attendees' })
-  attendeesCount: number;
 
   @ApiProperty({
     description:
@@ -119,6 +107,21 @@ export class EventDto {
   hasServerPassword: boolean;
 
   // ── Member-only fields (present only when includeServer is set) ──────────────
+
+  @ApiPropertyOptional({
+    type: RsvpCountsDto,
+    description: 'Member view only (T-0215) — turnout is not public calendar information',
+  })
+  rsvpCounts?: RsvpCountsDto;
+
+  @ApiPropertyOptional({ description: 'Number of confirmed attendees. Member view only.' })
+  attendeesCount?: number;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
+  expectedAttendance?: number | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
+  attendanceGoal?: number | null;
 
   @ApiPropertyOptional({
     nullable: true,
@@ -210,14 +213,10 @@ export class EventDto {
     dto.timezone = event.timezone;
     dto.status = event.status;
     dto.isRecurring = event.isRecurring;
-    dto.expectedAttendance = event.expectedAttendance;
-    dto.attendanceGoal = event.attendanceGoal;
     dto.outcome = event.outcome;
     dto.twitchUrl = event.twitchUrl;
     dto.platforms = opts.platforms;
     dto.tags = opts.tags;
-    dto.rsvpCounts = opts.rsvpCounts;
-    dto.attendeesCount = opts.attendeesCount;
     // Presence flags carry no secret, so they are part of the PUBLIC projection
     // (T-0151) — without them the public calendar cannot tell a password-protected
     // event from a plain one. An empty string counts as unset: the encryption
@@ -227,6 +226,17 @@ export class EventDto {
     dto.hasServerPassword = !!event.serverPassword;
 
     if (opts.includeServer) {
+      // TURNOUT MOVED BEHIND THE MEMBER PROJECTION (T-0215). Now that the events
+      // calendar is a public, indexed page rather than a link members shared with
+      // each other, `rsvpCounts` + `attendeesCount` + `expectedAttendance` +
+      // `attendanceGoal` amount to publishing unit strength and turnout history
+      // — a rival regiment reading readiness off one anonymous GET. `outcome`
+      // stays public on purpose: a match result is the part worth bragging about
+      // and the part worth indexing.
+      dto.rsvpCounts = opts.rsvpCounts;
+      dto.attendeesCount = opts.attendeesCount;
+      dto.expectedAttendance = event.expectedAttendance;
+      dto.attendanceGoal = event.attendanceGoal;
       dto.announceRoleId = event.announceRoleId;
       dto.serverName = event.serverName || null;
       dto.serverRegion = event.serverRegion || null;

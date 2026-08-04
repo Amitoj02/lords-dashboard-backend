@@ -79,7 +79,7 @@ Four things worth knowing before you read any code:
 
 Picture a regular week in a Holdfast regiment, and this is the software underneath it:
 
-- **Somebody wants to join.** They land on the public site, read the regiment's pitch, and sign in with Discord. That does _not_ put them on the roster — it just gives them an identity. They fill in enlistment papers (in-game name, preferred classes, how they found the unit), and the application drops into an officers' review queue where it can be approved, held, declined, or the applicant blocked. Approve it and they are enlisted at the entry rank.
+- **Somebody wants to join.** They land on the public site, read the regiment's pitch, browse the roster and its members' profile pages — anonymously, at `/u/@handle`, indexed by search engines — and sign in with Discord. That does _not_ put them on the roster — it just gives them an identity. They fill in enlistment papers (in-game name, preferred classes, how they found the unit), and the application drops into an officers' review queue where it can be approved, held, declined, or the applicant blocked. Approve it and they are enlisted at the entry rank.
 - **Rank means something.** The seeded ladder runs twelve deep — General, Colonel, Major, Captain, Lieutenant, Sergeant, Corporal, Private First Class, Private, Recruit, Mercenary, Applicant — and each rung can be wired to a Discord role, so a promotion in the dashboard becomes a role change in the Discord server without anyone editing the member list by hand. Medals work the same way, with their own catalogue and precedence order.
 - **Events are the point of the whole thing.** An officer schedules a line battle with a timezone-correct start, a recurrence cadence, platform tags and a game-server password. Members RSVP; reminders fire at the lead times the officer chose; the password is encrypted at rest and revealed only to people who actually said they were coming.
 - **Afterwards, the clips.** Members submit screenshots, videos and YouTube/Medal.tv links to a gallery that moderators approve, tag and curate. Uploads go straight from the browser to object storage — the API only signs the request.
@@ -89,13 +89,13 @@ Everything above is gated by a **capability matrix** — 14 capabilities across 
 
 ### Modules
 
-Fourteen controllers, all under the global `api` prefix. The table below is one row per _module_: **Authz** owns no routes at all (it is the guard everything else leans on), and **Gallery** contributes two controllers — the feed and a nested `media` resolver.
+Eighteen controllers, all under the global `api` prefix. The table below is one row per _module_: **Authz** owns no routes at all (it is the guard everything else leans on), **Gallery** contributes three (the feed, a nested `media` resolver and the link-unfurl share shell), **Members** two (the authenticated roster and a separate anonymous one), and **SEO** two (the crawler shells and `/sitemap.xml`).
 
 | Module                 | Directory                    | What it provides                                                                                                                                           |
 | ---------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Auth**               | `src/auth/`                  | Discord OAuth2 → JWT session, the `/auth/me` projection, logout with a server-side session cutoff, Discord guild-membership re-check                       |
 | **Authz**              | `src/authz/`                 | The capability × role matrix engine — a `@RequireCapability()` guard over a cached `role_permissions` read                                                 |
-| **Members**            | `src/members/`               | Roster directory, profiles, service record, event history, staff actions (rank/role, medals, suspend/ban), and GDPR self-service export + deletion         |
+| **Members**            | `src/members/`               | Roster directory, profiles, service record, event history, staff actions (rank/role, medals, suspend/ban), GDPR self-service export + deletion, vanity handles, and the anonymous `/public/members` projection |
 | **Applications**       | `src/applications/`          | Recruitment intake: self-submit and edit; staff queue with approve → enlist, decline, hold, block                                                          |
 | **Events**             | `src/events/`                | Public + member calendars, create/edit, archive/complete/re-anchor, recurring series, RSVP (on the site or from the Discord announcement), attendance, encrypted server-password reveal, three schedulers |
 | **Gallery**            | `src/gallery/`               | Public feed, member archive, submissions, moderation queue, likes, and YouTube / Medal.tv link resolution into embed metadata                              |
@@ -104,6 +104,7 @@ Fourteen controllers, all under the global `api` prefix. The table below is one 
 | **Settings**           | `src/settings/`              | Control panel: regiment profile, first-run setup, the editable authorization matrix, public presentation, legal documents, Owner-only dissolve             |
 | **Discord**            | `src/discord/`               | The Lord Adjutant bot's control plane: connection status, guild role list, settings, full resync, bulk re-link progress, the bot-operations ledger         |
 | **Storage**            | `src/storage/`               | Presigned upload issuance and the per-target policy the client reads for hints                                                                             |
+| **SEO**                | `src/seo/`                   | Owns no data: crawler-facing HTML for the roster and public profiles, plus `/sitemap.xml`, rendered from the same predicate the JSON uses                  |
 | **Audit**              | `src/audit/`                 | Append-only ledger with actor/target/severity and before-after snapshots, filterable and CSV-exportable                                                    |
 | **Health**             | `src/health/`                | `/health/live` (touches nothing), `/health/ready` (`SELECT 1`, 503 on DB down), and a legacy always-200 probe                                              |
 
@@ -204,7 +205,7 @@ Joi validates the whole environment at boot with `abortEarly: false`, so a missi
 
 **Fresh authority on every request.** `JwtStrategy` trusts the token only for its stable `sub` / `did` claims and re-resolves role, regiment and member id from the database per request, rejecting any token issued before the identity's session cutoff — which `POST /auth/logout` advances, killing concurrent tokens. A demotion takes effect on the next request, not the next login.
 
-**Two global guards**, in order: `JwtAuthGuard` (everything is protected; `@Public()` opts out), then `GuildGateGuard` (an optional Discord-guild-membership gate; `@AllowWhenGated()` opts out). Specific rights are then declared per route with `@RequireCapability()`.
+**Two global guards**, in order: `JwtAuthGuard` (everything is protected; `@Public()` opts out), then `GuildGateGuard` (an optional Discord-guild-membership gate; `@AllowWhenGated()` opts out). Specific rights are then declared per route with `@RequireCapability()`. Note that `@Public()` is read by **both** guards, so marking a route public exempts it from the guild gate as well — correct on an anonymous surface, wrong on a route that also serves members, which is one reason the public roster and profiles live in their own controller rather than behind a flag on the authenticated one.
 
 **Capabilities, not roles.** Six roles — `Owner, Admin, Moderator, Member, Mercenary, Applicant` — mapped to 14 capabilities in the per-regiment `role_permissions` table, editable at runtime from the admin UI:
 
@@ -239,17 +240,29 @@ Every path is prefixed with `/api` (configurable via `API_PREFIX`). Capabilities
 <details>
 <summary><strong>Public reads</strong> — no authentication at all</summary>
 
-| Method | Route                                      | Purpose                                                                                        |
-| ------ | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| GET    | `/regiment`                                | Regiment profile + the `presentation` slice (landing/login banners, quotes, overlay densities) |
-| GET    | `/regiment/documents`                      | Terms, privacy and community guidelines as Markdown; `body: null` = never edited               |
-| GET    | `/regiment/stats`                          | Landing-page statistics                                                                        |
-| GET    | `/events`, `/events/:id`                   | Public calendar                                                                                |
-| GET    | `/gallery`, `/gallery/:id`                 | Approved gallery feed                                                                          |
-| GET    | `/gallery/media/medal/:id/thumbnail`       | Medal.tv thumbnail proxy (60/min)                                                              |
-| GET    | `/health/live`, `/health/ready`, `/health` | Probes                                                                                         |
+| Method | Route                                      | Purpose                                                                                                       |
+| ------ | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/regiment`                                | Regiment profile + the `presentation` slice (landing/login banners, quotes, overlay densities)                |
+| GET    | `/regiment/documents`                      | Terms, privacy and community guidelines as Markdown; `body: null` = never edited                              |
+| GET    | `/regiment/stats`                          | Landing-page statistics                                                                                       |
+| GET    | `/events`, `/events/:id`                   | Public calendar — history windowed to the last 90 days, turnout numbers withheld                              |
+| GET    | `/gallery`, `/gallery/:id`                 | Approved gallery feed                                                                                         |
+| GET    | `/gallery/media/medal/:id/thumbnail`       | Medal.tv thumbnail proxy (60/min)                                                                             |
+| GET    | `/public/members`                          | The anonymous roster, paginated (60/min, `Cache-Control: public, max-age=300`)                                |
+| GET    | `/public/members/:handle`                  | One public profile, addressed by `@handle` **or** 12-char short id (60/min)                                   |
+| GET    | `/public/members/:handle/gallery`          | That member's approved gallery contributions                                                                  |
+| GET    | `/public/members/:id/avatar`               | Same-origin avatar proxy (120/min, `max-age=21600`); 404 on a miss, never a redirect                          |
+| GET    | `/seo/roster`, `/seo/u/:handle`, `/seo`    | `text/html` crawler shells (60/min) — not for humans, see below                                               |
+| GET    | `/sitemap.xml`                             | `application/xml`, `max-age=3600` — static pages plus every publicly visible profile                          |
+| GET    | `/health/live`, `/health/ready`, `/health` | Probes                                                                                                        |
 
 The regiment routes are anonymous _because their consumers are logged-out surfaces_: the sign-in page and the legal pages are reached before authentication, so they cannot sit behind a capability gate.
+
+**`/public/members` is a separate controller, service and DTO from `/members`** — not the same handler with `@Public()` on it. A shared handler has to _remember_ to redact, and that conditional is the one somebody eventually widens; here the caller-varying and private fields were never in scope to begin with. One predicate decides who has a public page at all — **not an Applicant, not `Pending`, not banned, not currently suspended, not soft-deleted** — and every anonymous surface (roster, profile, sitemap, crawler shell) narrows through that single helper, so they cannot drift and leave someone indexed on a page they were removed from. A member who fails it is an ordinary **404**, indistinguishable from a handle that never existed, because "no page here" must not be readable as "that person is suspended". **410 Gone** is reserved for one case: an account that was deliberately deleted. The avatar route proxies the bytes rather than redirecting because the Discord CDN fallback URL embeds the member's snowflake, which the public projection otherwise never carries.
+
+**`/api/seo/*` is crawler-only.** `https://lordsofholdfast.com/u/@panda` is an SPA route: nginx returns the same un-templated Angular shell for every URL, so a deleted profile, a renamed handle and a typo all answer `200 OK` — a soft-404. Caddy matches known crawler user-agents on `/u/*` and `/roster` and rewrites them here, where the status code can be honest, while every human still gets the app. That rewrite is a **hand-synced change on the box** — `lords-deploy` only pins image tags and pulls, it never syncs the Caddyfile — so shipping this code changes nothing in production until the runbook step in [`deploy/README.md`](./deploy/README.md) has been run. Until then these routes are reachable only directly, which is how they should be tested first.
+
+The public calendar is deliberately narrower than the member one. `rsvpCounts`, `attendeesCount`, `expectedAttendance` and `attendanceGoal` moved behind `includeServer` once the page became indexable — anonymously published turnout is a rival regiment reading unit strength and readiness off one GET. `outcome` stays public on purpose: a match result is the part worth bragging about.
 
 Legal documents are stored as Markdown and are **not sanitised server-side** — the SPA renders them through a strict escape-first renderer, and that is the single security boundary. Please don't add a second, divergent sanitiser here.
 
@@ -263,10 +276,11 @@ Legal documents are stored as Markdown and are **not sanitised server-side** —
 | GET    | `/members`, `/members/:id`                                         | `view_members_directory`        |
 | GET    | `/members/:id/service-record`, `/:id/events`, `/:id/rsvps`         | `view_members_directory`        |
 | GET    | `/members/:id/command-info`                                        | `view_audit_log`                |
-| PATCH  | `/members/:id`                                                     | self-service                    |
+| PATCH  | `/members/:id`                                                     | self-service (incl. `username`) |
 | POST   | `/members/:id/rank`, `/:id/medals` · DELETE `/:id/medals/:medalId` | `edit_ranks_medals`             |
 | POST   | `/members/:id/derive-from-discord`                                 | `edit_ranks_medals`             |
 | POST   | `/members/:id/role`, `/suspend`, `/ban`, `/unban`, `/unsuspend`    | `manage_roles`                  |
+| GET    | `/members/me/username-available?username=`                         | authenticated, 30/min, advisory |
 | GET    | `/members/me/export`                                               | self-service (data export)      |
 | POST   | `/members/me/deletion-request`, `/confirm`, `/execute`, `/cancel`  | self-service (account deletion) |
 
@@ -274,6 +288,8 @@ Admin actions on a _specific_ member are additionally gated on a server-computed
 
 - **Moderation** (`role`, `suspend`, `unsuspend`, `ban`, `unban` — `manage_roles`): not yourself, not the regiment owner, and only against a **strictly lower** role. So an Admin cannot demote a peer Admin; only the Owner can. The role a caller may _grant_ is separately capped at their own tier — an Admin may appoint another Admin, a Moderator another Moderator, and nobody the Owner.
 - **Rank & medals** (`rank`, `medals`, `derive-from-discord` — `edit_ranks_medals`): **no target rule at all** — any roster member, the owner, your seniors and **your own record** included. A rank or a medal is a record of what someone did, not authority over them, so whoever keeps the service record keeps all of it. ⚠️ That makes the grant self-serving by design: an `edit_ranks_medals` holder can promote themselves. Grant it accordingly.
+
+**The vanity handle.** `PATCH /members/:id` also accepts an optional `username` — the `@panda` in `/u/@panda`. It is `[a-z0-9_]{3,20}` and nothing else, because every extra character class is an impersonation vector on a page whose whole job is to say _this is that person_: dots and hyphens would let `lord.panda`, `lord-panda` and `lordpanda` be three people, and any non-ASCII range brings homographs. The unique index sits on a `utf8mb4_unicode_ci` column, so it already folds case and accents together; the regex is what stops the classes the collation does _not_ fold. A short reserved list (`admin`, `support`, `staff`, `roster`, …) is refused on top of that — a handle is also a display name printed beside a real person's face. Renames are held to a **30-day cooldown** on its own `username_changed_at` column, and setting the field to `null` releases the handle without returning it to the pool: `username_reservations` holds it for the cooldown, and deleting an account blocks it **permanently**, so a rename never becomes an impersonation handoff to whoever claims it next. Account deletion additionally nulls the handle and purges the member's avatar and banner objects from storage. `GET /members/me/username-available` is advisory only and answers about one handle the caller typed — never enumerating — because the UNIQUE index is what actually decides, and a `PATCH` can still come back **409**.
 
 `derive-from-discord` credits a member with the rank and medals their existing Discord roles already say they earned — the manual counterpart to the carry-over an enlistment performs. Promotion-only (their current rank is the floor), additive-only on medals, and safe to press twice. It refused your own record until the rule above; it no longer does, so running it on yourself credits whatever your own Discord roles say you have earned.
 
@@ -439,7 +455,7 @@ Nine upload targets, each with its own MIME allowlist, size cap and required cap
 
 **Three background schedulers**, all `unref()`-ed interval timers with fully guarded ticks that log and swallow every failure: an event-status sweep (60 s, `upcoming → ongoing → previous`), recurrence materialisation (5 min, 60 days ahead, Luxon for timezone-correct anchoring), and lead-time reminders (60 s) that claim each row with a conditional `UPDATE … WHERE sent_at IS NULL` _before_ enqueuing, so at-most-once survives a restart mid-deploy.
 
-**Rate limiting** is global at 120 requests/minute, with tighter per-route caps on the OAuth routes (20/min), application submission (10/min), uploads (30/min) and the thumbnail proxy (60/min). `CfAwareThrottlerGuard` keys on `CF-Connecting-IP` **only** when `TRUST_CF_CONNECTING_IP=true`, because that header is client-suppliable — trusting it is safe only once ingress is provably CDN-only. Otherwise it falls back to the unforgeable socket peer IP.
+**Rate limiting** is global at 120 requests/minute, with tighter per-route caps on the OAuth routes (20/min), application submission (10/min), uploads (30/min), the thumbnail proxy (60/min), the handle-availability check (30/min), the anonymous roster and profiles (60/min), the avatar proxy (120/min, because one roster page renders 25 of them) and `/sitemap.xml` (30/min). `CfAwareThrottlerGuard` keys on `CF-Connecting-IP` **only** when `TRUST_CF_CONNECTING_IP=true`, because that header is client-suppliable — trusting it is safe only once ingress is provably CDN-only. Otherwise it falls back to the unforgeable socket peer IP, which behind Caddy is Caddy: every anonymous visitor and every logged-in member then shares **one** bucket, so a crawl burst can 429 real users. Enable Cloudflare Authenticated Origin Pulls and flip that flag before submitting a sitemap; the procedure is in [`deploy/README.md`](./deploy/README.md).
 
 **Hardening you'll meet while reading `main.ts`:** `helmet()` and `cookieParser()`; a middleware installed **before routing** that sets `Cache-Control: no-store` on every response by default, so the few genuinely cacheable handlers must opt out explicitly; a `ValidationPipe` with `whitelist` + `forbidNonWhitelisted` + `transform`, so an unknown property is a 400 rather than a silent drop; explicit-origin CORS with credentials; `NODE_ENV` required with no default, because a typo must not silently degrade to `development` (which would mount Swagger and drop the cookie `Secure` flag); Swagger gated out of production with `SWAGGER_ENABLED=true` as the staging override; a boot guard that **refuses to start production** while the OAuth mock is active without `ALLOW_MOCKS_IN_PROD=true`; and `enableShutdownHooks()` so the Discord gateway logs out cleanly and the schedulers stop on `SIGTERM`.
 
@@ -451,9 +467,9 @@ The audit ledger records as a **side effect**: a failure there is logged and swa
 
 ## 🗄 Database
 
-The complete normalized (3NF) model — 30 tables, enums, junctions, soft deletes, the authorization matrix and the auth/identity model — is documented in **[`SCHEMA.md`](./SCHEMA.md)**.
+The complete normalized (3NF) model — 31 tables, enums, junctions, soft deletes, the authorization matrix and the auth/identity model — is documented in **[`SCHEMA.md`](./SCHEMA.md)**.
 
-`synchronize` is hardcoded `false` and must stay that way. Schema changes are made by editing an entity and generating a migration; **six** migrations exist today, the first being a squash of the original eighteen — so a database that ran those must be **dropped and recreated, not migrated forward**. All date columns are `datetime(6)` rather than `timestamp`, avoiding both the 2038 cap (events are scheduled into the future) and implicit timezone conversion.
+`synchronize` is hardcoded `false` and must stay that way. Schema changes are made by editing an entity and generating a migration; **eight** migrations exist today, the first being a squash of the original eighteen — so a database that ran those must be **dropped and recreated, not migrated forward**. All date columns are `datetime(6)` rather than `timestamp`, avoiding both the 2038 cap (events are scheduled into the future) and implicit timezone conversion.
 
 > [!IMPORTANT]
 > **`seed:prod` runs on every production deploy, so seeding is two-tier.** "Idempotent" is not enough: re-applying a hardcoded default to a row an admin has since edited is idempotent _and_ destructive.
@@ -472,12 +488,12 @@ The complete normalized (3NF) model — 30 tables, enums, junctions, soft delete
 ## 🧪 Testing
 
 ```bash
-npm test           # 39 unit specs — services, guards, DTO validation, schedulers, crypto
-npm run test:e2e   # 8 Supertest suites, full HTTP round-trips against a real MySQL
+npm test           # 52 unit specs — services, guards, DTO validation, schedulers, crypto
+npm run test:e2e   # 9 Supertest suites, full HTTP round-trips against a real MySQL
 npm run test:cov   # coverage
 ```
 
-The e2e suites — `auth`, `mvp`, `post-mvp`, `discord`, `account-deletion`, `guild-membership`, `last-seen`, `member-hierarchy` — drive the real OAuth handshake (mocking only Discord's HTTP), proving that a new sign-in persists an encrypted identity record and a returning sign-in resolves the linked member.
+The e2e suites — `auth`, `mvp`, `post-mvp`, `discord`, `account-deletion`, `guild-membership`, `last-seen`, `member-hierarchy`, `public-profile` — drive the real OAuth handshake (mocking only Discord's HTTP), proving that a new sign-in persists an encrypted identity record and a returning sign-in resolves the linked member.
 
 > [!WARNING]
 > **Run the e2e suite against an isolated database.** The suites share one database and mutate single-tenant rows (the permission matrix, bot settings), so `maxWorkers` is pinned to 1 and they will fight with your dev data. [`CONTRIBUTING.md`](./CONTRIBUTING.md) has the exact copy-pasteable command — including the one non-obvious detail, that `OWNER_DISCORD_ID=` must be **empty**, or the seeder treats the database as a real deploy and starts with setup incomplete.
@@ -531,6 +547,7 @@ src/
 ├── audit/                    # append-only ledger (@Global)
 ├── members/  applications/  ranks/  medals/  regiments/  settings/
 ├── events/   gallery/       discord/  storage/
+├── seo/                      # crawler HTML + sitemap.xml, rendered from the public projection
 └── health/                   # liveness + readiness probes
 ```
 
@@ -544,7 +561,7 @@ Everything else lives beside it: `test/` (e2e suites), `deploy/` (the production
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-The whole product runs as a Docker Compose stack on a single OVHcloud VPS behind Cloudflare, owned by an unprivileged `deploy` user. GHCR images only — nothing is built on the box. A one-shot `migrate` container runs `migration:run:prod && seed:prod` from compiled JS and must exit successfully before the API starts (`condition: service_completed_successfully`). Caddy is the only container that publishes ports; it terminates TLS, sets HSTS/CSP/security headers, and routes `/api/*` to the API and everything else to the SPA. The API image is `node:26-alpine`, runs as the non-root `node` user, and connects as a DML-only database account — the DDL account belongs to the migrate one-shot and is gone before traffic arrives.
+The whole product runs as a Docker Compose stack on a single OVHcloud VPS behind Cloudflare, owned by an unprivileged `deploy` user. GHCR images only — nothing is built on the box. A one-shot `migrate` container runs `migration:run:prod && seed:prod` from compiled JS and must exit successfully before the API starts (`condition: service_completed_successfully`). Caddy is the only container that publishes ports; it terminates TLS, sets HSTS/CSP/security headers, routes `/api/*` to the API and everything else to the SPA, redirects `www` to the apex host, and rewrites known crawler user-agents on `/u/*` and `/roster` onto the server-rendered SEO routes. Its config is **not** part of a deploy: `lords-deploy` only pins image tags and pulls, so the `Caddyfile` and the compose files are hand-synced over SSH and a change to them is an out-of-band step, not a release. The API image is `node:26-alpine`, runs as the non-root `node` user, and connects as a DML-only database account — the DDL account belongs to the migrate one-shot and is gone before traffic arrives.
 
 **Deploys are manual by design.** Merging to `main` in either repo builds and pushes an image to GHCR and changes nothing live; a human then dispatches the `Deploy to production` workflow _in this repo_ with an `api_tag` and a `web_tag` (the two images come from two repos and therefore two different SHAs). Rollback is the same workflow with the previous pair. A failed deploy is deliberately **not** auto-rolled-back, because the migrations have already run.
 

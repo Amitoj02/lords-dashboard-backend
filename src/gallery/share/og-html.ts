@@ -68,11 +68,21 @@ function named(name: string, content: string | null | undefined): string {
  * other unfurlers drop a player card that has no poster, which would degrade a
  * video to no preview at all rather than to a still.
  *
- * A human who opens this URL is bounced to the SPA by `<meta http-equiv=
- * "refresh">`. Not a script: the site CSP is `script-src 'self'` with no nonce
- * (a statically-served build has nothing to mint one with), so an inline script
- * would be blocked. The visible anchor is the last resort for a client that
- * honours neither.
+ * ── THERE IS DELIBERATELY NO `<meta http-equiv="refresh">` (T-0215) ─────────
+ * This used to emit `<meta http-equiv="refresh" content="0; url=${canonical}">`
+ * to bounce a human to the SPA. It had to go, because `canonical` is the very
+ * URL the crawler requested and was rewritten from — so for the search-engine
+ * user-agents the Caddy matcher also catches (`googlebot|bingbot|applebot`),
+ * the refresh was a redirect straight back to itself. Googlebot follows a
+ * 0-second refresh as a redirect, re-requests, matches the same rule and gets
+ * the same refresh: a loop, surfaced in Search Console as "Page with redirect",
+ * and undiagnosable through Google's URL Inspection tool, which sends
+ * `Google-InspectionTool` and therefore never matches the rule at all.
+ *
+ * `<link rel="canonical">` is the mechanism that actually consolidates a
+ * duplicate, and it is still here. The visible anchor now carries the human
+ * case on its own — which is fine, because a human almost never lands here:
+ * they click a Discord card, and their browser's own user-agent gets the SPA.
  */
 export function renderOpenGraphShell(card: OpenGraphCard): string {
   const canonical = escapeHtml(card.canonicalUrl);
@@ -85,7 +95,6 @@ export function renderOpenGraphShell(card: OpenGraphCard): string {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>${escapeHtml(card.title)}</title>
 ${named('description', card.description)}    <link rel="canonical" href="${canonical}" />
-    <meta http-equiv="refresh" content="0; url=${canonical}" />
 ${meta('og:site_name', card.siteName)}${meta('og:type', card.video ? 'video.other' : 'article')}${meta('og:url', card.canonicalUrl)}${meta('og:title', card.title)}${meta('og:description', card.description)}${meta('og:image', card.imageUrl)}${card.video ? meta('og:video', card.video.url) : ''}${card.video ? meta('og:video:secure_url', card.video.url) : ''}${card.video ? meta('og:video:type', card.video.type) : ''}${card.video?.width ? meta('og:video:width', String(card.video.width)) : ''}${card.video?.height ? meta('og:video:height', String(card.video.height)) : ''}${named('twitter:card', twitterCard)}${named('twitter:title', card.title)}${named('twitter:description', card.description)}${named('twitter:image', card.imageUrl)}${card.video ? named('twitter:player:stream', card.video.url) : ''}  </head>
   <body>
     <p><a href="${canonical}">${escapeHtml(card.title)}</a></p>

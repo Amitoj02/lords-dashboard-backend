@@ -24,13 +24,20 @@ describe('renderOpenGraphShell', () => {
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
   });
 
-  it('bounces a HUMAN to the SPA without a script', () => {
-    // The site CSP is `script-src 'self'` with no nonce — a statically-served
-    // build has nothing to mint one with — so an inline redirect script would be
-    // blocked outright. Meta refresh plus a real anchor is the whole fallback.
+  it('NEVER emits a self-referential meta refresh (T-0215)', () => {
+    // The refresh this used to carry pointed at `canonicalUrl` — the very URL
+    // the crawler requested and was rewritten from. Search-engine agents are in
+    // the Caddy matcher too, and Googlebot follows a 0-second refresh as a
+    // redirect, so it looped straight back into this handler and Search Console
+    // reported the whole /gallery/* pattern as "Page with redirect".
+    // rel=canonical is what consolidates a duplicate; a refresh never was.
     const html = renderOpenGraphShell(card);
 
-    expect(html).toContain(`<meta http-equiv="refresh" content="0; url=${card.canonicalUrl}" />`);
+    expect(html).not.toContain('http-equiv="refresh"');
+    expect(html).toContain(`<link rel="canonical" href="${card.canonicalUrl}" />`);
+    // The anchor is now the whole human fallback. Still no script: the site CSP
+    // is `script-src 'self'` with no nonce (a static build has nothing to mint
+    // one with), so an inline redirect script would be blocked outright.
     expect(html).toContain(`<a href="${card.canonicalUrl}">`);
     expect(html).not.toContain('<script');
   });

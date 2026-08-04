@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -34,7 +35,9 @@ import { CommandInfoDto, ServiceRecordEntryDto } from './dto/member-detail.dto';
 import { MemberDto } from './dto/member.dto';
 import { MemberQueryDto } from './dto/member-query.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
+import { UsernameAvailabilityQueryDto } from './dto/username-availability-query.dto';
 import { MembersService } from './members.service';
+import { UsernameAvailability } from './username.service';
 
 /**
  * Members roster API. Reads require the ViewMembersDirectory capability (granted
@@ -106,6 +109,24 @@ export class MembersController {
   @ApiOperation({ summary: 'Export your own data (GDPR data download)' })
   exportSelf(@CurrentUser() user: AuthenticatedUser) {
     return this.membersService.exportSelfData(user);
+  }
+
+  @Get('me/username-available')
+  // Backs a keystroke-driven check, so it is deliberately cheaper than the
+  // global bucket allows a burst to be, and it answers only about the handle
+  // the caller typed — never enumerates.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Whether the caller could claim a vanity handle right now',
+    description:
+      'Advisory: the UNIQUE index is what actually decides, so a PATCH can still 409 if ' +
+      'two members claim the same handle in the same instant.',
+  })
+  checkUsername(
+    @Query() query: UsernameAvailabilityQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<UsernameAvailability> {
+    return this.membersService.checkUsername(query.username, user);
   }
 
   // ── Single member reads ──────────────────────────────────────────────────────

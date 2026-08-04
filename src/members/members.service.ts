@@ -57,6 +57,8 @@ import {
 } from './dto/member-admin.dto';
 import { CommandInfoDto, ServiceRecordEntryDto } from './dto/member-detail.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
+import { MemberAvatarService } from './public/member-avatar.service';
+import { UsernameAvailability, UsernameService } from './username.service';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { Member } from './entities/member.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
@@ -152,6 +154,11 @@ export class MembersService {
     private readonly authz: AuthzService,
     // Reuses the events projection machinery for the per-member events/RSVP tabs.
     private readonly eventsService: EventsService,
+    // Owns every rule about claiming, releasing and blocking a vanity handle.
+    private readonly usernames: UsernameService,
+    // Cached proxy bytes have to be evicted when a member changes their avatar —
+    // the proxy URL is stable by design, so nothing else would ever evict them.
+    private readonly avatars: MemberAvatarService,
   ) {}
 
   /**
@@ -250,6 +257,13 @@ export class MembersService {
     // In-game name is self-editable; like the avatar/banner below it is
     // intentionally not audited (no security-relevant role/status/rank change).
     if (dto.inGameName !== undefined) member.inGameName = dto.inGameName;
+    // The handle is claimed in memory here and RESERVED only after the save
+    // lands (below) — reserving the old one first would release a handle the
+    // member still holds if the write then failed.
+    let releasedHandle: string | null = null;
+    if (dto.username !== undefined) {
+      releasedHandle = await this.usernames.claimFor(member, dto.username);
+    }
     // Avatar/banner are set from an uploaded storage key; the key's namespace is
     // re-validated (it must live under THIS member's prefix) before it is
     // resolved to the public URL persisted on the row (T-0067).
@@ -264,10 +278,35 @@ export class MembersService {
         : null;
     }
 
-    const saved = await this.members.save(member);
+    let saved: Member;
+    try {
+      saved = await this.members.save(member);
+    } catch (error) {
+      // Two callers can pass the availability probe and race to the same
+      // handle; only the UNIQUE index is authoritative. Both losers get the
+      // identical 409 the probe would have given, so the race is invisible.
+      if (this.usernames.isDuplicateHandleError(error)) {
+        throw new ConflictException('That username is already taken');
+      }
+      throw error;
+    }
+    // Now that the new handle is committed, put the old one beyond reach for
+    // the cooldown window.
+    await this.usernames.holdAfterRelease(releasedHandle, member.id);
+    // A changed avatar invalidates the proxy's cached bytes; the URL is stable
+    // by design, so nothing else would ever evict them.
+    if (dto.avatarKey !== undefined) this.avatars.invalidate(member.id);
     // No audit row: a self profile edit never touches role/status/rank, so there
     // is no security-relevant change to record.
     return this.project(saved, user);
+  }
+
+  /** Live availability probe for the account form. Never throws on a refusal. */
+  async checkUsername(candidate: string, user: AuthenticatedUser): Promise<UsernameAvailability> {
+    const member = user.memberId
+      ? await this.members.findOne({ where: { id: user.memberId } })
+      : null;
+    return this.usernames.check(candidate, member);
   }
 
   // ── Admin actions (capability-gated in the controller; each is audited) ──────
@@ -960,6 +999,10 @@ export class MembersService {
 
     const member = await this.loadMember(user.memberId, user.regimentId);
     const identityId = member.discordIdentityId;
+    // Captured before the row is anonymised — the handle has to survive the
+    // transaction so it can be blocked afterwards.
+    const releasedHandle = member.username;
+    const avatarKeys = [member.avatarUrl, member.bannerUrl];
 
     // Anonymise + soft-delete atomically so the roster can never observe a
     // half-deleted member (PII cleared but row still live, or vice versa).
@@ -971,6 +1014,13 @@ export class MembersService {
       member.standing = null;
       member.status = MemberStatus.Inactive;
       member.discordLinked = false;
+      // MUST be null, not a placeholder. The row survives as a soft-delete and
+      // keeps occupying `UQ_members_username`, so a `'[deleted]'` sentinel of
+      // the kind used for `inGameName` above would raise ER_DUP_ENTRY on the
+      // SECOND account deletion. Null is the only value the unique index treats
+      // as distinct. The handle is separately blocked below so nulling it here
+      // does not hand it to a stranger.
+      member.username = null;
       await mgr.getRepository(Member).save(member);
       await mgr.getRepository(Member).softRemove(member);
 
@@ -988,6 +1038,21 @@ export class MembersService {
       request.executedAt = new Date();
       await mgr.getRepository(AccountDeletionRequest).save(request);
     });
+
+    // Outside the transaction on purpose: both are best-effort cleanups whose
+    // failure must not roll back an erasure the member already confirmed.
+
+    // The handle is blocked FOREVER rather than released. A departed member is
+    // still addressed by it in Discord history, event embeds and the audit
+    // ledger, so handing it to a stranger is the one squat with a real victim.
+    await this.usernames.blockPermanently(releasedHandle, user.memberId);
+
+    // Purge the avatar/banner bytes. Nulling the columns above only stops US
+    // linking them — the objects stay publicly fetchable at their original CDN
+    // URLs, and the path embeds the member id, so an erasure that leaves them
+    // behind is not an erasure. Now that profiles are public and indexed, an
+    // orphaned avatar is a face on a URL nobody can take down.
+    await this.purgeMemberObjects(avatarKeys);
 
     await this.audit.record({
       regimentId: user.regimentId,
@@ -1074,6 +1139,21 @@ export class MembersService {
   // (`enqueueScopedRoleSync` / `enqueueMembershipRoleSync`) or asks for the
   // additive sync (`enqueueRoleGrant`). Bringing the helper back would re-open
   // the bug, because a single shared call has nowhere to put the delta.
+
+  /**
+   * Best-effort purge of a departed member's uploaded avatar/banner bytes.
+   *
+   * `deleteObject` skips any URL outside our own storage base, which is exactly
+   * right here: the avatar column may hold the Discord CDN fallback, and that
+   * is not ours to delete. Every failure is swallowed by the storage layer —
+   * an erasure the member already confirmed must not roll back because an
+   * object was already gone.
+   */
+  private async purgeMemberObjects(urls: (string | null)[]): Promise<void> {
+    for (const url of urls) {
+      if (url) await this.storage.deleteObject(url);
+    }
+  }
 
   /** Load a regiment-scoped, non-deleted member with its rank + identity, or 404. */
   private async loadMember(id: string, regimentId: string): Promise<Member> {
