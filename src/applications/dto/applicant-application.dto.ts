@@ -45,7 +45,11 @@ export class ApplicantApplicationDto {
   @ApiProperty({ description: 'Confirms interest + willingness to enlist in-game' })
   interestConfirmed: boolean;
 
-  @ApiProperty({ nullable: true, description: 'Optional representative/guest note' })
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Why do you want to join the Lords Regiment? (null on applications predating T-0213)',
+  })
   representativeNote: string | null;
 
   @ApiProperty({ enum: ApplicationStatus })

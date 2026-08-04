@@ -66,6 +66,7 @@ export interface EnlistmentSummary {
   howFound: string;
   preferredClasses: string;
   skillsToImprove: string;
+  /** "Why do you want to join the Lords Regiment?" — null only on pre-T-0213 applications. */
   representativeNote: string | null;
   /** The applicant's Discord avatar, used as the thumbnail. Null ⇒ no thumbnail. */
   avatarUrl?: string | null;
@@ -250,7 +251,7 @@ export function buildEnlistmentEmbed(s: EnlistmentSummary, brand: RegimentBrand)
       ...field('How they found us', s.howFound),
       ...field('Preferred classes', s.preferredClasses, true),
       ...field('Wants to improve', s.skillsToImprove, true),
-      ...field('Representative note', s.representativeNote),
+      ...field('Why do you want to join the Lords Regiment?', s.representativeNote),
     ],
     footer: { text: brand.name },
   });
