@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
-  "lastSyncedAt": "2026-08-05T05:40:00Z",
-  "notesForNextSession": "T-0217..T-0219 (share cards + SEO for every public URL) are in REVIEW, coupled to frontend T-0293..T-0295.\n\nDEPLOY ORDER: API first, then the web image, then hand-sync the Caddyfile. The @crawler matcher now lists /home /events /events/* /gallery /gallery/* alongside /u/* and /roster, and a path listed there with no route under /api/seo/* returns a JSON 404 that an unfurler renders as a broken preview. deploy/README.md step 4 carries the verification loop, including the check people skip (humans must still get <app-root> on /home and /gallery).\n\nNon-obvious decisions worth not relitigating. (1) / is NOT in the matcher and /home is there instead - Cloudflare caches / and honours Vary only for Accept-Encoding, so a UA-varying / puts this document in the edge cache in front of every human. The sitemap lists /home for the same reason. (2) The gallery shell renders a full page now, not a head full of meta tags: googlebot is in the same UA regex as discordbot, and a stub for a search engine while humans get the Angular page is cloaking whatever the intent was. (3) GalleryShareService is EXPORTED and SeoService delegates to it, so /api/share/gallery/:id and /api/seo/gallery/:id are one implementation - the legacy path has to keep working while the Caddyfile on the box is un-synced. (4) The gallery shell will not resolve a member handle to link an author's profile: MembersModule already imports GalleryModule, so that edge is a cycle. (5) A VideoObject is only claimed with a poster AND an upload date; without them it degrades to CreativeWork, because an incomplete VideoObject is a structured-data error. (6) Titles are '<page> | <Regiment>' on both surfaces now via documentTitle() in seo/html/brand.ts - the shells used an em dash while the SPA used a pipe, so every crawlable URL had two titles. (7) og-html.ts is gone; escapeHtml lives in seo/html/escape-html.ts.\n\nVerification state: 1270 tests green, eslint + prettier clean, tsc clean. Routing exercised against a throwaway Caddy on :8899 in front of the dev stack. NOT done: there is no uploaded VIDEO in the dev gallery, so the og:video path is unit-tested only and has never been pasted into a real Discord channel - that is the one pending testPlan item on T-0218.\n\nDev-container trap hit twice this session: a stale root-owned tsconfig.build.tsbuildinfo makes `nest start --watch` report 'Found 0 errors' and emit nothing, so the container boots with 'Cannot find module /app/dist/main' and serves the PREVIOUS build. `docker compose exec api rm -f /app/tsconfig.build.tsbuildinfo && docker compose restart api` fixes it.",
-  "nextIdCounter": 220,
+  "lastSyncedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
+  "lastSyncedAt": "2026-08-05T18:30:00Z",
+  "notesForNextSession": "T-0297..T-0299 are in REVIEW as PR #84, coupled to frontend PR 71 (T-0297..T-0299 there). MERGE BOTH or neither.\n\nTHE ROOT CAUSE, so nobody re-diagnoses it: every link on the site unfurled identically NOT because the shells were wrong but because production ran a Caddyfile predating even the T-0197 gallery unfurler. /api/seo/* has been correct and live the whole time. Four commands prove it and they are now in deploy/README.md: a crawler-path response carrying `Vary: Accept-Encoding` + `Cache-Control: no-store` is the WEB NGINX answering (the API sends Vary: User-Agent + max-age=600); `cf-cache-status: DYNAMIC` rules Cloudflare out; www/home returning 200 not 301 and /sitemap.xml returning text/html each independently prove the Caddyfile is old. Cloudflare's certificate setup is NOT involved - that was the first guess and it was wrong.\n\nWHAT CHANGED SO IT CANNOT RECUR: the frontend's nginx.conf now carries the same crawler routing and ships inside the web image, so `deploy web <tag>` is enough. Caddy still wins when synced (handle blocks are mutually exclusive and file-ordered), so the two layers cannot disagree - both proxy the same path to the same API. The Caddyfile is STILL worth syncing: nginx cannot do the www->apex 301 because it never sees a request Caddy answered on another hostname.\n\nDECISIONS TAKEN WITH THE OWNER, do not relitigate. (1) The profile card image is the AVATAR always, not the banner - his call, and it means twitter:card is `summary` (small thumbnail) by design; shape:'square' DECLARES that rather than suffering Discord's demotion of a square file. The banner renders in the body instead. (2) The attendance count is dead everywhere - roster column, profile particulars, CSV export and both meta descriptions. It read 0 for most of the roster. (3) The Discord tag stays in the Owner-only CSV export but is gone from the roster row; flagged in the PR as reversible.\n\nTWO LIVE BUGS FIXED IN PASSING, both silent: ROSTER_PAGE_SIZE was 50 against the SPA's 25, so /roster?page=2 served members 51-100 to a crawler and 26-50 to Googlebot's render pass. And no member past roster page 1 had a single internal link pointing at them anywhere on the site (rel=prev/next stopped being an indexing signal in 2019; the SPA paginates with buttons).\n\nNOT DONE. (a) The e2e suite has not been run against the isolated database this session - unit + spec suites are green (1286 BE, 802 FE) and test/post-mvp.e2e-spec.ts WAS edited for the T-0298 projection change, so run it before merging. (b) Nothing has been pasted into a real Discord channel; the oEmbed author line is unit-tested only. Discord caches an unfurl ~30min with no purge, so append a throwaway query string when re-testing. (c) The Caddyfile on the box is still un-synced. (d) Search Console: the sitemap has never been submitted, and deploy/README.md is explicit that Authenticated Origin Pulls + TRUST_CF_CONNECTING_IP must land FIRST - the throttler keys on req.ip which behind Cloudflare is always Caddy, so one Googlebot pass drains the bucket for every signed-in member.\n\nAn auditor flagged `eventStatus: EventScheduled` on concluded events as a bug. It is not - schema.org's enum has no 'already happened' member, and a past endDate is what conveys that. Left alone deliberately, with a comment saying so.",
+  "nextIdCounter": 300,
   "connections": [],
   "tasks": [
     {
@@ -516,7 +516,7 @@
     },
     {
       "id": "T-0010",
-      "title": "MembersModule \u2014 roster + admin actions + GDPR",
+      "title": "MembersModule — roster + admin actions + GDPR",
       "summary": "GET /members (filter + pagination), GET/PATCH /members/:id, admin actions (change rank/role, award/remove medal, suspend, ban, unban), service-record and command-info reads, and GDPR (deletion-request + confirm + export). Derived values (chevrons, events_attended, attendance_percent) computed server-side. Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -542,7 +542,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Members admin actions now enqueue Discord sync jobs \u2014 ban\u2192kick (gated by kickOnBan, DEFAULT OFF and re-checked at execution time) and rank/role/medal\u2192role-sync. All best-effort (never throw to the caller) and no-op when the bot is disabled; but any change to the enqueuer/gating affects moderation + role sync.",
+          "desc": "Members admin actions now enqueue Discord sync jobs — ban→kick (gated by kickOnBan, DEFAULT OFF and re-checked at execution time) and rank/role/medal→role-sync. All best-effort (never throw to the caller) and no-op when the bot is disabled; but any change to the enqueuer/gating affects moderation + role sync.",
           "status": "resolved",
           "notedAt": "2026-07-11T22:00:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -580,7 +580,7 @@
     },
     {
       "id": "T-0011",
-      "title": "RanksModule \u2014 CRUD + reorder + link-discord",
+      "title": "RanksModule — CRUD + reorder + link-discord",
       "summary": "Ranks CRUD, precedence reorder, and Discord-role link fields (the sync itself lands with the bot). Entity + seed exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -641,7 +641,7 @@
     },
     {
       "id": "T-0012",
-      "title": "MedalsModule \u2014 CRUD + link-discord",
+      "title": "MedalsModule — CRUD + link-discord",
       "summary": "Medals catalog CRUD and Discord-role link fields; holders_count derived server-side. Entity + seed exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -757,7 +757,7 @@
     },
     {
       "id": "T-0014",
-      "title": "ApplicationsModule \u2014 intake + decisions + promote",
+      "title": "ApplicationsModule — intake + decisions + promote",
       "summary": "Public POST /applications intake, admin list/detail, approve/decline/hold with moderator_note + discord_dm_message. Approve promotes to a members row (link identity, default rank, role=Member, set promoted_member_id, service-record + audit). Honors open_recruitment and reapplication detection. Entity exists; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -813,7 +813,7 @@
     },
     {
       "id": "T-0015",
-      "title": "EventsModule \u2014 CRUD + RSVP + attendees + password reveal",
+      "title": "EventsModule — CRUD + RSVP + attendees + password reveal",
       "summary": "Events CRUD (+ draft/archive), child writes for platforms/tags/notify_offsets, RSVP, attendee check-in, and the sensitive POST /:id/reveal-password (gated on RSVP + reveal_event_passwords capability, decrypts server_password, writes an audit row). Public vs member serialization; a scheduled job advances status upcoming->ongoing->previous. Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -868,7 +868,7 @@
     },
     {
       "id": "T-0016",
-      "title": "GalleryModule \u2014 submit + moderation + likes",
+      "title": "GalleryModule — submit + moderation + likes",
       "summary": "POST /gallery submit (forces pending), public GET (approved only) + filters, approve/decline moderation (auto_approve_trusted honored), like toggle, tagged members, soft-delete. Stores file URLs/refs only in v1; enforces regiment_settings size/type limits. Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -923,7 +923,7 @@
     },
     {
       "id": "T-0017",
-      "title": "AuditModule \u2014 read-only ledger",
+      "title": "AuditModule — read-only ledger",
       "summary": "GET /audit (filter severity/actor/action/date + search + pagination), GET /audit/:id (before/after drawer), GET /audit/export (CSV). Append-only, no write API (writes come from T-0007). Entities exist; read module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -978,8 +978,8 @@
     },
     {
       "id": "T-0018",
-      "title": "NotificationsModule \u2014 field dispatches",
-      "summary": "GET /notifications, POST /notifications (compose \u2014 admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
+      "title": "NotificationsModule — field dispatches",
+      "summary": "GET /notifications, POST /notifications (compose — admin), POST /:id/read, GET /notifications/unread-count (notification_reads). Entities exist; module unbuilt.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -1033,7 +1033,7 @@
     },
     {
       "id": "T-0019",
-      "title": "SettingsModule \u2014 config + permissions matrix + hazardous ops",
+      "title": "SettingsModule — config + permissions matrix + hazardous ops",
       "summary": "GET/PATCH /settings (profile, visibility toggles, gallery/event defaults, Holdfast server, backups/retention), GET/PATCH /settings/permissions (edit the role_permissions matrix that CapabilitiesGuard reads), and hazardous ops: transfer-ownership, transfer-discord, dissolve. regiment_settings entity exists; module unbuilt.",
       "status": "deployed",
       "type": "feature",
@@ -1152,7 +1152,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created during bf-init; Phase 07 \u2014 new schema + net-new bot runtime"
+          "note": "created during bf-init; Phase 07 — new schema + net-new bot runtime"
         },
         {
           "at": "2026-07-11T22:00:00Z",
@@ -1231,7 +1231,7 @@
     {
       "id": "T-0022",
       "title": "Bot onboarding automation + slash commands",
-      "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami \u2014 resolve against the same services, ephemeral responses.",
+      "summary": "On GuildMemberAdd: send welcome (DM/channel per settings) + auto-assign join_role_id; optional reaction-roles. Guild-scoped slash commands registered on boot: /roster, /event, /apply, /whoami — resolve against the same services, ephemeral responses.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -1262,7 +1262,7 @@
       ],
       "regressionRisk": [],
       "skippedByClaude": [
-        "Slash commands (/roster /event /apply /whoami) \u2014 owner decided (T-0027) the bot is role-sync + announcements only; members use the webapp. Reaction-roles also deferred (T-0027 Q3)."
+        "Slash commands (/roster /event /apply /whoami) — owner decided (T-0027) the bot is role-sync + announcements only; members use the webapp. Reaction-roles also deferred (T-0027 Q3)."
       ],
       "lastTouchedCommit": "9d76e138d95c63548ee9ec1b5d8c5e1daca8e2de",
       "createdAt": "2026-07-11T00:50:59Z",
@@ -1280,7 +1280,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Built MOCK-first with REDUCED scope per owner (T-0027): NO slash commands \u2014 onboarding is welcome + auto-assign the Guest join role only. Real GuildMemberAdd wiring is in RealDiscordGateway; exercised via a mock simulate endpoint. PR #4."
+          "note": "Built MOCK-first with REDUCED scope per owner (T-0027): NO slash commands — onboarding is welcome + auto-assign the Guest join role only. Real GuildMemberAdd wiring is in RealDiscordGateway; exercised via a mock simulate endpoint. PR #4."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -1294,7 +1294,7 @@
     {
       "id": "T-0029",
       "title": "Containerize all config + purge XAMPP (zero-config `up`)",
-      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology \u2014 DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
+      "summary": "Make Docker the only environment and make `docker compose up` boot zero-config. (a) Rewrite .env.example end-to-end: DB block off XAMPP (DB_HOST=db service, real dev password); auth/redirect/CORS for the same-origin proxied topology — DISCORD_CALLBACK_URL, FRONTEND_URL, FRONTEND_AUTH_SUCCESS/FAILURE_REDIRECT via the proxy origin (dev localhost / prod domain), CORS_ORIGINS set accordingly, session cookie secure/sameSite under TLS. (b) Provide Joi-valid dev secrets so the app boots with no hand-editing (committed dev env / compose env defaults or a dev entrypoint that generates a throwaway JWT_SECRET + 64-hex ENCRYPTION_KEY). (c) Purge residual XAMPP/localhost strings (README, CLAUDE.md, SCHEMA.md line 3, and the localhost/root DB defaults in configuration/env.validation/data-source). Prod secrets stay injected via env (T-0032).",
       "status": "deployed",
       "type": "chore",
       "size": "M",
@@ -1318,7 +1318,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` \u2014 no XAMPP, no host MySQL/Node, no hand-edited secrets",
+          "desc": "a fresh clone with only Docker installed reaches /api/health via `docker compose up` — no XAMPP, no host MySQL/Node, no hand-edited secrets",
           "status": "passed"
         },
         {
@@ -1378,7 +1378,7 @@
     {
       "id": "T-0030",
       "title": "Containerized DB bootstrap & migration workflow (dev + prod)",
-      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id \u2014 the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
+      "summary": "MySQL 8 as the `db` compose service (named volume, healthcheck, utf8mb4) and a DB lifecycle that works in BOTH the dev and the slim prod image. Dev: `docker compose run --rm api npm run db:setup` + idempotent auto-migrate on boot. Prod: a ts-node-free path (compiled JS data-source + migration:run/seed scripts) runnable in the slim runtime, wired as a one-shot init service that api depends_on with condition service_completed_successfully. Also provision a real Owner on first boot (seed/claim a configurable owner Discord id — the dev-only owner seed is not valid for prod) and drop the create-database.ts XAMPP localhost/root defaults. Replaces the host-MySQL, ts-node-only db:setup assumption end-to-end.",
       "status": "deployed",
       "type": "infra",
       "size": "L",
@@ -1451,7 +1451,7 @@
     {
       "id": "T-0031",
       "title": "Fully-containerized dev workflow (devcontainer + hot reload, api + web)",
-      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too \u2014 bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
+      "summary": "Developer ergonomics so only Docker is needed on the host. api: nest watch hot-reload inside the container (source bind-mount + anonymous node_modules volume), all commands (test/lint/migration/seed) run via `docker compose exec api ...`, and a .devcontainer/ to attach editors. web: define the dev service in docker-compose.override.yml too — bind-mount the sibling ../lords-regiment-dashboard, protect node_modules with an anonymous volume, run ng serve, and point proxy.conf at the compose host api:3000 (not localhost). Backs the 'no local environment' guarantee with dev/prod image parity.",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -1528,7 +1528,7 @@
     {
       "id": "T-0032",
       "title": "MVP production deploy (unified prod compose)",
-      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs \u2014 register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost \u2014 a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025). [2026-07-20] The server half is DONE: the OVH VPS-1 exists (Debian 13, IP in the DEPLOY_HOST secret), Phase 3 steps 1-9 were completed by the owner, and this session provisioned everything else - app dir, compose/Caddyfile/mysql config, a 0600 .env with real generated secrets, helper scripts, rclone, systemd user units, the CI forced-command key, and the deploy workflow. What remains is purely credentials and DNS, none of which Claude can obtain: the 8 placeholder values in ~/lords/.env (ACME_EMAIL, the 3 Discord values, OWNER_DISCORD_ID, the 3 R2 values), the GHCR read:packages PAT, the lords-backups R2 token, the DEPLOY_SSH_KEY GitHub secret, and the apex + www Cloudflare A/CNAME records (cdn. is already bound to R2).",
+      "summary": "Ship the MVP: deploy the api + db + web prod compose to a single host (target per T-0028), fronted by a reverse proxy with TLS (Caddy/Traefik), real secrets via env, a persistent MySQL volume + backup. Includes the Discord PRODUCTION app config the smoke test needs — register the prod redirect URI in the Developer Portal and set prod OAuth/redirect env off localhost — a minimal pre-exposure config check (real JWT_SECRET/ENCRYPTION_KEY/Discord secrets, CORS_ORIGINS = prod origin), and cloning/pulling BOTH repos on the deploy host so the web build context resolves. Post-deploy smoke: real Discord sign-in -> roster + core admin action round-trips. MVP go-live, ahead of the bot + full hardening pass (T-0025). [2026-07-20] The server half is DONE: the OVH VPS-1 exists (Debian 13, IP in the DEPLOY_HOST secret), Phase 3 steps 1-9 were completed by the owner, and this session provisioned everything else - app dir, compose/Caddyfile/mysql config, a 0600 .env with real generated secrets, helper scripts, rclone, systemd user units, the CI forced-command key, and the deploy workflow. What remains is purely credentials and DNS, none of which Claude can obtain: the 8 placeholder values in ~/lords/.env (ACME_EMAIL, the 3 Discord values, OWNER_DISCORD_ID, the 3 R2 values), the GHCR read:packages PAT, the lords-backups R2 token, the DEPLOY_SSH_KEY GitHub secret, and the apex + www Cloudflare A/CNAME records (cdn. is already bound to R2).",
       "status": "deployed",
       "type": "infra",
       "size": "L",
@@ -1634,8 +1634,8 @@
     },
     {
       "id": "T-0033",
-      "title": "Real Discord bot go-live (mock \u2192 real gateway + creds)",
-      "summary": "Swap the mock gateway/OAuth for the real Discord app when the owner provides credentials: set DISCORD_MOCK/DISCORD_BOT_MOCK=false + tokens, register the redirect URI, enable the GUILD_MEMBERS intent, position the bot role, wire channels/join-role from the admin UI, and RE-REVIEW the sensitive ban\u2192kick (kickOnBan) with the owner before enabling it. Runbook: project-plan/DISCORD_GOLIVE.md. Then post-go-live smoke (real sign-in, one role sync, one announcement).",
+      "title": "Real Discord bot go-live (mock → real gateway + creds)",
+      "summary": "Swap the mock gateway/OAuth for the real Discord app when the owner provides credentials: set DISCORD_MOCK/DISCORD_BOT_MOCK=false + tokens, register the redirect URI, enable the GUILD_MEMBERS intent, position the bot role, wire channels/join-role from the admin UI, and RE-REVIEW the sensitive ban→kick (kickOnBan) with the owner before enabling it. Runbook: project-plan/DISCORD_GOLIVE.md. Then post-go-live smoke (real sign-in, one role sync, one announcement).",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -1662,7 +1662,7 @@
           "answeredAt": "2026-07-12T00:54:54.294Z"
         },
         {
-          "q": "Confirm (re-review) whether to enable kickOnBan in production \u2014 an app ban would then also kick the member from the Discord guild.",
+          "q": "Confirm (re-review) whether to enable kickOnBan in production — an app ban would then also kick the member from the Discord guild.",
           "answer": "no, check latest tasks on blueframe",
           "askedAt": "2026-07-11T22:00:00Z",
           "answeredAt": "2026-07-12T00:55:18.808Z"
@@ -1778,7 +1778,7 @@
     },
     {
       "id": "T-0035",
-      "title": "Replace ban\u2192kick with strip-roles + apply Ban role",
+      "title": "Replace ban→kick with strip-roles + apply Ban role",
       "summary": "Remove the KICK_MEMBERS-dependent `kickMember` path. On an app-side ban the bot instead removes the member's managed Discord roles and assigns the configured Ban role. Rename the `kickOnBan` gate to `applyBanRoleOnBan` (keep the enqueue-time + drain-time double gate), swap the `member.kick` job type/audit action for `member.ban_role`, and drop `kickMember` from the gateway abstraction and both implementations.",
       "status": "deployed",
       "type": "feature",
@@ -1811,7 +1811,7 @@
       ],
       "questions": [
         {
-          "q": "Rename kickOnBan \u2192 applyBanRoleOnBan (breaking DTO field change), or keep the field name and only change behaviour?",
+          "q": "Rename kickOnBan → applyBanRoleOnBan (breaking DTO field change), or keep the field name and only change behaviour?",
           "answer": "Yes, replace it.",
           "askedAt": "2026-07-11T00:00:00Z",
           "answeredAt": "2026-07-12T00:49:50.594Z"
@@ -1841,7 +1841,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "settings DTO contract changes (kickOnBan field removed/renamed, member.kick job+audit retired) \u2014 the Angular Settings page and any consumers of the audit action string must be updated in lockstep",
+          "desc": "settings DTO contract changes (kickOnBan field removed/renamed, member.kick job+audit retired) — the Angular Settings page and any consumers of the audit action string must be updated in lockstep",
           "status": "resolved",
           "notedAt": "2026-07-11T00:00:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -1880,7 +1880,7 @@
     {
       "id": "T-0036",
       "title": "Drop KICK_MEMBERS from bot invite + refresh go-live docs",
-      "summary": "The bot now only needs Manage Roles + Send Messages, so remove Kick Members from the invite instructions and the permissions integer (268437506 \u2192 268437504), and rewrite the 'ban \u2192 kick' section of the go-live runbook to describe the Ban-role flow and the renamed setting. Update README and .env.example bot comments to match.",
+      "summary": "The bot now only needs Manage Roles + Send Messages, so remove Kick Members from the invite instructions and the permissions integer (268437506 → 268437504), and rewrite the 'ban → kick' section of the go-live runbook to describe the Ban-role flow and the renamed setting. Update README and .env.example bot comments to match.",
       "status": "deployed",
       "type": "chore",
       "size": "S",
@@ -1944,8 +1944,8 @@
     },
     {
       "id": "T-0038",
-      "title": "Sync apply-form age copy 16 \u2192 18 (frontend companion)",
-      "summary": "Cross-repo companion to T-0037 in the Angular app. Update the application-form age-confirmation checkbox label ('I confirm that I am 16 years of age or older \u2026') to 18 in lords-regiment-dashboard so the client-facing requirement matches the API. Copy-only; ships with T-0037. Implementation lands in the frontend repo (src/app/features/onboarding/application-form/application-form.component.html); tracked here for coordination.",
+      "title": "Sync apply-form age copy 16 → 18 (frontend companion)",
+      "summary": "Cross-repo companion to T-0037 in the Angular app. Update the application-form age-confirmation checkbox label ('I confirm that I am 16 years of age or older …') to 18 in lords-regiment-dashboard so the client-facing requirement matches the API. Copy-only; ships with T-0037. Implementation lands in the frontend repo (src/app/features/onboarding/application-form/application-form.component.html); tracked here for coordination.",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -1981,7 +1981,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created via bf-plan: frontend companion to T-0037 (apply-form age label 16 \u2192 18)"
+          "note": "created via bf-plan: frontend companion to T-0037 (apply-form age label 16 → 18)"
         },
         {
           "at": "2026-07-12T02:35:00Z",
@@ -2002,7 +2002,7 @@
     {
       "id": "T-0039",
       "title": "Reshape applications intake to the current enlistment-form fields",
-      "summary": "Replace the generic application questions with the regiment's real 'Application for Enlistment' fields (per the live Discord form): keep inGameName; convert howFound from a constrained enum to the free-text 'How did you find/hear about the Lords of Holdfast?'; add currentRegiment, preferredClasses, skillsToImprove, an interest/enlist-in-game confirmation, and an optional representative/guest note; drop whyJoin and the fields the form no longer collects (platform, timezone, priorExperience, applicantType). Touches the entity, a new idempotent migration, CreateApplicationDto validation, the ApplicationDto projection, the service mapping + reapplication detection, SCHEMA.md \u00a73.5, and the enum barrel. Unit + e2e specs updated.",
+      "summary": "Replace the generic application questions with the regiment's real 'Application for Enlistment' fields (per the live Discord form): keep inGameName; convert howFound from a constrained enum to the free-text 'How did you find/hear about the Lords of Holdfast?'; add currentRegiment, preferredClasses, skillsToImprove, an interest/enlist-in-game confirmation, and an optional representative/guest note; drop whyJoin and the fields the form no longer collects (platform, timezone, priorExperience, applicantType). Touches the entity, a new idempotent migration, CreateApplicationDto validation, the ApplicationDto projection, the service mapping + reapplication detection, SCHEMA.md §3.5, and the enum barrel. Unit + e2e specs updated.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -2026,13 +2026,13 @@
       "blocks": [],
       "questions": [
         {
-          "q": "The live form (Discord embed) drops platform, timezone, priorExperience, whyJoin and age confirmation, and asks howFound as free text. Confirm the exact final field set: (a) hard-drop those columns vs keep them nullable/hidden; (b) convert howFound enum \u2192 free text (retires the how_found enum + derived label); (c) keep or drop applicantType (Applicant/Mercenary) given the new 'representative/guest note' question.",
+          "q": "The live form (Discord embed) drops platform, timezone, priorExperience, whyJoin and age confirmation, and asks howFound as free text. Confirm the exact final field set: (a) hard-drop those columns vs keep them nullable/hidden; (b) convert howFound enum → free text (retires the how_found enum + derived label); (c) keep or drop applicantType (Applicant/Mercenary) given the new 'representative/guest note' question.",
           "answer": "You are free to do anything with database since it is not deployed. we dont have production data so do whatever you want.",
           "askedAt": "2026-07-11T23:15:00Z",
           "answeredAt": "2026-07-12T00:51:09.982Z"
         },
         {
-          "q": "The new form has no age gate, but T-0037/T-0038 are raising the stated minimum age 16 \u2192 18. Should ageConfirmed be removed entirely (superseding T-0037/T-0038), kept as a separate checkbox alongside the new questions, or handled some other way?",
+          "q": "The new form has no age gate, but T-0037/T-0038 are raising the stated minimum age 16 → 18. Should ageConfirmed be removed entirely (superseding T-0037/T-0038), kept as a separate checkbox alongside the new questions, or handled some other way?",
           "answer": "it is frontend concern, backend should not be invovled for this",
           "askedAt": "2026-07-11T23:15:00Z",
           "answeredAt": "2026-07-12T00:51:36.911Z"
@@ -2165,7 +2165,7 @@
     {
       "id": "T-0041",
       "title": "Per-purpose Discord channel routing (settings + channel picker)",
-      "summary": "Extend discord_bot_settings with three configurable, admin-editable target channels \u2014 enlistments, audit log, and event announcements \u2014 alongside the existing announcement/welcome channels. Add a `listChannels()` gateway capability + a text-channel picker surfaced through verify-connection (mirroring the role picker), expose the new ids/names on the settings DTO GET/PATCH, and a new idempotent migration + seed that pre-fills the default channel names (#new-enlistments, #audit-logs, #event-announcements). This is the foundation the three producers (T-0042/T-0043/T-0044) route through.",
+      "summary": "Extend discord_bot_settings with three configurable, admin-editable target channels — enlistments, audit log, and event announcements — alongside the existing announcement/welcome channels. Add a `listChannels()` gateway capability + a text-channel picker surfaced through verify-connection (mirroring the role picker), expose the new ids/names on the settings DTO GET/PATCH, and a new idempotent migration + seed that pre-fills the default channel names (#new-enlistments, #audit-logs, #event-announcements). This is the foundation the three producers (T-0042/T-0043/T-0044) route through.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -2283,7 +2283,7 @@
           "status": "passed"
         },
         {
-          "desc": "with botEnabled=false (or enqueue failure) submit still succeeds and enqueues nothing \u2014 best-effort, never throws to the applicant",
+          "desc": "with botEnabled=false (or enqueue failure) submit still succeeds and enqueues nothing — best-effort, never throws to the applicant",
           "status": "passed"
         },
         {
@@ -2293,12 +2293,12 @@
       ],
       "regressionRisk": [
         {
-          "desc": "ApplicationsService gains a new dependency on the Discord sync service \u2014 the public POST /applications path must stay best-effort so a bot/enqueue failure can never break intake",
+          "desc": "ApplicationsService gains a new dependency on the Discord sync service — the public POST /applications path must stay best-effort so a bot/enqueue failure can never break intake",
           "status": "resolved",
           "notedAt": "2026-07-11T23:45:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
           "resolvedBy": "claude",
-          "note": "ApplicationsService enqueue is guarded/best-effort (never throws, no-ops when the bot is off) \u2014 public POST /applications intake cannot be broken by a bot/enqueue failure. Verified."
+          "note": "ApplicationsService enqueue is guarded/best-effort (never throws, no-ops when the bot is off) — public POST /applications intake cannot be broken by a bot/enqueue failure. Verified."
         }
       ],
       "skippedByClaude": [],
@@ -2355,7 +2355,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "Audit is high-volume: which entries should cross-post to #audit-logs \u2014 every entry, or only a filtered set (e.g. warning/critical severity + key moderation/settings actions)? And should posts be batched/throttled to stay within the Discord channel rate limit?",
+          "q": "Audit is high-volume: which entries should cross-post to #audit-logs — every entry, or only a filtered set (e.g. warning/critical severity + key moderation/settings actions)? And should posts be batched/throttled to stay within the Discord channel rate limit?",
           "answer": "every entry",
           "askedAt": "2026-07-11T23:45:00Z",
           "answeredAt": "2026-07-12T00:53:19.374Z"
@@ -2598,7 +2598,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "every protected route depends on this resolver \u2014 a bug breaks all authorization, and an uncached lookup adds a DB round-trip to every authenticated request (perf).",
+          "desc": "every protected route depends on this resolver — a bug breaks all authorization, and an uncached lookup adds a DB round-trip to every authenticated request (perf).",
           "status": "resolved",
           "notedAt": "2026-07-11T23:55:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -2667,7 +2667,7 @@
       ],
       "testPlan": [
         {
-          "desc": "a freshly issued JWT decodes to exactly { sub, did, iat, exp } \u2014 rid, role and mid are absent",
+          "desc": "a freshly issued JWT decodes to exactly { sub, did, iat, exp } — rid, role and mid are absent",
           "status": "passed"
         },
         {
@@ -2685,7 +2685,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "the JWT payload is a public contract \u2014 any code (or the frontend) that decodes role/rid/mid out of the raw token will break; must confirm no consumer reads token claims directly.",
+          "desc": "the JWT payload is a public contract — any code (or the frontend) that decodes role/rid/mid out of the raw token will break; must confirm no consumer reads token claims directly.",
           "status": "resolved",
           "notedAt": "2026-07-11T23:55:00Z",
           "resolvedAt": "2026-07-12T02:35:00Z",
@@ -2810,8 +2810,8 @@
     },
     {
       "id": "T-0049",
-      "title": "Frontend companion \u2014 treat /auth/me as the sole source of role/membership",
-      "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): ensure no authorization decision decodes role/regiment/membership out of the raw JWT (those claims are being removed), and that the app re-hydrates from GET /auth/me as the single source of truth \u2014 including after an applicant is approved, so the promoted member sees Member access without a manual re-login. Tracked here for coordination; implementation lands in the frontend repo.",
+      "title": "Frontend companion — treat /auth/me as the sole source of role/membership",
+      "summary": "Cross-repo companion in the Angular app (lords-regiment-dashboard): ensure no authorization decision decodes role/regiment/membership out of the raw JWT (those claims are being removed), and that the app re-hydrates from GET /auth/me as the single source of truth — including after an applicant is approved, so the promoted member sees Member access without a manual re-login. Tracked here for coordination; implementation lands in the frontend repo.",
       "status": "deployed",
       "type": "chore",
       "size": "S",
@@ -2938,7 +2938,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3000,7 +3000,7 @@
           "notedAt": "2026-07-12T15:23:11Z",
           "resolvedAt": "2026-07-12T19:02:09Z",
           "resolvedBy": "claude",
-          "note": "Resolved: no code branches on the stored `scopes` string value (grep-confirmed \u2014 only writes). Existing `identify email guilds` rows are inert; the next sign-in overwrites with `identify email`. dev-owner seed updated."
+          "note": "Resolved: no code branches on the stored `scopes` string value (grep-confirmed — only writes). Existing `identify email guilds` rows are inert; the next sign-in overwrites with `identify email`. dev-owner seed updated."
         }
       ],
       "skippedByClaude": [],
@@ -3020,7 +3020,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3084,7 +3084,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3156,7 +3156,7 @@
           "from": "planned",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded \u2014 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
+          "note": "Guilds-scope removal shipped: guildMember now resolved from the bot's DiscordGateway.fetchMember at sign-in (guarded — 4s timeout + try/catch, never throws/blocks login); `guilds` dropped from DISCORD_SCOPES everywhere; dead fetchGuilds/isMemberOfGuild + DiscordGuild removed; mock gateway pre-seeds the owner persona for parity. 226 unit + 35 e2e green, lint+build clean, adversarial review clean on all 7 axes. VERIFIED LIVE against the real test guild: the authorize URL scope is `identify email` (no guilds) and the bot REST member lookup resolves in-guild (200) vs non-member (404). On feat/guilds-scope-and-applicant-self-service."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3203,7 +3203,7 @@
           "status": "passed"
         },
         {
-          "desc": "full unit + e2e suite green; verified live end-to-end (submit \u2192 mine \u2192 edit)",
+          "desc": "full unit + e2e suite green; verified live end-to-end (submit → mine → edit)",
           "status": "passed"
         }
       ],
@@ -3227,7 +3227,7 @@
           "from": null,
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Built GET /applications/mine + PATCH /applications/mine (apply_to_join, scoped to the caller's Discord identity; edit only a PENDING app, re-bumps the officer queue). 226 unit + 35 e2e green; verified live via JWT smoke (submit\u2192mine\u2192edit round-trips). Frontend status page + edit form shipped in lockstep (lords-regiment-dashboard:T-0028/29/31)."
+          "note": "Built GET /applications/mine + PATCH /applications/mine (apply_to_join, scoped to the caller's Discord identity; edit only a PENDING app, re-bumps the officer queue). 226 unit + 35 e2e green; verified live via JWT smoke (submit→mine→edit round-trips). Frontend status page + edit form shipped in lockstep (lords-regiment-dashboard:T-0028/29/31)."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3272,7 +3272,7 @@
           "status": "passed"
         },
         {
-          "desc": "a blocked identity is refused a new submit (403) \u2014 checked before recruitment/priors",
+          "desc": "a blocked identity is refused a new submit (403) — checked before recruitment/priors",
           "status": "passed"
         },
         {
@@ -3300,14 +3300,14 @@
           "from": null,
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Built the applicant blocklist: POST /applications/:id/{block,unblock} (manage_applications) set/clear applications_blocked_* on discord_identities (idempotent migration), and submit() rejects a blocked identity FIRST. Audited (application.block/unblock seeded). Verified live: block \u2192 applicant sees blocked + resubmit 403; applicant-block 403; unblock clears. Frontend admin block UI shipped in lockstep."
+          "note": "Built the applicant blocklist: POST /applications/:id/{block,unblock} (manage_applications) set/clear applications_blocked_* on discord_identities (idempotent migration), and submit() rejects a blocked identity FIRST. Audited (application.block/unblock seeded). Verified live: block → applicant sees blocked + resubmit 403; applicant-block 403; unblock clears. Frontend admin block UI shipped in lockstep."
         },
         {
           "at": "2026-07-12T19:12:00Z",
           "from": "deploy_ready",
           "to": "deploy_ready",
           "by": "claude",
-          "note": "Security-review hardening: blocking now also declines any open (Pending/Held) application by that identity and updateMine rejects a blocked identity \u2014 so a blocked applicant can no longer PATCH-spam the officer queue or be approved despite the block. e2e asserts block\u2192declined + PATCH-while-blocked 403."
+          "note": "Security-review hardening: blocking now also declines any open (Pending/Held) application by that identity and updateMine rejects a blocked identity — so a blocked applicant can no longer PATCH-spam the officer queue or be approved despite the block. e2e asserts block→declined + PATCH-while-blocked 403."
         },
         {
           "at": "2026-07-17T00:00:00.000Z",
@@ -3356,12 +3356,12 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Settings contract gains setupComplete + a flip endpoint; the frontend first-run routing (Owner \u2192 admin settings) must consume it.",
+          "desc": "Settings contract gains setupComplete + a flip endpoint; the frontend first-run routing (Owner → admin settings) must consume it.",
           "status": "resolved",
           "notedAt": "2026-07-12T19:02:09Z",
           "resolvedAt": "2026-07-12T19:02:09Z",
           "resolvedBy": "claude",
-          "note": "Frontend first-run routing (routeAfterLogin: Owner + setupComplete=false \u2192 /admin/settings) shipped in lockstep on lords-regiment-dashboard:T-0037."
+          "note": "Frontend first-run routing (routeAfterLogin: Owner + setupComplete=false → /admin/settings) shipped in lockstep on lords-regiment-dashboard:T-0037."
         }
       ],
       "skippedByClaude": [],
@@ -3388,7 +3388,7 @@
     {
       "id": "T-0057",
       "title": "Drop OWNER_NAME env; default the seeded Owner display name to \"Admin\"",
-      "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY \u2014 the non-member /auth/me fallback ('Recruit') is left unchanged.",
+      "summary": "Stop deriving the Owner's display name from the environment. Remove OWNER_NAME from .env.example and stop reading process.env.OWNER_NAME in the owner seed; the Owner is claimed solely by OWNER_DISCORD_ID. The seeded Owner's member.name and identity.globalName default to the literal \"Admin\", which the Owner edits post-sign-in (see T-0058). Scope is the SEEDED OWNER ONLY — the non-member /auth/me fallback ('Recruit') is left unchanged.",
       "status": "deployed",
       "type": "chore",
       "size": "S",
@@ -3406,7 +3406,7 @@
       ],
       "questions": [
         {
-          "q": "\"Default name Admin for all\" \u2014 does this also change the non-member /auth/me identity fallback (currently 'Recruit' in auth.service.toIdentityProjection), or only seeded member/owner names? Assuming member/owner names only.",
+          "q": "\"Default name Admin for all\" — does this also change the non-member /auth/me identity fallback (currently 'Recruit' in auth.service.toIdentityProjection), or only seeded member/owner names? Assuming member/owner names only.",
           "answer": "Seeded Owner only. Do NOT change the 'Recruit' identity fallback in auth.service.toIdentityProjection; 'Admin' applies solely to the seeded Owner's member.name / identity.globalName.",
           "askedAt": "2026-07-12T00:00:00Z",
           "answeredAt": "2026-07-12T00:00:00Z"
@@ -3430,7 +3430,7 @@
           "status": "passed"
         },
         {
-          "desc": "non-member /auth/me still falls back to 'Recruit' (unchanged) \u2014 no regression to the applicant projection",
+          "desc": "non-member /auth/me still falls back to 'Recruit' (unchanged) — no regression to the applicant projection",
           "status": "passed"
         }
       ],
@@ -3561,7 +3561,7 @@
     {
       "id": "T-0059",
       "title": "Applicant decision DM (custom Discord DM on approve/decline/hold)",
-      "summary": "New DiscordSyncJobType.ApplicationDecision + enqueueApplicationDecision; approve/decline/hold accept an optional discordDmMessage and best-effort enqueue a DM to the applicant\u2019s linked Discord identity (empty message -> per-decision default template). Never blocks or rolls back the decision. Frontend counterpart of lords-regiment-dashboard:T-0045.",
+      "summary": "New DiscordSyncJobType.ApplicationDecision + enqueueApplicationDecision; approve/decline/hold accept an optional discordDmMessage and best-effort enqueue a DM to the applicant’s linked Discord identity (empty message -> per-decision default template). Never blocks or rolls back the decision. Frontend counterpart of lords-regiment-dashboard:T-0045.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -3602,7 +3602,7 @@
           "notedAt": "2026-07-12T22:20:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "The hazard is structurally removed in src/applications/applications.service.ts. `enqueueDecisionDm` (line ~547) wraps its entire body \u2014 identity lookup, message rendering, and `discordSync.enqueueApplicationDecision` \u2014 in a try/catch that only logs (`this.logger.error('Failed to enqueue ... decision DM')`), so no DM-side error can propagate. It is invoked at lines 448 (approve), 487 (decline) and 529 (hold), and on the approve path the call sits AFTER `await this.dataSource.transaction(...)` has returned `{ savedApplication, member }` and after the audit write, so it cannot roll the decision back. Missing identity / missing discordUserId return early and silently."
+          "note": "The hazard is structurally removed in src/applications/applications.service.ts. `enqueueDecisionDm` (line ~547) wraps its entire body — identity lookup, message rendering, and `discordSync.enqueueApplicationDecision` — in a try/catch that only logs (`this.logger.error('Failed to enqueue ... decision DM')`), so no DM-side error can propagate. It is invoked at lines 448 (approve), 487 (decline) and 529 (hold), and on the approve path the call sits AFTER `await this.dataSource.transaction(...)` has returned `{ savedApplication, member }` and after the audit write, so it cannot roll the decision back. Missing identity / missing discordUserId return early and silently."
         }
       ],
       "skippedByClaude": [],
@@ -3664,7 +3664,7 @@
           "notedAt": "2026-07-12T22:20:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "The changed query shape is pinned by src/audit/audit.service.spec.ts: 'returns the entry projection scoped to the regiment, eager-loading member identities' (line 100), 'resolves avatars to null when the actor has no member (system actor)' (line 148), 'throws NotFound for a missing/wrong-regiment entry' (line 174), plus the CSV path \u2014 'emits the header row and un-paginated, 10k-capped, newest-first read' (line 183), 'emits the actor/target avatar columns (custom, else Discord fallback)' (line 200) and 'quote-escapes commas and quotes and renders nulls as empty cells' (line 226). List, detail and CSV consumers of the actorMember/targetMember relations are all covered."
+          "note": "The changed query shape is pinned by src/audit/audit.service.spec.ts: 'returns the entry projection scoped to the regiment, eager-loading member identities' (line 100), 'resolves avatars to null when the actor has no member (system actor)' (line 148), 'throws NotFound for a missing/wrong-regiment entry' (line 174), plus the CSV path — 'emits the header row and un-paginated, 10k-capped, newest-first read' (line 183), 'emits the actor/target avatar columns (custom, else Discord fallback)' (line 200) and 'quote-escapes commas and quotes and renders nulls as empty cells' (line 226). List, detail and CSV consumers of the actorMember/targetMember relations are all covered."
         }
       ],
       "skippedByClaude": [],
@@ -4053,7 +4053,7 @@
           "notedAt": "2026-07-12T23:45:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "The shared upload surface is broadly pinned by src/storage/storage.service.spec.ts (439 lines): namespaced key generation per target (lines 62, 78), content-type rejection (88), image-only enforcement (98), size caps including the gallery video cap from regiment_settings (108, 118), capability 403 (136) and non-enrolled self-service 403 (147), plus getPolicy ceiling clamping (398, 426). Consumer wiring is covered downstream \u2014 e.g. src/members/members.service.spec.ts:379-390 asserts avatarKey/bannerKey are passed through resolveKeyToPublicUrl with the right StorageTarget \u2014 and the icon-policy contract is additionally pinned end-to-end in test/post-mvp.e2e-spec.ts."
+          "note": "The shared upload surface is broadly pinned by src/storage/storage.service.spec.ts (439 lines): namespaced key generation per target (lines 62, 78), content-type rejection (88), image-only enforcement (98), size caps including the gallery video cap from regiment_settings (108, 118), capability 403 (136) and non-enrolled self-service 403 (147), plus getPolicy ceiling clamping (398, 426). Consumer wiring is covered downstream — e.g. src/members/members.service.spec.ts:379-390 asserts avatarKey/bannerKey are passed through resolveKeyToPublicUrl with the right StorageTarget — and the icon-policy contract is additionally pinned end-to-end in test/post-mvp.e2e-spec.ts."
         },
         {
           "desc": "StorageService.resolveKeyToPublicUrl is the shared namespace-validation gate consumed by members/events/medals/ranks/gallery uploads; a bypass would let a caller claim another member's or another target's object key. Pinned by storage.service.spec (namespace + path-traversal + URL-overflow) and each consumer spec.",
@@ -4134,7 +4134,7 @@
           "notedAt": "2026-07-12T23:45:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "The whitelist guarantee is intact and the new fields did not loosen it. src/main.ts:35-37 still constructs the global ValidationPipe with `whitelist: true, forbidNonWhitelisted: true`. src/members/dto/update-member.dto.ts exposes exactly three optional, individually-validated fields (inGameName with Min/MaxLength, avatarKey and bannerKey as @IsString @MaxLength(512)) \u2014 role/status/rank remain absent. The keys are not trusted: members.service.ts:178-186 routes both through StorageService.resolveKeyToPublicUrl with the correct StorageTarget, pinned by members.service.spec.ts:379-390."
+          "note": "The whitelist guarantee is intact and the new fields did not loosen it. src/main.ts:35-37 still constructs the global ValidationPipe with `whitelist: true, forbidNonWhitelisted: true`. src/members/dto/update-member.dto.ts exposes exactly three optional, individually-validated fields (inGameName with Min/MaxLength, avatarKey and bannerKey as @IsString @MaxLength(512)) — role/status/rank remain absent. The keys are not trusted: members.service.ts:178-186 routes both through StorageService.resolveKeyToPublicUrl with the correct StorageTarget, pinned by members.service.spec.ts:379-390."
         }
       ],
       "skippedByClaude": [],
@@ -4417,7 +4417,7 @@
           "notedAt": "2026-07-12T23:45:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "src/gallery/gallery.service.spec.ts pins the changed submit path against live settings without regressing moderation: 'forces Pending for a regular member and audits the submission' (line 239), 'auto-approves a trusted admin when the regiment opts in' (265) and its negative 'does NOT auto-approve a non-trusted member even when the setting is on' (285); enforcement reads regiment_settings \u2014 'rejects a submission whose file count exceeds the per-submission limit' (295), 'rejects a file that exceeds its per-type size cap' (308), 'rejects a file whose type is not in the settings allow-list (T-0071)' (325) and 'resolves an uploaded file key to a public URL (T-0071)' (344). The surrounding moderation/like reads remain covered (moderationQueue 467-512, findArchive 513, approve 548)."
+          "note": "src/gallery/gallery.service.spec.ts pins the changed submit path against live settings without regressing moderation: 'forces Pending for a regular member and audits the submission' (line 239), 'auto-approves a trusted admin when the regiment opts in' (265) and its negative 'does NOT auto-approve a non-trusted member even when the setting is on' (285); enforcement reads regiment_settings — 'rejects a submission whose file count exceeds the per-submission limit' (295), 'rejects a file that exceeds its per-type size cap' (308), 'rejects a file whose type is not in the settings allow-list (T-0071)' (325) and 'resolves an uploaded file key to a public URL (T-0071)' (344). The surrounding moderation/like reads remain covered (moderationQueue 467-512, findArchive 513, approve 548)."
         }
       ],
       "skippedByClaude": [],
@@ -4450,8 +4450,8 @@
     },
     {
       "id": "T-0072",
-      "title": "Events: remove save-as-draft \u2014 creation publishes directly",
-      "summary": "Eliminate the draft workflow: stop accepting isDraft on create (always published), retire the POST /events/:id/publish route, and make the public isDraft=false read filter a harmless no-op. Because create() already announces to Discord only for non-draft events, every create will now enqueue an event-announcement to the configured channel \u2014 intended per the direct-publish goal. Coordinated with the frontend removing the 'Save draft' button and the isDraft/publish() service calls.",
+      "title": "Events: remove save-as-draft — creation publishes directly",
+      "summary": "Eliminate the draft workflow: stop accepting isDraft on create (always published), retire the POST /events/:id/publish route, and make the public isDraft=false read filter a harmless no-op. Because create() already announces to Discord only for non-draft events, every create will now enqueue an event-announcement to the configured channel — intended per the direct-publish goal. Coordinated with the frontend removing the 'Save draft' button and the isDraft/publish() service calls.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -4484,7 +4484,7 @@
           "notedAt": "2026-07-12T23:45:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "The frontend moved in lockstep: a repo-wide grep of ../lords-regiment-dashboard/src/app for `isDraft` or `publish(` returns exactly one hit \u2014 events.service.spec.ts:125, which asserts `expect(req.request.body.isDraft).toBeUndefined()` \u2014 i.e. the client no longer sends isDraft and no publish() call site remains. The backend fan-out is bounded and pinned by src/events/events.service.spec.ts:277 'publishes directly and enqueues exactly one Discord announce (T-0072)'."
+          "note": "The frontend moved in lockstep: a repo-wide grep of ../lords-regiment-dashboard/src/app for `isDraft` or `publish(` returns exactly one hit — events.service.spec.ts:125, which asserts `expect(req.request.body.isDraft).toBeUndefined()` — i.e. the client no longer sends isDraft and no publish() call site remains. The backend fan-out is bounded and pinned by src/events/events.service.spec.ts:277 'publishes directly and enqueues exactly one Discord announce (T-0072)'."
         },
         {
           "desc": "Events service create/update + listPublic/getPublic/loadEvent + EventStatusScheduler all share the isDraft filter; draft-write was removed but the column is retained (always false), so projections/filters must stay consistent. Pinned by events.service.spec + post-mvp e2e (publish route 404, create publishes).",
@@ -4492,11 +4492,11 @@
           "notedAt": "2026-07-13T05:15:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "Both pinning tests named in the note exist. src/events/events.service.spec.ts:277 pins that create publishes directly and enqueues exactly one announce, and test/post-mvp.e2e-spec.ts:236 pins 'has no save-as-draft publish route (T-0072): POST /:id/publish is 404'. Projection consistency is preserved: the retained column is written as a constant false \u2014 src/database/migrations/1782177187006-InitialSchema.ts declares `is_draft tinyint NOT NULL DEFAULT 0` \u2014 and the read paths are covered by listPublic (301-338), listForMember (340-421) and getForMember (422-458) specs."
+          "note": "Both pinning tests named in the note exist. src/events/events.service.spec.ts:277 pins that create publishes directly and enqueues exactly one announce, and test/post-mvp.e2e-spec.ts:236 pins 'has no save-as-draft publish route (T-0072): POST /:id/publish is 404'. Projection consistency is preserved: the retained column is written as a constant false — src/database/migrations/1782177187006-InitialSchema.ts declares `is_draft tinyint NOT NULL DEFAULT 0` — and the read paths are covered by listPublic (301-338), listForMember (340-421) and getForMember (422-458) specs."
         }
       ],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -4528,7 +4528,7 @@
     {
       "id": "T-0073",
       "title": "Events: authenticated member read endpoint (member projection + myRsvp)",
-      "summary": "Add an auth-guarded events read that returns the member projection (server binding, notifyOffsets, myRsvp, recurrence fields, timestamps) so normal members at /dashboard/events see their own RSVP and server details. Either add GET /events/mine (+ auth-aware detail) or make the existing @Public() GET / and GET /:id optionally-authenticated (detect JWT \u2192 include member fields when the caller is enrolled). Reads require no write capability; server_password is still never serialized (only reveal-password returns it).",
+      "summary": "Add an auth-guarded events read that returns the member projection (server binding, notifyOffsets, myRsvp, recurrence fields, timestamps) so normal members at /dashboard/events see their own RSVP and server details. Either add GET /events/mine (+ auth-aware detail) or make the existing @Public() GET / and GET /:id optionally-authenticated (detect JWT → include member fields when the caller is enrolled). Reads require no write capability; server_password is still never serialized (only reveal-password returns it).",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -4570,7 +4570,7 @@
         }
       ],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -4641,7 +4641,7 @@
           "notedAt": "2026-07-12T23:45:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "The schema fields are now in the squashed source of truth \u2014 src/database/migrations/1782177187006-InitialSchema.ts:47 creates `events` with recurrence_cadence enum('daily','weekly','monthly'), recurrence_active, recurrence_rule, is_recurring and recurrence_template_id, and the commit message for 01a5505 records that `migration:generate` reports zero drift against the entity model. Correct write/read of those fields is pinned by src/events/events.service.spec.ts:289 'stores a cadence as an active recurring template (T-0074)' and :514 'permanently stops a recurring template via recurrenceActive=false', and consumed by the generation specs in event-recurrence.scheduler.spec.ts."
+          "note": "The schema fields are now in the squashed source of truth — src/database/migrations/1782177187006-InitialSchema.ts:47 creates `events` with recurrence_cadence enum('daily','weekly','monthly'), recurrence_active, recurrence_rule, is_recurring and recurrence_template_id, and the commit message for 01a5505 records that `migration:generate` reports zero drift against the entity model. Correct write/read of those fields is pinned by src/events/events.service.spec.ts:289 'stores a cadence as an active recurring template (T-0074)' and :514 'permanently stops a recurring template via recurrenceActive=false', and consumed by the generation specs in event-recurrence.scheduler.spec.ts."
         }
       ],
       "skippedByClaude": [],
@@ -4675,7 +4675,7 @@
     {
       "id": "T-0075",
       "title": "Events: recurring-occurrence generation cron (materialize real rows, timezone-accurate)",
-      "summary": "A scheduled generator (mirroring the existing guarded setInterval EventStatusScheduler pattern \u2014 no new dependency) that, per active recurring template, materializes each upcoming occurrence as its OWN real event row ahead of time on a rolling horizon, so each occurrence carries its own RSVP/attendance (no 'RSVP problem', no bulk pre-creation of X duplicates). Occurrence start times are computed in the template's IANA timezone (default EST/America/New_York) so DST and local wall-clock are correct in every timezone. Idempotent (never double-creates). Honors live template state on each run: recurrenceActive=false stops generation and cadence changes take effect going forward; optionally prunes future not-yet-passed generated occurrences on stop/cadence change.",
+      "summary": "A scheduled generator (mirroring the existing guarded setInterval EventStatusScheduler pattern — no new dependency) that, per active recurring template, materializes each upcoming occurrence as its OWN real event row ahead of time on a rolling horizon, so each occurrence carries its own RSVP/attendance (no 'RSVP problem', no bulk pre-creation of X duplicates). Occurrence start times are computed in the template's IANA timezone (default EST/America/New_York) so DST and local wall-clock are correct in every timezone. Idempotent (never double-creates). Honors live template state on each run: recurrenceActive=false stops generation and cadence changes take effect going forward; optionally prunes future not-yet-passed generated occurrences on stop/cadence change.",
       "status": "deployed",
       "type": "feature",
       "size": "L",
@@ -4709,7 +4709,7 @@
           "status": "passed"
         },
         {
-          "desc": "setting recurrenceActive=false stops further generation; changing cadence daily\u2192monthly is reflected on the next run",
+          "desc": "setting recurrenceActive=false stops further generation; changing cadence daily→monthly is reflected on the next run",
           "status": "passed"
         },
         {
@@ -4732,7 +4732,7 @@
           "notedAt": "2026-07-13T05:15:00Z",
           "resolvedAt": "2026-07-20T05:00:00Z",
           "resolvedBy": "claude",
-          "note": "All four stated mitigations are verifiable in the landed code: `MAX_EMIT = 500` bounds each sweep (src/events/event-recurrence.scheduler.ts:18, enforced in the emit loop at line 90) alongside `HORIZON_DAYS = 60` (line 15); the timer is unref'd (line 127); and UQ_event_occurrence(recurrence_template_id, starts_at) is now both on the entity (src/events/entities/event.entity.ts:25) and in the squashed migration (InitialSchema.ts:47, dropped in down() at line 390) \u2014 it previously lived only in the deleted 1782470000000-EventOccurrenceUnique migration. The anchor/DST/idempotency/far-past specs are all present in event-recurrence.scheduler.spec.ts (lines 13-148)."
+          "note": "All four stated mitigations are verifiable in the landed code: `MAX_EMIT = 500` bounds each sweep (src/events/event-recurrence.scheduler.ts:18, enforced in the emit loop at line 90) alongside `HORIZON_DAYS = 60` (line 15); the timer is unref'd (line 127); and UQ_event_occurrence(recurrence_template_id, starts_at) is now both on the entity (src/events/entities/event.entity.ts:25) and in the squashed migration (InitialSchema.ts:47, dropped in down() at line 390) — it previously lived only in the deleted 1782470000000-EventOccurrenceUnique migration. The anchor/DST/idempotency/far-past specs are all present in event-recurrence.scheduler.spec.ts (lines 13-148)."
         }
       ],
       "skippedByClaude": [],
@@ -4818,7 +4818,7 @@
         }
       ],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -4850,7 +4850,7 @@
     {
       "id": "T-0077",
       "title": "Discord: expose bot status to STAFF (Owner/Admin/Moderator) for the dashboard widget",
-      "summary": "The only bot-status route today (GET /discord/connection) requires ManageSettings, which the seeded matrix grants to Owner ONLY \u2014 so Admins/Moderators cannot read it. The Quartermaster Bot widget is to be visible to admin+moderator (STAFF). Add a read-only STAFF-gated status route (e.g. GET /discord/status) returning the non-sensitive connection + metrics fields (online/offline, uptime, latency, memory, cpu, users) and excluding sensitive config (permissions/ban settings), so any STAFF member can drive the widget without owner-level manage_settings.",
+      "summary": "The only bot-status route today (GET /discord/connection) requires ManageSettings, which the seeded matrix grants to Owner ONLY — so Admins/Moderators cannot read it. The Quartermaster Bot widget is to be visible to admin+moderator (STAFF). Add a read-only STAFF-gated status route (e.g. GET /discord/status) returning the non-sensitive connection + metrics fields (online/offline, uptime, latency, memory, cpu, users) and excluding sensitive config (permissions/ban settings), so any STAFF member can drive the widget without owner-level manage_settings.",
       "status": "deployed",
       "type": "feature",
       "size": "XS",
@@ -4879,13 +4879,13 @@
           "status": "passed"
         },
         {
-          "desc": "a plain enrolled member without STAFF is denied (403) \u2014 widget stays STAFF-only",
+          "desc": "a plain enrolled member without STAFF is denied (403) — widget stays STAFF-only",
           "status": "passed"
         }
       ],
       "regressionRisk": [],
       "skippedByClaude": [
-        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds \u2192 real gateway; the suite needs the container's mock-Discord config \u2014 it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
+        "e2e suites could not be run from the host (pre-existing env: host .env has real Discord creds → real gateway; the suite needs the container's mock-Discord config — it fails identically on the untouched baseline). Logic is covered by unit specs; new e2e assertions added but run inside the container."
       ],
       "lastTouchedCommit": "3f6d9b6",
       "createdAt": "2026-07-12T23:45:00Z",
@@ -4917,7 +4917,7 @@
     {
       "id": "T-0078",
       "title": "Confirm Invite-Mercenary is frontend-only; retire the stale invite question",
-      "summary": "Recon confirms there is NO backend endpoint, service method, DTO, entity, seed, migration, or Swagger doc implementing a member/mercenary invite \u2014 the roster '+ Invite Mercenary' button is a dead frontend affordance, so its removal needs ZERO backend code. This chore records that finding and retires the dangling 'what should Invite-Mercenary do' planning question (project-plan/PLAN.md, ROADMAP.md). IMPORTANT scope guard: the Mercenary MemberRole/rank and the onboarding applicant type are NOT being removed \u2014 only the individual-invite button goes (frontend).",
+      "summary": "Recon confirms there is NO backend endpoint, service method, DTO, entity, seed, migration, or Swagger doc implementing a member/mercenary invite — the roster '+ Invite Mercenary' button is a dead frontend affordance, so its removal needs ZERO backend code. This chore records that finding and retires the dangling 'what should Invite-Mercenary do' planning question (project-plan/PLAN.md, ROADMAP.md). IMPORTANT scope guard: the Mercenary MemberRole/rank and the onboarding applicant type are NOT being removed — only the individual-invite button goes (frontend).",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -5040,7 +5040,7 @@
     {
       "id": "T-0080",
       "title": "Enforce event tags hard limit of 10 in DTO",
-      "summary": "Add @ArrayMaxSize(10) to CreateEventDto.tags so create and update (via PartialType inheritance) reject >10 tags with 400. The event_tags table/column already exist (InitialSchema); MySQL cannot cap per-event row count without a trigger, so the limit lives at the DTO + FE layers \u2014 no migration.",
+      "summary": "Add @ArrayMaxSize(10) to CreateEventDto.tags so create and update (via PartialType inheritance) reject >10 tags with 400. The event_tags table/column already exist (InitialSchema); MySQL cannot cap per-event row count without a trigger, so the limit lives at the DTO + FE layers — no migration.",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -5124,7 +5124,7 @@
           "answeredAt": "2026-07-15T03:10:00Z"
         },
         {
-          "q": "Confirm the uuid/opaque retention set: MinIO object keys, auth + refresh tokens, session ids, discord outbox/idempotency keys, GDPR self-deletion tokens \u2014 anything else that must stay long/unguessable?",
+          "q": "Confirm the uuid/opaque retention set: MinIO object keys, auth + refresh tokens, session ids, discord outbox/idempotency keys, GDPR self-deletion tokens — anything else that must stay long/unguessable?",
           "answer": "Retained opaque (NOT short-id): discord_identities.id (JWT sub) + its inbound FKs (members/applications.discord_identity_id), discord_sync_jobs.id, account_deletion_requests.confirm_token, storage object keys (randomUUID), OAuth state, auth tokens, Discord snowflakes, AES-GCM ciphertext.",
           "askedAt": "2026-07-14T23:55:03.452Z",
           "answeredAt": "2026-07-15T03:10:00Z"
@@ -5203,7 +5203,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "A freshly generated entity persists with a short id of the agreed length/alphabet, and all relations (member\u2194regiment, event\u2194occurrence, gallery\u2194member, etc.) resolve",
+          "desc": "A freshly generated entity persists with a short id of the agreed length/alphabet, and all relations (member↔regiment, event↔occurrence, gallery↔member, etc.) resolve",
           "status": "passed"
         },
         {
@@ -5256,7 +5256,7 @@
     {
       "id": "T-0083",
       "title": "Rewrite migrations to short-id column lengths (DB rebuild)",
-      "summary": "Rewrite InitialSchema (and reconcile follow-on migrations) so a clean db:setup builds the short-id schema directly \u2014 permitted because there is no production data. Ensure column lengths for retained-uuid columns are unchanged and the migration set still runs idempotently end to end.",
+      "summary": "Rewrite InitialSchema (and reconcile follow-on migrations) so a clean db:setup builds the short-id schema directly — permitted because there is no production data. Ensure column lengths for retained-uuid columns are unchanged and the migration set still runs idempotently end to end.",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -5277,7 +5277,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "npm run db:setup (create \u2192 migrate \u2192 seed) runs cleanly against a fresh MySQL 8 and produces short-id primary keys",
+          "desc": "npm run db:setup (create → migrate → seed) runs cleanly against a fresh MySQL 8 and produces short-id primary keys",
           "status": "passed"
         },
         {
@@ -5291,7 +5291,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "InitialSchema + follow-on migrations are rewritten; the change requires a clean DB rebuild \u2014 any existing dev/local data is dropped. Migration ordering and idempotency must be re-verified.",
+          "desc": "InitialSchema + follow-on migrations are rewritten; the change requires a clean DB rebuild — any existing dev/local data is dropped. Migration ordering and idempotency must be re-verified.",
           "status": "resolved",
           "notedAt": "2026-07-14T23:55:03.452Z",
           "resolvedAt": "2026-07-15T03:10:00Z",
@@ -5513,8 +5513,8 @@
     },
     {
       "id": "T-0087",
-      "title": "DB migration: drop gallery\u2194event + member-tag, add gallery_tags",
-      "summary": "Migration to remove the gallery\u2192event association and the gallery member-tag junction/columns (never used going forward), and add a gallery tag store (mirroring event_tags) to back free-form + quick-chip tags. Clean rebuild acceptable (no production data).",
+      "title": "DB migration: drop gallery↔event + member-tag, add gallery_tags",
+      "summary": "Migration to remove the gallery→event association and the gallery member-tag junction/columns (never used going forward), and add a gallery tag store (mirroring event_tags) to back free-form + quick-chip tags. Clean rebuild acceptable (no production data).",
       "status": "deployed",
       "type": "infra",
       "size": "M",
@@ -5542,7 +5542,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Drops gallery\u2194event and gallery member-tag associations from the schema; any code/DTO still referencing them must be updated in lockstep (T-0088), and the FE gallery consumers in lockstep (lords-regiment-dashboard).",
+          "desc": "Drops gallery↔event and gallery member-tag associations from the schema; any code/DTO still referencing them must be updated in lockstep (T-0088), and the FE gallery consumers in lockstep (lords-regiment-dashboard).",
           "status": "resolved",
           "notedAt": "2026-07-14T23:55:03.452Z",
           "resolvedAt": "2026-07-15T03:10:00Z",
@@ -5602,7 +5602,7 @@
       "questions": [],
       "testPlan": [
         {
-          "desc": "POST gallery with 11 tags \u2192 400; \u226410 succeeds and tags round-trip on the read",
+          "desc": "POST gallery with 11 tags → 400; ≤10 succeeds and tags round-trip on the read",
           "status": "passed"
         },
         {
@@ -5788,7 +5788,7 @@
     {
       "id": "T-0091",
       "title": "Reconcile Capability enum + seed defaults with the epic permission decisions",
-      "summary": "Update the capability catalog + role\u2192permission seed defaults to match the epic: gallery archive view = members + mercenaries; gallery submit = members only (revoke from Mercenary); moderation queue = moderators + admins; dashboard \"Gallery submissions\" panel read = ManageEvents (see T-0094). This is the single source of truth the admin Permission Matrix renders.",
+      "summary": "Update the capability catalog + role→permission seed defaults to match the epic: gallery archive view = members + mercenaries; gallery submit = members only (revoke from Mercenary); moderation queue = moderators + admins; dashboard \"Gallery submissions\" panel read = ManageEvents (see T-0094). This is the single source of truth the admin Permission Matrix renders.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -5980,7 +5980,7 @@
     {
       "id": "T-0094",
       "title": "Expose pending gallery submissions read to the dashboard \"Gallery submissions\" panel",
-      "summary": "Provide a read the dashboard \"Gallery submissions\" panel can call to list pending submissions (title + submitter username) for users with ManageEvents. Either widen the existing moderation-queue read's capability or add a lightweight pending-list endpoint \u2014 resolve the ManageEvents vs ModerateGallery gate question first.",
+      "summary": "Provide a read the dashboard \"Gallery submissions\" panel can call to list pending submissions (title + submitter username) for users with ManageEvents. Either widen the existing moderation-queue read's capability or add a lightweight pending-list endpoint — resolve the ManageEvents vs ModerateGallery gate question first.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -6051,7 +6051,7 @@
     {
       "id": "T-0095",
       "title": "Re-add applicant_type (Member/Mercenary) to applications",
-      "summary": "Restore the applicant_type field retired in T-0039: a new migration re-adds the column (enum Member/Mercenary, default Member), add applicantType to the Application entity, CreateApplicationDto (IsEnum) \u2014 UpdateMyApplicationDto inherits \u2014 and ApplicationDto(.from); branch the approve-flow enlisted role on applicantType instead of the hardcoded MemberRole.Member.",
+      "summary": "Restore the applicant_type field retired in T-0039: a new migration re-adds the column (enum Member/Mercenary, default Member), add applicantType to the Application entity, CreateApplicationDto (IsEnum) — UpdateMyApplicationDto inherits — and ApplicationDto(.from); branch the approve-flow enlisted role on applicantType instead of the hardcoded MemberRole.Member.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -6123,7 +6123,7 @@
     {
       "id": "T-0096",
       "title": "Expose hasServerPassword on the member Event DTO",
-      "summary": "Add a non-sensitive boolean hasServerPassword to EventDto, set in EventDto.from only under includeServer, computed as event.serverPassword != null \u2014 so the frontend can hide the password/reveal UI for passwordless events without exposing the password.",
+      "summary": "Add a non-sensitive boolean hasServerPassword to EventDto, set in EventDto.from only under includeServer, computed as event.serverPassword != null — so the frontend can hide the password/reveal UI for passwordless events without exposing the password.",
       "status": "deployed",
       "type": "feature",
       "size": "XS",
@@ -6530,7 +6530,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "The landing wants \"Since est 11/2023\" (month precision). Add month precision (establishedAt date / establishedMonth) as planned, or is year-only (\"Since est 2023\", already available) acceptable \u2014 which would make this task unnecessary?",
+          "q": "The landing wants \"Since est 11/2023\" (month precision). Add month precision (establishedAt date / establishedMonth) as planned, or is year-only (\"Since est 2023\", already available) acceptable — which would make this task unnecessary?",
           "answer": "do whatever, i gave you full date: 20/11/2023",
           "askedAt": "2026-07-15T20:30:00Z",
           "answeredAt": "2026-07-16T00:43:34.648Z"
@@ -6625,7 +6625,7 @@
           "notedAt": "2026-07-15T20:30:00Z",
           "resolvedAt": "2026-07-16T02:45:00Z",
           "resolvedBy": "claude",
-          "note": "enqueueEventAnnounce repointed off the announcementChannelId fallback to eventAnnouncementChannelId only; announcement_channel_id + NotificationsModule + notifications tables dropped; event-announce routing still works (post-mvp e2e). /discord/announce \u2192 404 verified live."
+          "note": "enqueueEventAnnounce repointed off the announcementChannelId fallback to eventAnnouncementChannelId only; announcement_channel_id + NotificationsModule + notifications tables dropped; event-announce routing still works (post-mvp e2e). /discord/announce → 404 verified live."
         }
       ],
       "skippedByClaude": [],
@@ -6659,7 +6659,7 @@
     {
       "id": "T-0104",
       "title": "Rename Quartermaster to Lord Adjutant in the backend/bot",
-      "summary": "Rename the audit actor label \"Quartermaster bot\" \u2192 \"Lord Adjutant bot\" in discord-sync.worker (2 places) and the mock gateway role name, and update comments in config/discord entities/dtos/module for consistency. String-only, no schema change.",
+      "summary": "Rename the audit actor label \"Quartermaster bot\" → \"Lord Adjutant bot\" in discord-sync.worker (2 places) and the mock gateway role name, and update comments in config/discord entities/dtos/module for consistency. String-only, no schema change.",
       "status": "deployed",
       "type": "chore",
       "size": "XS",
@@ -6840,7 +6840,7 @@
           "notedAt": "2026-07-15T20:30:00Z",
           "resolvedAt": "2026-07-16T02:45:00Z",
           "resolvedBy": "claude",
-          "note": "members.name dropped; in_game_name backfilled + NOT NULL; every denormalized read path (audit actor/target label fallback, attendee display, gallery author, discord-sync, member search/order, self-edit, CurrentUserDto, dev-owner seed) repointed to inGameName. 298 unit + 36 e2e green; /auth/me \u2192 inGameName verified live."
+          "note": "members.name dropped; in_game_name backfilled + NOT NULL; every denormalized read path (audit actor/target label fallback, attendee display, gallery author, discord-sync, member search/order, self-edit, CurrentUserDto, dev-owner seed) repointed to inGameName. 298 unit + 36 e2e green; /auth/me → inGameName verified live."
         }
       ],
       "skippedByClaude": [],
@@ -6948,7 +6948,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "Throttle window for the per-request bump (default 5 min) \u2014 writing on every request would add a DB write per request, so bump at most once per window per member?",
+          "q": "Throttle window for the per-request bump (default 5 min) — writing on every request would add a DB write per request, so bump at most once per window per member?",
           "answer": null,
           "askedAt": "2026-07-17T00:00:00Z"
         }
@@ -6967,7 +6967,7 @@
           "status": "pending"
         },
         {
-          "desc": "Identity-only / Applicant sessions (no member row) are skipped \u2014 no write, no error",
+          "desc": "Identity-only / Applicant sessions (no member row) are skipped — no write, no error",
           "status": "pending"
         },
         {
@@ -7668,7 +7668,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Audit read path (findEntries/findOne/exportCsv) now eager-loads actorMember/targetMember.discordIdentity and the DTO/CSV emit actor/target avatar fields \u2014 shared by every audit consumer.",
+          "desc": "Audit read path (findEntries/findOne/exportCsv) now eager-loads actorMember/targetMember.discordIdentity and the DTO/CSV emit actor/target avatar fields — shared by every audit consumer.",
           "status": "resolved",
           "notedAt": "2026-07-18T04:56:34Z",
           "resolvedAt": "2026-07-18T04:56:34Z",
@@ -8354,7 +8354,7 @@
     {
       "id": "T-0129",
       "title": "Expose live applicant identity on the admin application projection",
-      "summary": "Extend ApplicationDto with the applicant's live identity \u2014 currentAvatarUrl and currentDisplayName \u2014 derived from the promoted member (so post-approval profile edits are reflected) and falling back to the linked Discord identity's avatarUrl/globalName. Load the promotedMember relation in the admin queue findAll/findOne queries (discordIdentity is already joined); promotedMemberId is already exposed to drive the profile deep-link.",
+      "summary": "Extend ApplicationDto with the applicant's live identity — currentAvatarUrl and currentDisplayName — derived from the promoted member (so post-approval profile edits are reflected) and falling back to the linked Discord identity's avatarUrl/globalName. Load the promotedMember relation in the admin queue findAll/findOne queries (discordIdentity is already joined); promotedMemberId is already exposed to drive the profile deep-link.",
       "status": "deployed",
       "type": "feature",
       "size": "M",
@@ -8393,12 +8393,12 @@
       ],
       "regressionRisk": [
         {
-          "desc": "ApplicationDto.from() shared by queue/detail/self-service responses \u2014 new relation load must not break existing callers",
+          "desc": "ApplicationDto.from() shared by queue/detail/self-service responses — new relation load must not break existing callers",
           "status": "resolved",
           "notedAt": "2026-07-19T01:00:00Z",
           "resolvedAt": "2026-07-19T20:45:48Z",
           "resolvedBy": "claude",
-          "note": "ApplicationDto.from stays null-safe for all callers (self-service returns null live-identity); findAll/findOne eager-load promotedMember with no N+1. Verified by applications.service.spec (387 unit tests green) and live API returning currentDisplayName/currentAvatarUrl. FOLLOW-UP (T-0132): this resolution was premature \u2014 it was verified against unit tests and read paths only, never e2e. The new promotedMember eager-load in loadOrFail DID break a write caller: TypeORM lets a loaded relation win over the raw FK on save, so approve wrote promoted_member_id = NULL. Fixed in 4870cd2; mvp + discord e2e now cover it."
+          "note": "ApplicationDto.from stays null-safe for all callers (self-service returns null live-identity); findAll/findOne eager-load promotedMember with no N+1. Verified by applications.service.spec (387 unit tests green) and live API returning currentDisplayName/currentAvatarUrl. FOLLOW-UP (T-0132): this resolution was premature — it was verified against unit tests and read paths only, never e2e. The new promotedMember eager-load in loadOrFail DID break a write caller: TypeORM lets a loaded relation win over the raw FK on save, so approve wrote promoted_member_id = NULL. Fixed in 4870cd2; mvp + discord e2e now cover it."
         }
       ],
       "skippedByClaude": [],
@@ -8439,7 +8439,7 @@
     {
       "id": "T-0130",
       "title": "Accept WebP for rank/medal icon uploads",
-      "summary": "Extend the rank/medal icon accepted-type policy from PNG+SVG to PNG+SVG+WebP (ICON_IMAGE_TYPES) so the presign flow accepts image/webp and stores a .webp key. WebP is raster, so parse its pixel dimensions from the RIFF header (VP8/VP8L/VP8X) in assertIconWithinDimensions \u2014 reading 32 header bytes and trying PNG then WebP \u2014 to keep the 250px-per-side cap enforced server-side (SVG stays exempt). Discovered while implementing the frontend WebP acceptance (FE T-0214/T-0215): without this the FE would 400 on every WebP icon upload.",
+      "summary": "Extend the rank/medal icon accepted-type policy from PNG+SVG to PNG+SVG+WebP (ICON_IMAGE_TYPES) so the presign flow accepts image/webp and stores a .webp key. WebP is raster, so parse its pixel dimensions from the RIFF header (VP8/VP8L/VP8X) in assertIconWithinDimensions — reading 32 header bytes and trying PNG then WebP — to keep the 250px-per-side cap enforced server-side (SVG stays exempt). Discovered while implementing the frontend WebP acceptance (FE T-0214/T-0215): without this the FE would 400 on every WebP icon upload.",
       "status": "deployed",
       "type": "feature",
       "size": "S",
@@ -8483,7 +8483,7 @@
           "notedAt": "2026-07-19T03:32:11Z",
           "resolvedAt": "2026-07-19T03:32:11Z",
           "resolvedBy": "claude",
-          "note": "WebP added alongside PNG/SVG (order preserved); WebP dimension parsing (VP8/VP8L/VP8X) enforces the same 250px cap, PNG path unchanged, SVG still exempt. Pinned by storage.service.spec (webp accept/reject/policy) \u2014 387 unit tests green."
+          "note": "WebP added alongside PNG/SVG (order preserved); WebP dimension parsing (VP8/VP8L/VP8X) enforces the same 250px cap, PNG path unchanged, SVG still exempt. Pinned by storage.service.spec (webp accept/reject/policy) — 387 unit tests green."
         }
       ],
       "skippedByClaude": [],
@@ -8578,7 +8578,7 @@
     {
       "id": "T-0132",
       "title": "Fix CI: approve dropped the promotion FK; icon-policy e2e left stale",
-      "summary": "PR #16 CI failed on 6 e2e tests from two causes. (1) T-0129 added promotedMember to loadOrFail's relations; TypeORM gives a LOADED relation precedence over the raw FK column on save, so the hydrated promotedMember=null overwrote promotedMemberId and approve wrote promoted_member_id = NULL. POST /applications/:id/approve returned promotedMemberId: null, and discord.e2e \u2014 which derives its member id from that response \u2014 404d every downstream ban/suspend/rank call. Fixed by assigning the relation alongside the FK, which also lets the approve response carry the new member's live identity. (2) T-0130 intentionally added image/webp to ICON_IMAGE_TYPES and updated the unit spec, but the post-mvp e2e storage-policy assertion still expected PNG+SVG only; updated to PNG+SVG+WebP (jpeg still excluded).",
+      "summary": "PR #16 CI failed on 6 e2e tests from two causes. (1) T-0129 added promotedMember to loadOrFail's relations; TypeORM gives a LOADED relation precedence over the raw FK column on save, so the hydrated promotedMember=null overwrote promotedMemberId and approve wrote promoted_member_id = NULL. POST /applications/:id/approve returned promotedMemberId: null, and discord.e2e — which derives its member id from that response — 404d every downstream ban/suspend/rank call. Fixed by assigning the relation alongside the FK, which also lets the approve response carry the new member's live identity. (2) T-0130 intentionally added image/webp to ICON_IMAGE_TYPES and updated the unit spec, but the post-mvp e2e storage-policy assertion still expected PNG+SVG only; updated to PNG+SVG+WebP (jpeg still excluded).",
       "status": "deployed",
       "type": "bug",
       "size": "S",
@@ -8618,7 +8618,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "Any entity save after loadOrFail now carries loaded relations \u2014 a loaded relation silently overrides its FK column on save, so future code setting only an *Id field on an Application can lose the write the same way.",
+          "desc": "Any entity save after loadOrFail now carries loaded relations — a loaded relation silently overrides its FK column on save, so future code setting only an *Id field on an Application can lose the write the same way.",
           "status": "open",
           "notedAt": "2026-07-19T20:45:48Z"
         }
@@ -8636,7 +8636,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "created \u2014 PR #16 CI failure triage"
+          "note": "created — PR #16 CI failure triage"
         },
         {
           "at": "2026-07-19T20:45:48Z",
@@ -11882,7 +11882,7 @@
           "status": "open",
           "notedAt": "2026-07-23T03:55:04Z",
           "recheckedAt": "2026-07-23T15:45:00Z",
-          "recheckNote": "Re-checked under T-0182/T-0184/T-0185. None of them touches discord-job-payloads.ts, gateway/discord-gateway.ts or the worker's postToChannel/dmUser \u2014 verified by diff. The legacy content-only e2e row still delivers as plain text. Risk stays OPEN; T-0188 is the task that would narrow it, by giving the shared send an explicit allowed_mentions policy."
+          "recheckNote": "Re-checked under T-0182/T-0184/T-0185. None of them touches discord-job-payloads.ts, gateway/discord-gateway.ts or the worker's postToChannel/dmUser — verified by diff. The legacy content-only e2e row still delivers as plain text. Risk stays OPEN; T-0188 is the task that would narrow it, by giving the shared send an explicit allowed_mentions policy."
         }
       ],
       "skippedByClaude": [
@@ -12514,8 +12514,8 @@
       ],
       "questions": [
         {
-          "q": "DeclineApplicationDto.reason is documented as 'shown/recorded for the decline' while note is staff-only \u2014 should an explicitly-typed decline reason still reach the applicant, or is discordDmMessage now the ONLY applicant-visible text? (Plan assumes the latter: drop reviewerNote from the applicant embed entirely.)",
-          "answer": "ANSWERED by the product owner: the console offers exactly two boxes \u2014 \"User message\" (discordDmMessage) and \"Moderator note\" (note, badged Staff only). The applicant receives the user message, or the house default when it is blank, and NOTHING else. `reason` is a staff-only record like `note`; it no longer reaches the applicant. buildDecisionEmbed now takes ONE text input and emits no fields at all, so the leak cannot be re-introduced by a caller \u2014 it would need a new parameter and a new field.",
+          "q": "DeclineApplicationDto.reason is documented as 'shown/recorded for the decline' while note is staff-only — should an explicitly-typed decline reason still reach the applicant, or is discordDmMessage now the ONLY applicant-visible text? (Plan assumes the latter: drop reviewerNote from the applicant embed entirely.)",
+          "answer": "ANSWERED by the product owner: the console offers exactly two boxes — \"User message\" (discordDmMessage) and \"Moderator note\" (note, badged Staff only). The applicant receives the user message, or the house default when it is blank, and NOTHING else. `reason` is a staff-only record like `note`; it no longer reaches the applicant. buildDecisionEmbed now takes ONE text input and emits no fields at all, so the leak cannot be re-introduced by a caller — it would need a new parameter and a new field.",
           "askedAt": "2026-07-23T04:20:00Z",
           "answeredAt": "2026-07-23T15:45:00Z"
         }
@@ -12526,7 +12526,7 @@
           "status": "passed"
         },
         {
-          "desc": "decline() with { reason: 'X', note: 'Y' } still audits the rationale and still persists declineReason/moderatorNote \u2014 only the DM payload changes",
+          "desc": "decline() with { reason: 'X', note: 'Y' } still audits the rationale and still persists declineReason/moderatorNote — only the DM payload changes",
           "status": "passed"
         },
         {
@@ -12582,7 +12582,7 @@
     {
       "id": "T-0183",
       "title": "Regression guard: no staff-only field may reach any applicant-facing channel",
-      "summary": "T-0154 fenced the staff-only columns out of the applicant API projection, but the Discord DM path bypassed that fence. Add a single explicit guard \u2014 a test that walks every applicant-facing surface (GET /api/applications/mine and the enqueued decision embed) and asserts moderatorNote / declineReason / internal audit detail never appear. IMPLEMENTED in test/discord.e2e-spec.ts, NOT the recorded test/applications.e2e-spec.ts (which does not exist). That choice is load-bearing: enqueueApplicationDecision runs inside guarded(), which no-ops when the bot is disabled \u2014 so the same assertions in a suite that never enables the bot would find zero jobs and pass while the leak was live. discord.e2e-spec is the only suite with the bot enabled and the mock gateway wired.",
+      "summary": "T-0154 fenced the staff-only columns out of the applicant API projection, but the Discord DM path bypassed that fence. Add a single explicit guard — a test that walks every applicant-facing surface (GET /api/applications/mine and the enqueued decision embed) and asserts moderatorNote / declineReason / internal audit detail never appear. IMPLEMENTED in test/discord.e2e-spec.ts, NOT the recorded test/applications.e2e-spec.ts (which does not exist). That choice is load-bearing: enqueueApplicationDecision runs inside guarded(), which no-ops when the bot is disabled — so the same assertions in a suite that never enables the bot would find zero jobs and pass while the leak was live. discord.e2e-spec is the only suite with the bot enabled and the mock gateway wired.",
       "status": "review",
       "type": "chore",
       "size": "S",
@@ -12648,7 +12648,7 @@
     {
       "id": "T-0184",
       "title": "Honour a blank welcome message (fall back to the house default) and trim on save",
-      "summary": "DiscordSyncService uses `s.welcomeMessage ?? DEFAULT_WELCOME`, so an empty string saved from the settings editor produces a welcome embed with an empty description rather than the default. Normalise blank/whitespace-only input to null on update and treat blank as 'use the default' on send. FIXED ON BOTH SIDES. The PATCH normalises blank/whitespace/null to NULL and trims, and the SEND path independently reads `welcomeMessage?.trim() || DEFAULT` \u2014 because rows already written as '' are not repaired by the PATCH change and the bot-settings seeder is greenfield-only, so it will never re-run against production. The DTO also had to widen to `string | null`: the shipped settings editor round-trips the stored value and genuinely posts null, which @IsOptional() lets through, so a bare .trim() would have been a live TypeError.",
+      "summary": "DiscordSyncService uses `s.welcomeMessage ?? DEFAULT_WELCOME`, so an empty string saved from the settings editor produces a welcome embed with an empty description rather than the default. Normalise blank/whitespace-only input to null on update and treat blank as 'use the default' on send. FIXED ON BOTH SIDES. The PATCH normalises blank/whitespace/null to NULL and trims, and the SEND path independently reads `welcomeMessage?.trim() || DEFAULT` — because rows already written as '' are not repaired by the PATCH change and the bot-settings seeder is greenfield-only, so it will never re-run against production. The DTO also had to widen to `string | null`: the shipped settings editor round-trips the stored value and genuinely posts null, which @IsOptional() lets through, so a bare .trim() would have been a live TypeError.",
       "status": "review",
       "type": "bug",
       "size": "S",
@@ -12727,7 +12727,7 @@
     {
       "id": "T-0185",
       "title": "Support placeholder tokens in the configurable welcome message",
-      "summary": "So an admin-authored welcome can address the joiner, expand a small documented token set (e.g. {user} \u2192 a Discord mention, {regiment} \u2192 the regiment name) when composing the welcome embed. Unknown tokens are left as literal text, and the token list is surfaced in the settings API docs so the frontend editor can show the same hint.",
+      "summary": "So an admin-authored welcome can address the joiner, expand a small documented token set (e.g. {user} → a Discord mention, {regiment} → the regiment name) when composing the welcome embed. Unknown tokens are left as literal text, and the token list is surfaced in the settings API docs so the frontend editor can show the same hint.",
       "status": "review",
       "type": "feature",
       "size": "S",
@@ -12752,8 +12752,8 @@
       ],
       "questions": [
         {
-          "q": "Which token set do we commit to \u2014 {user} and {regiment} only, or also {memberCount} / {rulesChannel}? Whatever ships becomes an admin-facing contract the settings hint documents.",
-          "answer": "ANSWERED by the product owner: {user} and {regiment} ONLY. Both resolve from data the welcome producer already holds, so neither costs a query nor can render stale. {memberCount} and {rulesChannel} were declined \u2014 the latter would also have needed a new configurable channel id. The set is exported as WELCOME_TOKENS and Swagger renders its hint from that same array, so the documented tokens cannot drift from the ones that work.",
+          "q": "Which token set do we commit to — {user} and {regiment} only, or also {memberCount} / {rulesChannel}? Whatever ships becomes an admin-facing contract the settings hint documents.",
+          "answer": "ANSWERED by the product owner: {user} and {regiment} ONLY. Both resolve from data the welcome producer already holds, so neither costs a query nor can render stale. {memberCount} and {rulesChannel} were declined — the latter would also have needed a new configurable channel id. The set is exported as WELCOME_TOKENS and Swagger renders its hint from that same array, so the documented tokens cannot drift from the ones that work.",
           "askedAt": "2026-07-23T04:20:00Z",
           "answeredAt": "2026-07-23T15:45:00Z"
         }
@@ -12787,7 +12787,7 @@
           "notedAt": "2026-07-23T04:20:00Z",
           "resolvedAt": "2026-07-23T15:45:00Z",
           "resolvedBy": "claude",
-          "note": "The injection risk is closed STRUCTURALLY, not by escaping. The welcome text only ever lands in embed.description and the job keeps content: '' \u2014 Discord does not resolve @everyone / @here / role mentions inside an embed, and the gateway sets no allowed_mentions, so content is the only place admin text could ping. A unit case asserts @everyone renders as inert literal text; a sync-service case asserts the enqueued payload's content is '' for a welcome containing @everyone @here; an e2e asserts the same on the drained message. Expansion is also prototype-safe: the regex matches only the two literal tokens, so {constructor} / {__proto__} come back verbatim. Expansion runs inside the composer, ahead of clampEmbed, so a 512-char message of {user} tokens still emits a legal embed."
+          "note": "The injection risk is closed STRUCTURALLY, not by escaping. The welcome text only ever lands in embed.description and the job keeps content: '' — Discord does not resolve @everyone / @here / role mentions inside an embed, and the gateway sets no allowed_mentions, so content is the only place admin text could ping. A unit case asserts @everyone renders as inert literal text; a sync-service case asserts the enqueued payload's content is '' for a welcome containing @everyone @here; an e2e asserts the same on the drained message. Expansion is also prototype-safe: the regex matches only the two literal tokens, so {constructor} / {__proto__} come back verbatim. Expansion runs inside the composer, ahead of clampEmbed, so a 512-char message of {user} tokens still emits a legal embed."
         }
       ],
       "skippedByClaude": [],
@@ -12854,7 +12854,7 @@
           "status": "open",
           "notedAt": "2026-07-23T05:25:13Z",
           "recheckedAt": "2026-07-23T15:45:00Z",
-          "recheckNote": "Re-checked under T-0182, which edits the same decision path. stampDecider still sets both decidedByMemberId and the loaded decidedByMember relation, still runs BEFORE applications.save(), and the DM enqueue is still after the save \u2014 T-0182 only removed an argument passed to the enqueue. The post-mvp e2e that proves decided_by_member_id survives a real decision was run against real MySQL and passes. Risk stays OPEN: it is a standing constraint on future edits, not a defect."
+          "recheckNote": "Re-checked under T-0182, which edits the same decision path. stampDecider still sets both decidedByMemberId and the loaded decidedByMember relation, still runs BEFORE applications.save(), and the DM enqueue is still after the save — T-0182 only removed an argument passed to the enqueue. The post-mvp e2e that proves decided_by_member_id survives a real decision was run against real MySQL and passes. Risk stays OPEN: it is a standing constraint on future edits, not a defect."
         }
       ],
       "skippedByClaude": [
@@ -12887,7 +12887,7 @@
       "blocks": [],
       "questions": [
         {
-          "q": "Should gallery decline gain a staff-only note alongside the author-visible reason, matching the enlistment console \u2014 or stay single-field with the reason documented as author-visible?",
+          "q": "Should gallery decline gain a staff-only note alongside the author-visible reason, matching the enlistment console — or stay single-field with the reason documented as author-visible?",
           "answer": null,
           "askedAt": "2026-07-23T15:45:00Z"
         }
@@ -12909,7 +12909,7 @@
       ],
       "id": "T-0187",
       "title": "Decide whether gallery moderation needs the staff-note / user-message split",
-      "summary": "T-0182 fenced the applicant decision DM down to the officer's user message. Gallery moderation was deliberately left alone because it is a different shape: DeclineGalleryDto has ONE `reason`, it is moderator-typed but author-FACING by design, and the DM is the only channel it reaches the author through (findPublic/findArchive are Approved-only and the moderation queue is ModerateGallery-gated). So removing it would leave a declined submitter with no explanation. The open question is whether gallery should gain the same two-field split the enlistment console has \u2014 a staff-only note plus an author-visible message \u2014 or stay single-field with the reason explicitly documented as author-visible.",
+      "summary": "T-0182 fenced the applicant decision DM down to the officer's user message. Gallery moderation was deliberately left alone because it is a different shape: DeclineGalleryDto has ONE `reason`, it is moderator-typed but author-FACING by design, and the DM is the only channel it reaches the author through (findPublic/findArchive are Approved-only and the moderation queue is ModerateGallery-gated). So removing it would leave a declined submitter with no explanation. The open question is whether gallery should gain the same two-field split the enlistment console has — a staff-only note plus an author-visible message — or stay single-field with the reason explicitly documented as author-visible.",
       "status": "planned",
       "type": "question",
       "size": "S",
@@ -12959,7 +12959,7 @@
       ],
       "id": "T-0188",
       "title": "Set allowed_mentions on every bot send so no stored payload can ping the guild",
-      "summary": "Discovered while closing T-0185. The gateway's toSendOptions() sets no allowed_mentions at all, so anything that reaches a message CONTENT is parsed by Discord with the default permissive policy. Today nothing admin-authored gets there \u2014 every composed notification is embed-only with content '' \u2014 so the exposure is latent rather than live, and T-0185 pins it with tests. But the legacy content-only outbox path still exists for rows written before the embed change, and one future producer that puts text in content re-opens it. Setting allowed_mentions: { parse: [] } (widening deliberately per-producer where a ping is wanted) makes it unreachable by construction instead of by convention. NOT done here: it changes the shared gateway contract every notification type rides on, which is beyond the scope of the tasks in this branch.",
+      "summary": "Discovered while closing T-0185. The gateway's toSendOptions() sets no allowed_mentions at all, so anything that reaches a message CONTENT is parsed by Discord with the default permissive policy. Today nothing admin-authored gets there — every composed notification is embed-only with content '' — so the exposure is latent rather than live, and T-0185 pins it with tests. But the legacy content-only outbox path still exists for rows written before the embed change, and one future producer that puts text in content re-opens it. Setting allowed_mentions: { parse: [] } (widening deliberately per-producer where a ping is wanted) makes it unreachable by construction instead of by convention. NOT done here: it changes the shared gateway contract every notification type rides on, which is beyond the scope of the tasks in this branch.",
       "status": "planned",
       "type": "chore",
       "size": "S",
@@ -13003,7 +13003,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "DiscordRolePolicyService.assertRoleLinkable is now a thin wrapper over checkRoleLinkable, and both are shared by the rank, medal, join-role and Ban-role paths. A future edit to the shared method changes the verdict for all four at once \u2014 the split only holds because the two entry points stay distinct.",
+          "desc": "DiscordRolePolicyService.assertRoleLinkable is now a thin wrapper over checkRoleLinkable, and both are shared by the rank, medal, join-role and Ban-role paths. A future edit to the shared method changes the verdict for all four at once — the split only holds because the two entry points stay distinct.",
           "status": "open",
           "notedAt": "2026-07-26T18:00:00Z"
         },
@@ -13014,10 +13014,10 @@
         }
       ],
       "skippedByClaude": [
-        "Left the join-role and Ban-role settings as hard 400s \u2014 the owner asked for the warning on rank/medal linking specifically, and those two roles are applied with no admin in the loop to read a warning.",
+        "Left the join-role and Ban-role settings as hard 400s — the owner asked for the warning on rank/medal linking specifically, and those two roles are applied with no admin in the loop to read a warning.",
         "Did not expose the role's privileged flag on GET /api/discord/roles, so the admin is warned AFTER the link (and after the holder fan-out is queued) rather than before. Flagging the role inside the picker would be the pre-emptive version.",
         "No e2e coverage: assertRoleLinkable/checkRoleLinkable short-circuit under DISCORD_BOT_MOCK=true, which is what both CI and the e2e suite run, so an e2e would assert nothing. Unit tests carry it.",
-        "Did not reconcile lastSyncedCommit/lastSyncedAt \u2014 the state was already stale before this session and a full /bf-sync is still owed."
+        "Did not reconcile lastSyncedCommit/lastSyncedAt — the state was already stale before this session and a full /bf-sync is still owed."
       ],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-26T18:00:00Z",
@@ -13040,7 +13040,7 @@
       ],
       "id": "T-0189",
       "title": "Warn instead of blocking when a rank or medal is linked to a privileged Discord role",
-      "summary": "The LDA-H1 link validation rejected any Discord role carrying privileged permission bits (administrator, kick/ban, manage roles/channels/messages, moderate members, mention-everyone) with a 400. The owner asked for that to be advisory: the regiment should be able to link such a role with its eyes open. DiscordRolePolicyService splits into checkRoleLinkable (returns the privileged advisory, still throws for the three cases the bot physically cannot assign \u2014 not in guild, at/above the bot, integration-managed) and assertRoleLinkable (the strict wrapper, still used by the join-role and Ban-role settings where no admin is in the loop). Ranks and medals link anyway, return the advisory as discordRoleWarning on the link response, and raise the audit row to severity warn so the ledger \u2014 not a rejected request \u2014 is what records that someone handed out real Discord authority. The self-exclusion in the relink fan-out is untouched, so a one-click self-grant is still impossible.",
+      "summary": "The LDA-H1 link validation rejected any Discord role carrying privileged permission bits (administrator, kick/ban, manage roles/channels/messages, moderate members, mention-everyone) with a 400. The owner asked for that to be advisory: the regiment should be able to link such a role with its eyes open. DiscordRolePolicyService splits into checkRoleLinkable (returns the privileged advisory, still throws for the three cases the bot physically cannot assign — not in guild, at/above the bot, integration-managed) and assertRoleLinkable (the strict wrapper, still used by the join-role and Ban-role settings where no admin is in the loop). Ranks and medals link anyway, return the advisory as discordRoleWarning on the link response, and raise the audit row to severity warn so the ledger — not a rejected request — is what records that someone handed out real Discord authority. The self-exclusion in the relink fan-out is untouched, so a one-click self-grant is still impossible.",
       "status": "review",
       "type": "feature",
       "size": "S",
@@ -13103,7 +13103,7 @@
       ],
       "regressionRisk": [
         {
-          "note": "RanksService.update/remove gained a shared assertNotProtected guard, and RankDto.from now derives isProtected for every rank read. A future protected name added to PROTECTED_RANK_NAMES freezes that row for every caller with no admin override and no migration path \u2014 the refusal message in assertNotProtected names the enlistment coupling concretely and would need revisiting.",
+          "note": "RanksService.update/remove gained a shared assertNotProtected guard, and RankDto.from now derives isProtected for every rank read. A future protected name added to PROTECTED_RANK_NAMES freezes that row for every caller with no admin override and no migration path — the refusal message in assertNotProtected names the enlistment coupling concretely and would need revisiting.",
           "status": "open"
         },
         {
@@ -13112,10 +13112,10 @@
         }
       ],
       "skippedByClaude": [
-        "Did not add a `protected` DB column \u2014 a migration would have had to back-fill production and seedRanks is tier-2 greenfield-only, so the flag would never have been set on the live database.",
-        "Did not make the entry rank resolvable by a stable key (systemKey column) so a rename would be SAFE rather than refused \u2014 the ask was to prevent the rename, and decoupling is a larger schema change.",
+        "Did not add a `protected` DB column — a migration would have had to back-fill production and seedRanks is tier-2 greenfield-only, so the flag would never have been set on the live database.",
+        "Did not make the entry rank resolvable by a stable key (systemKey column) so a rename would be SAFE rather than refused — the ask was to prevent the rename, and decoupling is a larger schema change.",
         "Did not protect Mercenary or Applicant: nothing in the code resolves either by name, so freezing them would be protection without a dependency.",
-        "Did not approve an application through the dev stack \u2014 it has a real Discord bot connected and a decision there DMs a real person. The enlistment lookup is covered by unit + e2e against real MySQL instead."
+        "Did not approve an application through the dev stack — it has a real Discord bot connected and a decision there DMs a real person. The enlistment lookup is covered by unit + e2e against real MySQL instead."
       ],
       "lastTouchedCommit": "e568be6c90fdb111c42a7e4f158a73845f8e916a",
       "createdAt": "2026-07-26T23:55:00Z",
@@ -13140,7 +13140,7 @@
     {
       "id": "T-0191",
       "title": "Replace the Join role with a roster-derived Membership role",
-      "summary": "The join role was assigned by the GuildMemberAdd handler to EVERY account that entered the guild, which made it useless as the permission anchor the regiment wanted: a visitor who had never applied held exactly what an enlisted member held. It becomes `membershipRoleId`, granted from ROSTER STATE by DiscordSyncWorker.reconcileRoles (approved members yes; Mercenary and Applicant no; banned no) and no longer assigned on join. Renamed via migration rather than replaced with a new column, so the live row's already-correct value carries across; a new column would have shipped NULL. The reconcile now both grants AND strips it \u2014 the exact inverse of the old assign-only rule, and what makes the role mean 'enrolled'. Membership is decided by an allow-list predicate (src/discord/membership-role.ts) so a MemberRole added later defaults to NOT holding it.",
+      "summary": "The join role was assigned by the GuildMemberAdd handler to EVERY account that entered the guild, which made it useless as the permission anchor the regiment wanted: a visitor who had never applied held exactly what an enlisted member held. It becomes `membershipRoleId`, granted from ROSTER STATE by DiscordSyncWorker.reconcileRoles (approved members yes; Mercenary and Applicant no; banned no) and no longer assigned on join. Renamed via migration rather than replaced with a new column, so the live row's already-correct value carries across; a new column would have shipped NULL. The reconcile now both grants AND strips it — the exact inverse of the old assign-only rule, and what makes the role mean 'enrolled'. Membership is decided by an allow-list predicate (src/discord/membership-role.ts) so a MemberRole added later defaults to NOT holding it.",
       "status": "review",
       "type": "feature",
       "size": "L",
@@ -13188,7 +13188,7 @@
       ],
       "regressionRisk": [
         {
-          "note": "reconcileRoles no longer exempts the membership role from stripping. Any guild member holding the OLD join role who is not an enrolled member loses it on their next reconcile \u2014 intended, but it is a real role removal against real people the first time the bot runs with syncRolesOnChange on.",
+          "note": "reconcileRoles no longer exempts the membership role from stripping. Any guild member holding the OLD join role who is not an enrolled member loses it on their next reconcile — intended, but it is a real role removal against real people the first time the bot runs with syncRolesOnChange on.",
           "status": "resolved",
           "resolvedAt": "2026-07-28T14:45:00Z",
           "resolvedBy": "T-0209",
@@ -13200,7 +13200,7 @@
         }
       ],
       "skippedByClaude": [
-        "Did not write a one-off migration to strip the old join role from non-members in the guild \u2014 that is a Discord-side action against real accounts and belongs to a deliberate operator step, not a deploy.",
+        "Did not write a one-off migration to strip the old join role from non-members in the guild — that is a Discord-side action against real accounts and belongs to a deliberate operator step, not a deploy.",
         "Did not make suspension strip the Membership role in the general reconcile; suspension does not touch Discord anywhere else and widening that was beyond the ask. The rejoin path does honour it."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
@@ -13226,7 +13226,7 @@
     {
       "id": "T-0192",
       "title": "Mark an application in flight with the Applicant Discord role",
-      "summary": "Submitting an application had no Discord side at all. The role linked to the `Applicant` RANK is now added on submit and removed on approve, decline and block. Resolved through the rank rather than a settings column so the admin configures it in the same Ranks & Medals screen as every other role link, with no second place for it to be half-configured \u2014 which is why the Applicant rank had to become protected. NOTHING is granted on the website: no member row, no rank. Submitting is not joining, and an applicant shown a rank has been told they are in when they are not. Entirely best-effort: a missing or unlinked Applicant rank is a silent no-op (the state production is in today).",
+      "summary": "Submitting an application had no Discord side at all. The role linked to the `Applicant` RANK is now added on submit and removed on approve, decline and block. Resolved through the rank rather than a settings column so the admin configures it in the same Ranks & Medals screen as every other role link, with no second place for it to be half-configured — which is why the Applicant rank had to become protected. NOTHING is granted on the website: no member row, no rank. Submitting is not joining, and an applicant shown a rank has been told they are in when they are not. Entirely best-effort: a missing or unlinked Applicant rank is a silent no-op (the state production is in today).",
       "status": "review",
       "type": "feature",
       "size": "M",
@@ -13261,7 +13261,7 @@
           "status": "passed"
         },
         {
-          "desc": "hold leaves it on \u2014 the application is still in flight",
+          "desc": "hold leaves it on — the application is still in flight",
           "status": "passed"
         },
         {
@@ -13284,7 +13284,7 @@
         }
       ],
       "skippedByClaude": [
-        "Did not add a settings column for the Applicant role \u2014 deriving it from the rank link keeps one configuration surface, at the cost of coupling to a rank name.",
+        "Did not add a settings column for the Applicant role — deriving it from the rank link keeps one configuration surface, at the cost of coupling to a rank name.",
         "Did not strip the Applicant role on a withdrawn application: there is no withdraw path in the API."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
@@ -13363,12 +13363,12 @@
           "status": "open"
         },
         {
-          "note": "The ban branch still respects applyBanRoleOnBan (owner-gated, default off). With it off a rejoining banned member receives nothing \u2014 correct, since no Ban role was ever applied, but it means 'banned' is not enforced in Discord unless that switch is on.",
+          "note": "The ban branch still respects applyBanRoleOnBan (owner-gated, default off). With it off a rejoining banned member receives nothing — correct, since no Ban role was ever applied, but it means 'banned' is not enforced in Discord unless that switch is on.",
           "status": "open"
         }
       ],
       "skippedByClaude": [
-        "Did not add a GuildMemberRemove role cleanup \u2014 leaving the guild already strips every role, so there is nothing to undo.",
+        "Did not add a GuildMemberRemove role cleanup — leaving the guild already strips every role, so there is nothing to undo.",
         "Did not suppress the welcome message for a returning member; the owner may want a different greeting for a rejoin, which is a copy decision, not a code one."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
@@ -13394,7 +13394,7 @@
     {
       "id": "T-0194",
       "title": "Fix enlistment never syncing the new member's Discord roles",
-      "summary": "*** approve() wrote the member row at the entry rank and enqueued NOTHING. *** A newly approved recruit got the rank on the dashboard and no Discord role for it; it only ever landed later, by accident, on the next rank/role/medal change (MembersService.syncMemberRoles) or a manual POST /discord/resync. Enlistment was the single rank-assigning path in the app that did not sync. Fixed by enqueueing a role reconcile after the transaction commits, using the applicant's SNOWFLAKE \u2014 enqueueRoleSync returns null on a falsy third argument, and the member built in the transaction has only the FK column with no hydrated relation, so copying the members-module idiom would have been a silent no-op forever.",
+      "summary": "*** approve() wrote the member row at the entry rank and enqueued NOTHING. *** A newly approved recruit got the rank on the dashboard and no Discord role for it; it only ever landed later, by accident, on the next rank/role/medal change (MembersService.syncMemberRoles) or a manual POST /discord/resync. Enlistment was the single rank-assigning path in the app that did not sync. Fixed by enqueueing a role reconcile after the transaction commits, using the applicant's SNOWFLAKE — enqueueRoleSync returns null on a falsy third argument, and the member built in the transaction has only the FK column with no hydrated relation, so copying the members-module idiom would have been a silent no-op forever.",
       "status": "review",
       "type": "bug",
       "size": "S",
@@ -13435,12 +13435,12 @@
           "status": "open"
         },
         {
-          "note": "The reconcile only delivers a rank role if the Recruit rank is LINKED to a Discord role. On a database where it is not, the fix changes nothing visible \u2014 two independent causes produced the same symptom.",
+          "note": "The reconcile only delivers a rank role if the Recruit rank is LINKED to a Discord role. On a database where it is not, the fix changes nothing visible — two independent causes produced the same symptom.",
           "status": "open"
         }
       ],
       "skippedByClaude": [
-        "Did not back-fill roles for members approved before this shipped \u2014 POST /discord/resync already covers that and is an operator decision, not a deploy-time one."
+        "Did not back-fill roles for members approved before this shipped — POST /discord/resync already covers that and is an operator decision, not a deploy-time one."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
@@ -13465,7 +13465,7 @@
     {
       "id": "T-0195",
       "title": "Post gallery submissions and approvals to two configurable Discord channels",
-      "summary": "Two new settings channels: a staff review channel a submission is posted to the moment it arrives, and a public showcase channel an approved item goes to. Both carry a branded embed with the media. The shape is dictated by what Discord will actually render: an image goes IN the embed, a video NEVER plays from inside one (Discord only builds a player from a bare media URL in the message CONTENT, so a playable item needs a second message), and an external link is left for Discord's own unfurl rather than scraped and re-rendered \u2014 which is also why no external host is ever fetched to build a post. Only the first file is shown; a multi-file submission says how many there are and links back.",
+      "summary": "Two new settings channels: a staff review channel a submission is posted to the moment it arrives, and a public showcase channel an approved item goes to. Both carry a branded embed with the media. The shape is dictated by what Discord will actually render: an image goes IN the embed, a video NEVER plays from inside one (Discord only builds a player from a bare media URL in the message CONTENT, so a playable item needs a second message), and an external link is left for Discord's own unfurl rather than scraped and re-rendered — which is also why no external host is ever fetched to build a post. Only the first file is shown; a multi-file submission says how many there are and links back.",
       "status": "review",
       "type": "feature",
       "size": "L",
@@ -13518,7 +13518,7 @@
       ],
       "regressionRisk": [
         {
-          "note": "Two new DiscordSyncJobType members. Neither is in IDEMPOTENT_JOB_TYPES, so an orphaned in-flight gallery post after a restart is failed rather than retried \u2014 deliberate (a retry would double-post) but it means a post can be silently lost across a restart.",
+          "note": "Two new DiscordSyncJobType members. Neither is in IDEMPOTENT_JOB_TYPES, so an orphaned in-flight gallery post after a restart is failed rather than retried — deliberate (a retry would double-post) but it means a post can be silently lost across a restart.",
           "status": "open"
         },
         {
@@ -13527,7 +13527,7 @@
         }
       ],
       "skippedByClaude": [
-        "Did not attach media as a file upload \u2014 the R2 URLs are permanent and public, so a URL is strictly better than re-uploading bytes to Discord.",
+        "Did not attach media as a file upload — the R2 URLs are permanent and public, so a URL is strictly better than re-uploading bytes to Discord.",
         "Did not post on decline or delete; the author already gets a decline DM and a channel post about a rejected submission would be a pile-on."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
@@ -13553,7 +13553,7 @@
     {
       "id": "T-0196",
       "title": "Show who approved a gallery item, to moderate_gallery holders only",
-      "summary": "The moderator identity was stored (gallery_items.moderated_by_member_id) but never projected anywhere. It now appears on the gallery cards, the detail page and the moderation queue. The field is set to `undefined` rather than null for a caller without moderate_gallery, so the key is ABSENT from the response rather than present-and-empty \u2014 a null would tell an ordinary viewer that an approver exists and is being hidden, which is exactly what the gate is for. Resolved once per request and applied as a pure per-row function so a paginated page costs no extra query. The column is shared with decline, so the attribution is only rendered for an item whose status is actually Approved.",
+      "summary": "The moderator identity was stored (gallery_items.moderated_by_member_id) but never projected anywhere. It now appears on the gallery cards, the detail page and the moderation queue. The field is set to `undefined` rather than null for a caller without moderate_gallery, so the key is ABSENT from the response rather than present-and-empty — a null would tell an ordinary viewer that an approver exists and is being hidden, which is exactly what the gate is for. Resolved once per request and applied as a pure per-row function so a paginated page costs no extra query. The column is shared with decline, so the attribution is only rendered for an item whose status is actually Approved.",
       "status": "review",
       "type": "feature",
       "size": "S",
@@ -13598,7 +13598,7 @@
         }
       ],
       "skippedByClaude": [
-        "Did not add a separate approved_by column \u2014 moderated_by_member_id already holds it, and a second column would have needed a migration plus a back-fill that could not be derived.",
+        "Did not add a separate approved_by column — moderated_by_member_id already holds it, and a second column would have needed a migration plus a back-fill that could not be derived.",
         "Did not surface the approval TIMESTAMP on the cards; it is on the detail page only, where there is room for it."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
@@ -13624,7 +13624,7 @@
     {
       "id": "T-0197",
       "title": "Server-render Open Graph cards so a gallery share link unfurls",
-      "summary": "https://lordsofholdfast.com/gallery/<id> is an SPA route and the SPA is a purely client-side build, so no unfurler \u2014 Discord, WhatsApp, Slack, Twitter \u2014 saw anything but one generic <head> for every item. A new @Public() route (/api/share/gallery/:id) renders per-item og:*/twitter:* tags, and a Caddy matcher routes ONLY known unfurler user-agents to it while every human still gets the real app. Image -> og:image; uploaded video -> og:video with its poster (never a player card without a still, which several unfurlers drop outright); YouTube/Medal -> the provider card built from the SAME pure extractors the in-app resolver uses; anything else -> metadata only, because the alternative is an unauthenticated route fetching arbitrary member-supplied URLs server-side and republishing them.",
+      "summary": "https://lordsofholdfast.com/gallery/<id> is an SPA route and the SPA is a purely client-side build, so no unfurler — Discord, WhatsApp, Slack, Twitter — saw anything but one generic <head> for every item. A new @Public() route (/api/share/gallery/:id) renders per-item og:*/twitter:* tags, and a Caddy matcher routes ONLY known unfurler user-agents to it while every human still gets the real app. Image -> og:image; uploaded video -> og:video with its poster (never a player card without a still, which several unfurlers drop outright); YouTube/Medal -> the provider card built from the SAME pure extractors the in-app resolver uses; anything else -> metadata only, because the alternative is an unauthenticated route fetching arbitrary member-supplied URLs server-side and republishing them.",
       "status": "review",
       "type": "feature",
       "size": "L",
@@ -13680,7 +13680,7 @@
       ],
       "regressionRisk": [
         {
-          "note": "The Caddyfile is NOT shipped by CI \u2014 deploy/bin/lords-deploy only pins image tags. The crawler matcher requires a manual `ssh ovh-lords`, a file sync and `up -d caddy`; until then the backend route works but the pretty URL does not unfurl. A Caddyfile syntax error takes the whole site down, so validate in the container before recreating.",
+          "note": "The Caddyfile is NOT shipped by CI — deploy/bin/lords-deploy only pins image tags. The crawler matcher requires a manual `ssh ovh-lords`, a file sync and `up -d caddy`; until then the backend route works but the pretty URL does not unfurl. A Caddyfile syntax error takes the whole site down, so validate in the container before recreating.",
           "status": "open"
         },
         {
@@ -13689,8 +13689,8 @@
         }
       ],
       "skippedByClaude": [
-        "Did not adopt Angular SSR \u2014 a multi-day change to a live site for a problem a public route solves in an afternoon, and it would turn the static `web` image into a Node process with no memory limit on a 4 GB box.",
-        "Did not use a Cloudflare Worker \u2014 it would add a fourth deployment surface that CI does not build and the runbook does not describe.",
+        "Did not adopt Angular SSR — a multi-day change to a live site for a problem a public route solves in an afternoon, and it would turn the static `web` image into a Node process with no memory limit on a 4 GB box.",
+        "Did not use a Cloudflare Worker — it would add a fourth deployment surface that CI does not build and the runbook does not describe.",
         "Did not fetch or scrape unrecognised external hosts to enrich their cards; that is an SSRF surface on an unauthenticated route."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
@@ -13749,7 +13749,7 @@
       ],
       "regressionRisk": [],
       "skippedByClaude": [
-        "Did not make the next-steps block a configurable second field \u2014 the owner asked for it gone, and one message box is simpler than two."
+        "Did not make the next-steps block a configurable second field — the owner asked for it gone, and one message box is simpler than two."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
@@ -13812,7 +13812,7 @@
       ],
       "regressionRisk": [
         {
-          "note": "Three ranks are now unrenameable for every caller including the Owner, with no capability override. A regiment that had renamed Applicant or Mercenary before this shipped keeps the renamed row and the coupled lookups will not find it \u2014 protection freezes a row, it cannot un-rename one.",
+          "note": "Three ranks are now unrenameable for every caller including the Owner, with no capability override. A regiment that had renamed Applicant or Mercenary before this shipped keeps the renamed row and the coupled lookups will not find it — protection freezes a row, it cannot un-rename one.",
           "status": "open"
         }
       ],
@@ -13842,7 +13842,7 @@
     {
       "id": "T-0200",
       "title": "Validate a bot-settings role link only when it CHANGES",
-      "summary": "Discovered during live verification. The settings editor posts the whole object on every save, and updateSettings re-ran the strict privileged-role check on membershipRoleId/banRoleId unconditionally \u2014 so one already-stored privileged role made the ENTIRE panel unsaveable: channels, welcome copy and every toggle refused along with it, with an error naming a field the admin had not touched. The bad value could not be cleared either, because the clear posts the same body. Only a changed id is validated now, the same rule the protected-rank rename guard uses; a genuinely new privileged role is still refused.",
+      "summary": "Discovered during live verification. The settings editor posts the whole object on every save, and updateSettings re-ran the strict privileged-role check on membershipRoleId/banRoleId unconditionally — so one already-stored privileged role made the ENTIRE panel unsaveable: channels, welcome copy and every toggle refused along with it, with an error naming a field the admin had not touched. The bad value could not be cleared either, because the clear posts the same body. Only a changed id is validated now, the same rule the protected-rank rename guard uses; a genuinely new privileged role is still refused.",
       "status": "review",
       "type": "bug",
       "size": "S",
@@ -13887,7 +13887,7 @@
         }
       ],
       "skippedByClaude": [
-        "Did not add a re-validation sweep for roles whose Discord permissions changed after linking \u2014 that needs a scheduled check against the live guild, not a settings write."
+        "Did not add a re-validation sweep for roles whose Discord permissions changed after linking — that needs a scheduled check against the live guild, not a settings write."
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
@@ -13964,7 +13964,7 @@
     {
       "id": "T-0202",
       "title": "Adopt an applicant's existing Discord rank and medals on approval",
-      "summary": "*** APPROVAL WAS THE FIRST RECONCILE OF A MEMBER'S LIFE, AND IT WIPED THEM. *** The regiment ran on Discord for years before it ran on this dashboard, so a veteran's rank and medals exist ONLY as guild roles. reconcileRoles strips every MANAGED role (rank roles + medal roles + the Membership role) that the roster cannot account for, and a member row created fresh at the entry rank accounts for nothing \u2014 so the T-0194 sync that approve() now enqueues took years of decorations straight back off the person it had just admitted. Sign-in and submit were never implicated: AuthService touches Discord not at all and creates no member row, and the submit path is an additive role.assign. Fixed by making roles flow BOTH ways at this one point: a new DiscordRoleAdoptionService reads the applicant's current guild roles before the transaction opens and maps them back to rank/medal rows, and approve() writes those onto the member (rank) and into member_medals (awards) inside the enlistment transaction. The reconcile that follows then finds them DESIRED and leaves them alone. Protected ranks are never adopted (the entry rank is where enlistment starts, the Applicant role is the marker the applicant is wearing, and mercenary status is the approved track's call), and an entry-rank precedence floor keeps the carry-over a promotion mechanism rather than a possible demotion.",
+      "summary": "*** APPROVAL WAS THE FIRST RECONCILE OF A MEMBER'S LIFE, AND IT WIPED THEM. *** The regiment ran on Discord for years before it ran on this dashboard, so a veteran's rank and medals exist ONLY as guild roles. reconcileRoles strips every MANAGED role (rank roles + medal roles + the Membership role) that the roster cannot account for, and a member row created fresh at the entry rank accounts for nothing — so the T-0194 sync that approve() now enqueues took years of decorations straight back off the person it had just admitted. Sign-in and submit were never implicated: AuthService touches Discord not at all and creates no member row, and the submit path is an additive role.assign. Fixed by making roles flow BOTH ways at this one point: a new DiscordRoleAdoptionService reads the applicant's current guild roles before the transaction opens and maps them back to rank/medal rows, and approve() writes those onto the member (rank) and into member_medals (awards) inside the enlistment transaction. The reconcile that follows then finds them DESIRED and leaves them alone. Protected ranks are never adopted (the entry rank is where enlistment starts, the Applicant role is the marker the applicant is wearing, and mercenary status is the approved track's call), and an entry-rank precedence floor keeps the carry-over a promotion mechanism rather than a possible demotion.",
       "status": "review",
       "type": "bug",
       "size": "M",
@@ -14024,7 +14024,7 @@
           "status": "open"
         },
         {
-          "note": "Adoption is gated on botEnabled and, in production today, on DISCORD_BOT_MOCK=true \u2014 the mock only knows members it has already touched, so the carry-over is inert until the real bot runs. That is the same condition that makes the strip inert, so the two stay in step.",
+          "note": "Adoption is gated on botEnabled and, in production today, on DISCORD_BOT_MOCK=true — the mock only knows members it has already touched, so the carry-over is inert until the real bot runs. That is the same condition that makes the strip inert, so the two stay in step.",
           "status": "open"
         },
         {
@@ -14033,9 +14033,9 @@
         }
       ],
       "skippedByClaude": [
-        "Did not back-fill members approved BEFORE this ships \u2014 their roles are already gone and only the guild audit log knows what they were; POST /discord/resync cannot recover them.",
+        "Did not back-fill members approved BEFORE this ships — their roles are already gone and only the guild audit log knows what they were; POST /discord/resync cannot recover them.",
         "Did not adopt roles on the guild-join restore path or on staff-created members; both already reconcile from roster state and neither is where the history was being lost.",
-        "Adopts one award per medal \u2014 a role is a boolean and cannot say a medal was earned three times."
+        "Adopts one award per medal — a role is a boolean and cannot say a medal was earned three times."
       ],
       "lastTouchedCommit": "348f0aeb27f72821c912a5d3bde110e9d63801ff",
       "createdAt": "2026-07-27T10:30:00Z",
@@ -14898,7 +14898,7 @@
       ],
       "regressionRisk": [
         {
-          "desc": "\u26a0\ufe0f SELF-PROMOTION IS NOW REACHABLE BY DESIGN, and this is the entry to read before touching any of it. edit_ranks_medals holders may set their own rank, pin their own medal, and run deriveFromDiscord on their own record - which credits whatever their own Discord roles say they have earned, a trigger that lives in the guild rather than in this application. That was LDA-H1's last defence. What still bounds it: the capability (Owner+Admin by default in role-permissions.seed.ts), the promotion-only rank floor and additive-only medal diff in the derive path, DiscordRolePolicyService refusing to bind a role the bot cannot manage, and the audit row on every write. What does NOT bound it is member-hierarchy.ts.",
+          "desc": "⚠️ SELF-PROMOTION IS NOW REACHABLE BY DESIGN, and this is the entry to read before touching any of it. edit_ranks_medals holders may set their own rank, pin their own medal, and run deriveFromDiscord on their own record - which credits whatever their own Discord roles say they have earned, a trigger that lives in the guild rather than in this application. That was LDA-H1's last defence. What still bounds it: the capability (Owner+Admin by default in role-permissions.seed.ts), the promotion-only rank floor and additive-only medal diff in the derive path, DiscordRolePolicyService refusing to bind a role the bot cannot manage, and the audit row on every write. What does NOT bound it is member-hierarchy.ts.",
           "status": "open",
           "notedAt": "2026-07-28T19:10:00Z"
         },
@@ -14960,7 +14960,7 @@
     {
       "id": "T-0212",
       "title": "Order a member's medals by the cabinet, and send the medal's own description",
-      "summary": "Owner report: the roster, the profile's Honours & Decorations panel and the dashboard's Decorations strip listed a member's medals oldest-award-first, so the same five medals came out in a different order on every member and nothing lined up with the Medal Cabinet on /admin/ranks. `medalsByMember` was ordering `{ awardedAt: 'DESC' }`; it now orders `{ medal: { precedence: 'ASC' }, awardedAt: 'DESC', id: 'ASC' }` on the same `find` (TypeORM 0.3.31 reuses the join `relations: { medal: true }` already pushed, so it stays one LEFT JOIN and the unit spec's repository mock keeps working \u2014 a QueryBuilder rewrite would have broken every test that reaches `project()`). Both tiebreakers are load-bearing: `precedence` defaults to 0 and is rewritten wholesale by the drag-reorder, and medals are repeatable, so two awards of the SAME medal always tie. This is the only place a MemberMedalSummary is built, so the roster, profile, dashboard, admin dialog chips and the GDPR self-export all inherit it. MemberMedalSummary also gains `description` \u2014 the CATALOGUE text (what the medal is awarded FOR, identical for every holder, the same string /admin/ranks edits) \u2014 alongside the existing per-award `detail` citation. Both are sent; they are two fields, not a rename. `removeMedal`'s own `order: { awardedAt: 'DESC' }` is deliberately untouched: there it picks WHICH award to delete and is semantics, not display.",
+      "summary": "Owner report: the roster, the profile's Honours & Decorations panel and the dashboard's Decorations strip listed a member's medals oldest-award-first, so the same five medals came out in a different order on every member and nothing lined up with the Medal Cabinet on /admin/ranks. `medalsByMember` was ordering `{ awardedAt: 'DESC' }`; it now orders `{ medal: { precedence: 'ASC' }, awardedAt: 'DESC', id: 'ASC' }` on the same `find` (TypeORM 0.3.31 reuses the join `relations: { medal: true }` already pushed, so it stays one LEFT JOIN and the unit spec's repository mock keeps working — a QueryBuilder rewrite would have broken every test that reaches `project()`). Both tiebreakers are load-bearing: `precedence` defaults to 0 and is rewritten wholesale by the drag-reorder, and medals are repeatable, so two awards of the SAME medal always tie. This is the only place a MemberMedalSummary is built, so the roster, profile, dashboard, admin dialog chips and the GDPR self-export all inherit it. MemberMedalSummary also gains `description` — the CATALOGUE text (what the medal is awarded FOR, identical for every holder, the same string /admin/ranks edits) — alongside the existing per-award `detail` citation. Both are sent; they are two fields, not a rename. `removeMedal`'s own `order: { awardedAt: 'DESC' }` is deliberately untouched: there it picks WHICH award to delete and is semantics, not display.",
       "status": "review",
       "type": "feature",
       "size": "S",
@@ -14997,7 +14997,7 @@
           "status": "passed"
         },
         {
-          "desc": "e2e (real MySQL): awarding a junior medal LAST still returns it last \u2014 cabinet order beats calendar order",
+          "desc": "e2e (real MySQL): awarding a junior medal LAST still returns it last — cabinet order beats calendar order",
           "status": "passed"
         },
         {
@@ -15015,12 +15015,12 @@
       ],
       "regressionRisk": [
         {
-          "desc": "This is the repo's FIRST use of TypeORM nested relation ordering (`order: { medal: { precedence: 'ASC' } }`); every other `order:` here is flat. It works because `relations: { medal: true }` already pushed the join and buildOrder reuses that alias \u2014 verified against the installed 0.3.31 source and against real MySQL in mvp.e2e. Adding `take`/`skip` to this find would move it onto TypeORM's distinct-alias pagination path, where relation ordering behaves differently.",
+          "desc": "This is the repo's FIRST use of TypeORM nested relation ordering (`order: { medal: { precedence: 'ASC' } }`); every other `order:` here is flat. It works because `relations: { medal: true }` already pushed the join and buildOrder reuses that alias — verified against the installed 0.3.31 source and against real MySQL in mvp.e2e. Adding `take`/`skip` to this find would move it onto TypeORM's distinct-alias pagination path, where relation ordering behaves differently.",
           "status": "open",
           "notedAt": "2026-07-29T22:20:00Z"
         },
         {
-          "desc": "`removeMedal` (members.service.ts) carries its own `order: { awardedAt: 'DESC' }` which selects WHICH repeated award to delete. It looks like the ordering this task changed and is not \u2014 a find-and-replace across the file silently changes which row a removal deletes.",
+          "desc": "`removeMedal` (members.service.ts) carries its own `order: { awardedAt: 'DESC' }` which selects WHICH repeated award to delete. It looks like the ordering this task changed and is not — a find-and-replace across the file silently changes which row a removal deletes.",
           "status": "open",
           "notedAt": "2026-07-29T22:20:00Z"
         },
@@ -15032,9 +15032,9 @@
       ],
       "skippedByClaude": [
         "Did not put `precedence` on MemberMedalSummary. Exposing it would invite a client-side sort and let four render sites drift; ordering stays decided once, on the server.",
-        "Did not touch the medal catalogue read (medals.service.findAll) \u2014 it was already precedence-ASC, which is the order this change mirrors.",
+        "Did not touch the medal catalogue read (medals.service.findAll) — it was already precedence-ASC, which is the order this change mirrors.",
         "Did not add the catalogue description to the hf-medal tooltip on the roster/dashboard tiles; only the profile panel asked for descriptive text.",
-        "Did not backfill the seeded medal descriptions on production \u2014 the live cabinet is admin-authored and one medal there still reads 'Please update the description'. That is an owner edit on /admin/ranks, not a code change."
+        "Did not backfill the seeded medal descriptions on production — the live cabinet is admin-authored and one medal there still reads 'Please update the description'. That is an owner edit on /admin/ranks, not a code change."
       ],
       "lastTouchedCommit": "8375880b546f6337a863ee9b348af186a2e9b02e",
       "createdAt": "2026-07-29T22:20:00Z",
@@ -15045,14 +15045,14 @@
           "from": null,
           "to": "review",
           "by": "claude",
-          "note": "medal ordering + catalogue description on the award projection; PR into dev. PRs open into dev: this repo #70, frontend [lords-regiment-dashboard #60](https://github.com/Amitoj02/lords-regiment-dashboard/pull/60). Merge this one FIRST \u2014 the frontend renders a blank description until the API sends it."
+          "note": "medal ordering + catalogue description on the award projection; PR into dev. PRs open into dev: this repo #70, frontend [lords-regiment-dashboard #60](https://github.com/Amitoj02/lords-regiment-dashboard/pull/60). Merge this one FIRST — the frontend renders a blank description until the API sends it."
         }
       ]
     },
     {
       "id": "T-0213",
       "title": "Require \"Why do you want to join the Lords Regiment?\" at intake",
-      "summary": "Renamed the optional \"Note to the recruiting officer\" to the required question \"Why do you want to join the Lords Regiment?\" on every surface: apply form, officer applicant page, the #new-enlistments Discord embed field, and the Swagger descriptions. Property stays representativeNote and the column stays representative_note varchar(500) NULL, so NO migration \u2014 nullable is deliberate so pre-T-0213 applications (which have no answer) still render. Only intake tightened: CreateApplicationDto @IsOptional -> @MinLength(1); PartialType keeps PATCH /applications/mine optional.",
+      "summary": "Renamed the optional \"Note to the recruiting officer\" to the required question \"Why do you want to join the Lords Regiment?\" on every surface: apply form, officer applicant page, the #new-enlistments Discord embed field, and the Swagger descriptions. Property stays representativeNote and the column stays representative_note varchar(500) NULL, so NO migration — nullable is deliberate so pre-T-0213 applications (which have no answer) still render. Only intake tightened: CreateApplicationDto @IsOptional -> @MinLength(1); PartialType keeps PATCH /applications/mine optional.",
       "status": "review",
       "type": "feature",
       "size": "S",
@@ -15094,14 +15094,14 @@
       ],
       "regressionRisk": [
         {
-          "desc": "representativeNote is now required at intake but the column stays NULLable for pre-T-0213 rows \u2014 any consumer that assumes a non-null answer (admin page @if guard, the embed composer's blank-field omission) must keep tolerating null",
+          "desc": "representativeNote is now required at intake but the column stays NULLable for pre-T-0213 rows — any consumer that assumes a non-null answer (admin page @if guard, the embed composer's blank-field omission) must keep tolerating null",
           "status": "open",
           "notedAt": "2026-08-04T00:30:00Z"
         }
       ],
       "skippedByClaude": [
-        "Did NOT rename representativeNote/representative_note to whyJoin/why_join \u2014 user chose labels-only to avoid a production schema migration and an API contract break.",
-        "Did NOT re-sync the rest of SCHEMA.md applications table (platform/timezone/prior_experience/age_confirmed/how_found enum/id width and the four T-0039 columns) \u2014 logged as T-0214.",
+        "Did NOT rename representativeNote/representative_note to whyJoin/why_join — user chose labels-only to avoid a production schema migration and an API contract break.",
+        "Did NOT re-sync the rest of SCHEMA.md applications table (platform/timezone/prior_experience/age_confirmed/how_found enum/id width and the four T-0039 columns) — logged as T-0214.",
         "Left the max length at 500 (unchanged), so no migration was needed even though the question now invites a longer answer.",
         "Left a test application submitted by the mock owner persona in the local lords_dashboard dev DB during verification (inert: that identity only exists under DISCORD_MOCK=true)."
       ],
@@ -15156,7 +15156,7 @@
           "from": null,
           "to": "planned",
           "by": "claude",
-          "note": "discovered during T-0213 \u2014 SCHEMA.md documented a phantom why_join column"
+          "note": "discovered during T-0213 — SCHEMA.md documented a phantom why_join column"
         }
       ]
     },
@@ -15223,7 +15223,7 @@
           "notedAt": "2026-08-04T22:10:00Z"
         },
         {
-          "desc": "og-html.ts no longer emits a meta refresh. A human who opens /api/share/gallery/:id directly now stays on the plain shell instead of bouncing to the SPA \u2014 deliberate, but it is a visible behaviour change on a route that is directly linkable.",
+          "desc": "og-html.ts no longer emits a meta refresh. A human who opens /api/share/gallery/:id directly now stays on the plain shell instead of bouncing to the SPA — deliberate, but it is a visible behaviour change on a route that is directly linkable.",
           "status": "open",
           "notedAt": "2026-08-04T22:10:00Z"
         },
@@ -15240,11 +15240,11 @@
       ],
       "skippedByClaude": [
         "Did NOT move status/suspendedUntil/bannedAt behind view_audit_log for INTERNAL callers. Every enrolled member including a Mercenary still reads another member's discipline state on the authenticated roster. Out of scope here (the public projection simply never carries them) but worth its own task.",
-        "Did NOT wire the dead members.public_profile column. The owner chose no per-member opt-out, so the column stays unread \u2014 as does `standing`, which only the dev-owner seeder ever writes.",
+        "Did NOT wire the dead members.public_profile column. The owner chose no per-member opt-out, so the column stays unread — as does `standing`, which only the dev-owner seeder ever writes.",
         "No username_history table, so a renamed handle's old URL 404s after the 30-day cooldown rather than redirecting forever.",
         "The sitemap is a single document capped at 5000 profiles, not a sitemap index. Fine at regiment scale; it would need splitting at 50k URLs.",
         "Cloudflare Authenticated Origin Pulls and TRUST_CF_CONNECTING_IP=true are documented in deploy/README.md but NOT enabled. Until they are, the whole internet shares one 120/min bucket keyed on Caddy's IP and a crawl burst can 429 real members.",
-        "Did not add a robots meta or noindex to /api/seo/* responses themselves \u2014 they are only ever reached through the Caddy UA rewrite, never linked."
+        "Did not add a robots meta or noindex to /api/seo/* responses themselves — they are only ever reached through the Caddy UA rewrite, never linked."
       ],
       "lastTouchedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
       "createdAt": "2026-08-04T22:10:00Z",
@@ -15391,7 +15391,7 @@
       "id": "T-0217",
       "title": "Teach the page shell the tags an unfurler actually reads",
       "summary": "renderPageShell gained og:locale, theme-color, the full og:image:* set (secure_url, type, width, height, alt), the full og:video:* set with twitter:player:stream, article timestamps, twitter:label/data for Slack, and a body <img>/<video> so a crawler sees the subject and not only a description of it. twitter:card is now three-way: player when there is a clip AND a poster, summary_large_image for a wide image, summary for a square one - Discord inspects the real file and demotes a square avatar whatever the tag claims. Video dimensions are halved above 1920 and doubled below 400, which is the workaround FxEmbed carries in production because Discord sizes its player purely from the declared numbers. escapeHtml moved out of gallery/share into seo/html, reversing an import that had the general renderer reaching into one feature's share code.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -15441,7 +15441,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
       "createdAt": "2026-08-05T05:40:00Z",
-      "updatedAt": "2026-08-05T05:40:00Z",
+      "updatedAt": "2026-08-05T18:30:00Z",
       "history": [
         {
           "at": "2026-08-05T05:40:00Z",
@@ -15457,6 +15457,13 @@
           "at": "2026-08-05T05:40:00Z",
           "from": "in_progress",
           "to": "review"
+        },
+        {
+          "at": "2026-08-05T18:30:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged as PR #82 and live in production; verified /api/seo/* serves real HTML from the box"
         }
       ]
     },
@@ -15464,7 +15471,7 @@
       "id": "T-0218",
       "title": "Server-render the home, events, event, gallery and gallery-item pages",
       "summary": "The module covered /roster and /u/* only, so an event or a dispatch pasted into Discord unfurled with the site's generic title, generic blurb and no banner - identical for every event the regiment has ever run, because no unfurler runs JavaScript. SeoService gained renderHome, renderEvents, renderEvent and delegates the gallery to GalleryShareService, which was rebuilt onto renderPageShell: its entire body used to be one anchor, which is the right document for Discord and the wrong one for Google, and the same UA matcher sends both there. Structured data is per type - Organization+WebSite, ItemList, Event, ImageGallery, ImageObject/VideoObject - and a VideoObject is only claimed when there is a poster AND an upload date, because an incomplete one is an error rather than a partial win. The sitemap now lists every public event and approved dispatch, and /home rather than /, which redirects.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 8,
@@ -15530,7 +15537,7 @@
       ],
       "lastTouchedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
       "createdAt": "2026-08-05T05:40:00Z",
-      "updatedAt": "2026-08-05T05:40:00Z",
+      "updatedAt": "2026-08-05T18:30:00Z",
       "history": [
         {
           "at": "2026-08-05T05:40:00Z",
@@ -15546,6 +15553,13 @@
           "at": "2026-08-05T05:40:00Z",
           "from": "in_progress",
           "to": "review"
+        },
+        {
+          "at": "2026-08-05T18:30:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged as PR #82 and live in production; verified /api/seo/* serves real HTML from the box"
         }
       ]
     },
@@ -15553,7 +15567,7 @@
       "id": "T-0219",
       "title": "Route every public path to the shell at the edge, and document the deploy order",
       "summary": "The @crawler matcher grew from '/u/* /roster /roster/*' to include /events, /events/*, /gallery, /gallery/* and /home. The bare forms are written out because Caddy treats slashes as significant - /gallery/* does not match /gallery. / is deliberately excluded and /home stands in for it: / is the one path a Cloudflare Cache Rule covers and Cloudflare honours Vary only for Accept-Encoding, so a UA-varying / would end up serving the crawler document to humans out of the edge cache. The shells now send Vary: User-Agent. The legacy /api/share/gallery/:id block is kept because this file is hand-synced and both versions have to work between an API deploy and someone SSHing in.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
@@ -15602,7 +15616,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
       "createdAt": "2026-08-05T05:40:00Z",
-      "updatedAt": "2026-08-05T05:40:00Z",
+      "updatedAt": "2026-08-05T18:30:00Z",
       "history": [
         {
           "at": "2026-08-05T05:40:00Z",
@@ -15618,6 +15632,201 @@
           "at": "2026-08-05T05:40:00Z",
           "from": "in_progress",
           "to": "review"
+        },
+        {
+          "at": "2026-08-05T18:30:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged as PR #82 and live in production; verified /api/seo/* serves real HTML from the box"
+        }
+      ]
+    },
+    {
+      "id": "T-0297",
+      "title": "Make a shared link say what the page is about",
+      "summary": "The profile card leads with the member's bio (cut at 160) instead of a generated stat line whose middle clause read '0 events attended'; the card image is the AVATAR always, with the banner moved into the body; profile:username is emitted. A new stateless /api/oembed supplies the one Discord embed slot Open Graph cannot reach — the bold author line above the title. Organization gets a stable @id that every memberOf/organizer references, BreadcrumbList lands on profiles and events, the fabricated ProfilePage.dateModified is dropped, and the sitemap loses <priority>/<changefreq> (Google ignores both). Two live bugs fixed: ROSTER_PAGE_SIZE was 50 against the SPA's 25 (one URL, two member sets), and no member past roster page 1 had any internal link pointing at them.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "seo",
+      "feature": "crawler-shell",
+      "subfeature": "card-copy-and-oembed",
+      "repo": "",
+      "paths": [
+        "src/seo/oembed.controller.ts",
+        "src/seo/oembed.controller.spec.ts",
+        "src/seo/seo.service.ts",
+        "src/seo/html/page-shell.ts",
+        "src/seo/seo.module.ts"
+      ],
+      "dependsOn": [
+        "lords-regiment-dashboard:T-0297"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "oembed returns a valid envelope and drops a non-http author_url",
+          "status": "passed"
+        },
+        {
+          "desc": "profile description leads with the bio, byte-identical to the SPA describe()",
+          "status": "passed"
+        },
+        {
+          "desc": "roster shell asks for limit=25 and renders numbered page anchors",
+          "status": "passed"
+        },
+        {
+          "desc": "paste a profile link into a real Discord channel and confirm the author line renders",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "describeProfile and the SPA's describe() must stay byte-identical; either moving alone gives one URL two descriptions across the two rendering passes",
+          "status": "open",
+          "notedAt": "2026-08-05T18:30:00Z"
+        },
+        {
+          "desc": "ROSTER_PAGE_SIZE (25) must equal PUBLIC_ROSTER_PAGE_SIZE in the frontend; they were 50/25 and nothing caught it",
+          "status": "open",
+          "notedAt": "2026-08-05T18:30:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
+      "createdAt": "2026-08-05T18:30:00Z",
+      "updatedAt": "2026-08-05T18:30:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T18:30:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "built and pushed as PR #84"
+        }
+      ]
+    },
+    {
+      "id": "T-0298",
+      "title": "Publish an event’s server binding, keep the password behind sign-in",
+      "summary": "serverName and serverRegion move out of the includeServer branch in EventDto.from. That flag gated turnout AND the binding, so it could not simply be flipped without publishing unit strength. The password does not move and cannot: it is not a field on EventDto on any branch, so no option value or future call site can make the DTO carry one. Reveal still needs a session, the reveal_event_passwords capability and a live non-declined RSVP. The event shell lists Server/Region as public facts and names the server in the JSON-LD VirtualLocation.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "events",
+      "feature": "event-detail",
+      "subfeature": "server-binding-visibility",
+      "repo": "",
+      "paths": [
+        "src/events/dto/event.dto.ts",
+        "src/seo/seo.service.ts",
+        "src/events/events.service.spec.ts",
+        "test/post-mvp.e2e-spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "public feed carries serverName + serverRegion, never serverPassword",
+          "status": "passed"
+        },
+        {
+          "desc": "a non-enrolled caller gets the binding but no turnout",
+          "status": "passed"
+        },
+        {
+          "desc": "reveal gating (RSVP + capability) unchanged",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e post-mvp suite against the isolated database",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "includeServer is one flag over two concerns (turnout, binding); a future field added under it inherits whichever visibility it was not meant to have",
+          "status": "open",
+          "notedAt": "2026-08-05T18:30:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
+      "createdAt": "2026-08-05T18:30:00Z",
+      "updatedAt": "2026-08-05T18:30:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T18:30:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "built and pushed as PR #84"
+        }
+      ]
+    },
+    {
+      "id": "T-0299",
+      "title": "Stop the crawler rewrite depending on a hand-synced Caddyfile",
+      "summary": "Root cause of 'every link unfurls the same': production ran a Caddyfile predating even the T-0197 gallery unfurler, so nothing ever reached /api/seo/* despite the API serving correct HTML since T-0293. lords-deploy has no command that can write the Caddyfile and the manual scp step did not happen. The frontend's nginx.conf now carries the same routing so it ships inside the web image on any ordinary `deploy web`. Caddy still wins when synced (handle blocks are mutually exclusive, file-ordered), so the layers cannot disagree. Google-InspectionTool added to both UA lists; deploy/README.md carries the four-command diagnosis.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "infra",
+      "feature": "edge",
+      "subfeature": "crawler-routing",
+      "repo": "",
+      "paths": [
+        "Caddyfile",
+        "deploy/README.md"
+      ],
+      "dependsOn": [
+        "lords-regiment-dashboard:T-0299"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "crawler routing exercised end-to-end against a real nginx + mock API",
+          "status": "passed"
+        },
+        {
+          "desc": "humans, /, /login, /app/* and asset paths never diverted",
+          "status": "passed"
+        },
+        {
+          "desc": "confirm against production after the web image deploys",
+          "status": "pending"
+        },
+        {
+          "desc": "sync the Caddyfile so the www→apex 301 fires (nginx cannot do it)",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the UA matcher now lives in TWO files (Caddyfile and the frontend nginx.conf); a crawler added to one and not the other gets the empty shell from whichever layer is live",
+          "status": "open",
+          "notedAt": "2026-08-05T18:30:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
+      "createdAt": "2026-08-05T18:30:00Z",
+      "updatedAt": "2026-08-05T18:30:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T18:30:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "built and pushed as PR #84"
         }
       ]
     }
@@ -15642,6 +15851,11 @@
       "at": "2026-08-05T04:20:00Z",
       "by": "claude",
       "note": "T-0216 (member bio + handle-based linked accounts) implemented and opened for review, coupled to lords-regiment-dashboard T-0289..T-0292 on the matching branch feat/member-bio-and-socials. Merge THIS repo first. PRs: backend https://github.com/Amitoj02/lords-dashboard-backend/pull/81 and frontend https://github.com/Amitoj02/lords-regiment-dashboard/pull/67, both into dev; merge this repo first."
+    },
+    {
+      "at": "2026-08-05T18:30:00Z",
+      "by": "claude",
+      "note": "T-0297..T-0299 created (link previews, public server binding, crawler routing off the hand-synced Caddyfile); T-0217..T-0219 advanced review->deployed"
     }
   ]
 }
