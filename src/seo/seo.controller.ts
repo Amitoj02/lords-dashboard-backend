@@ -7,20 +7,48 @@ import { SHORT_ID_REGEX } from '../common/ids/short-id';
 import { SeoService } from './seo.service';
 
 /**
+ * Requests per minute, per tracked client, for one shell route (T-0297).
+ *
+ * ── WHY 300 AND NOT THE 60 IT WAS ───────────────────────────────────────────
+ * `CfAwareThrottlerGuard` keys on `req.ip` unless `TRUST_CF_CONNECTING_IP=true`,
+ * and behind the edge that address is the proxy, not the crawler. Every
+ * unfurler and every search engine on earth therefore shares ONE bucket per
+ * route. That cost nothing while the rewrite was dead — nothing reached these
+ * routes at all — and became live the moment the routing shipped inside the web
+ * image.
+ *
+ * `u/:handle` is the binding constraint: it is one route serving every profile
+ * on the site, so a Googlebot pass over a few hundred members runs through 60
+ * requests in well under a minute and the rest of the crawl gets 429s, which
+ * Google reads as "slow down" and can hold for days.
+ *
+ * The buckets ARE per-route, so this cannot starve a signed-in member — they
+ * are on different routes entirely. The blast radius is crawlers starving each
+ * other, which is still the failure this module exists to prevent. 300/min
+ * absorbs a full crawl while leaving these public, uncached-by-us endpoints
+ * bounded. The real fix is Authenticated Origin Pulls plus
+ * `TRUST_CF_CONNECTING_IP=true`, so each crawler gets a bucket of its own; the
+ * ordering that makes that sound is in `deploy/README.md`.
+ */
+const SHELL_RATE_LIMIT = 300;
+
+/**
  * The crawler-facing surface (T-0215).
  *
  * ── HOW A CRAWLER GETS HERE ─────────────────────────────────────────────────
- * `https://lordsofholdfast.com/u/@panda` is an SPA route: Caddy hands it to the
- * static nginx image, which returns the un-templated Angular shell — one
- * `<app-root></app-root>` and nothing else, identical for every URL on the
- * site. The Caddyfile matches known crawler user-agents on `/u/*` and `/roster`
- * and rewrites them to this controller, while every human still gets the app.
+ * `https://lordsofholdfast.com/u/@panda` is an SPA route, and the SPA is a
+ * static build: without a rewrite a crawler receives one
+ * `<app-root></app-root>`, identical for every URL on the site. TWO layers now
+ * match known crawler user-agents and rewrite them here.
  *
- * That rewrite is a MANUAL change on the box. `lords-deploy` only ever pins
- * image tags and pulls — it never syncs the Caddyfile — so shipping this code
- * does nothing until someone SSHes in and updates the proxy. The runbook step
- * is written up in `deploy/README.md`; until it runs, these routes are only
- * reachable directly, which is exactly how they should be tested first.
+ * The frontend repo's `nginx.conf` is the one that reliably ships: it lives
+ * inside the `web` image and reaches production on any ordinary
+ * `deploy web <tag>`. The `Caddyfile` in this repo carries the same matcher and
+ * takes precedence when it is current — but it is HAND-SYNCED, `lords-deploy`
+ * has no command that can write it, and for months it was not synced at all, so
+ * every route below served correct HTML that nothing ever requested. Caddy's
+ * `handle` blocks are mutually exclusive, so whichever layer is live answers and
+ * the two cannot disagree: both proxy the same path to the same routes.
  *
  * ── WHY THE STATUS CODES MATTER HERE MORE THAN ANYWHERE ELSE ────────────────
  * The SPA cannot return one. Angular's wildcard route redirects every unknown
@@ -38,14 +66,14 @@ export class SeoController {
 
   @Public()
   @Get('roster')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async roster(@Query('page') page: string, @Res() res: Response): Promise<void> {
     this.sendHtml(res, await this.seo.renderRoster(Number(page ?? '1')));
   }
 
   @Public()
   @Get('u/:handle')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async profile(@Param('handle') handle: string, @Res() res: Response): Promise<void> {
     // Not wrapped in a try/catch: a 404 or 410 from the service IS the answer a
     // crawler needs. Swallowing it into a generic card — the way the gallery
@@ -66,14 +94,14 @@ export class SeoController {
    */
   @Public()
   @Get('home')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async home(@Res() res: Response): Promise<void> {
     this.sendHtml(res, await this.seo.renderHome());
   }
 
   @Public()
   @Get('events')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async events(@Query('page') page: string, @Res() res: Response): Promise<void> {
     this.sendHtml(res, await this.seo.renderEvents(Number(page ?? '1')));
   }
@@ -89,7 +117,7 @@ export class SeoController {
    */
   @Public()
   @Get('events/:id')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async event(@Param('id') id: string, @Res() res: Response): Promise<void> {
     if (!SHORT_ID_REGEX.test(id)) {
       this.sendHtml(res, await this.seo.renderFallback());
@@ -100,7 +128,7 @@ export class SeoController {
 
   @Public()
   @Get('gallery')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async gallery(@Query('page') page: string, @Res() res: Response): Promise<void> {
     this.sendHtml(res, await this.seo.renderGallery(Number(page ?? '1')));
   }
@@ -117,7 +145,7 @@ export class SeoController {
    */
   @Public()
   @Get('gallery/:id')
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async galleryItem(@Param('id') id: string, @Res() res: Response): Promise<void> {
     const html = SHORT_ID_REGEX.test(id)
       ? await this.seo.renderGalleryItem(id)
@@ -128,7 +156,7 @@ export class SeoController {
   /** Anything else under the matcher: the generic site card, never a 500. */
   @Public()
   @Get()
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Throttle({ default: { limit: SHELL_RATE_LIMIT, ttl: 60_000 } })
   async fallback(@Res() res: Response): Promise<void> {
     this.sendHtml(res, await this.seo.renderFallback());
   }

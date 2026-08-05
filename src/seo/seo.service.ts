@@ -125,7 +125,7 @@ export class SeoService {
     query.limit = ROSTER_PAGE_SIZE;
     const result = await this.members.list(query);
     const profile = await this.regimentProfile();
-    const regimentName = profile?.name || 'Lords Regiment';
+    const regimentName = profile?.name?.trim() || 'Lords Regiment';
 
     const links: ShellLink[] = result.data.map((member) => ({
       href: `${this.siteUrl()}${member.canonicalPath}`,
@@ -372,11 +372,11 @@ export class SeoService {
             ...(bio ? { description: bio } : {}),
             ...(dto.avatarUrl ? { image: this.absoluteAsset(dto.avatarUrl) } : {}),
             ...(dto.rank ? { jobTitle: dto.rank } : {}),
-            // `@id`, not a second inline copy of the organisation. The `/home`
-            // shell defines the node under this exact id; every profile now
-            // REFERENCES it, so Google reads one regiment with N members rather
-            // than N unlinked organisations that happen to share a name.
-            memberOf: { '@id': this.organizationId() },
+            // Carries the `@id` the `/home` shell defines the node under, so
+            // Google reads one regiment with N members rather than N unlinked
+            // organisations that happen to share a name — plus enough of the
+            // node to mean something to a consumer holding only this document.
+            memberOf: this.organizationRef(regimentName),
             ...(dto.medals.length ? { award: dto.medals.map((medal) => medal.title) } : {}),
           },
         },
@@ -404,7 +404,7 @@ export class SeoService {
    */
   async renderHome(): Promise<string> {
     const profile = await this.regimentProfile();
-    const regimentName = profile?.name || 'Lords Regiment';
+    const regimentName = profile?.name?.trim() || 'Lords Regiment';
     const canonicalUrl = `${this.siteUrl()}/home`;
     const mission =
       profile?.missionStatement?.trim() ||
@@ -699,7 +699,7 @@ export class SeoService {
             url: canonicalUrl,
             ...(event.serverName ? { name: event.serverName } : {}),
           },
-          organizer: { '@id': this.organizationId() },
+          organizer: this.organizationRef(regimentName),
           ...(event.description?.trim() ? { description: event.description.trim() } : {}),
           ...(event.bannerUrl ? { image: this.absoluteAsset(event.bannerUrl) } : {}),
         },
@@ -950,6 +950,30 @@ export class SeoService {
   }
 
   /**
+   * How a profile or an event names the regiment.
+   *
+   * ── WHY THIS IS NOT A BARE `{"@id": …}` ─────────────────────────────────────
+   * The `@id` is what merges these into ONE entity rather than N organisations
+   * that happen to share a name — that is the whole point of it. But JSON-LD
+   * `@id` references resolve within a document's own graph, and the node this id
+   * names is defined in a DIFFERENT document (`/home`). A consumer parsing one
+   * profile in isolation would find an identifier with nothing behind it, which
+   * is strictly worse than the inline copy this replaced.
+   *
+   * So: the id AND enough of the node to stand alone. A consumer that fetches
+   * `/home` merges them on the id; one that never does still learns the
+   * regiment's name and URL from the profile it is holding.
+   */
+  private organizationRef(regimentName: string): Record<string, string> {
+    return {
+      '@type': 'Organization',
+      '@id': this.organizationId(),
+      name: regimentName,
+      url: this.siteUrl(),
+    };
+  }
+
+  /**
    * `BreadcrumbList` for a page below the top level.
    *
    * Google renders it as the navigable trail in place of the raw URL line in a
@@ -1177,11 +1201,7 @@ export class SeoService {
 
     const bio = (member.bio || '').replace(/\s+/g, ' ').trim();
     if (bio) {
-      const cut =
-        bio.length > PROFILE_DESCRIPTION_LIMIT
-          ? `${bio.slice(0, PROFILE_DESCRIPTION_LIMIT - 1).trimEnd()}…`
-          : bio;
-      return `${cut} — ${standing}, a ${GAME_NAME} regiment.`;
+      return `${cutForSnippet(bio, PROFILE_DESCRIPTION_LIMIT)} — ${standing}, a ${GAME_NAME} regiment.`;
     }
 
     const parts = [
@@ -1223,7 +1243,7 @@ export class SeoService {
   private async regimentName(): Promise<string> {
     try {
       const profile = await this.regiments.getProfile();
-      return profile?.name || 'Lords Regiment';
+      return profile?.name?.trim() || 'Lords Regiment';
     } catch {
       return 'Lords Regiment';
     }
@@ -1232,6 +1252,33 @@ export class SeoService {
   private siteUrl(): string {
     return (this.config.get('frontend', { infer: true }).url ?? '').replace(/\/$/, '');
   }
+}
+
+/**
+ * Cut a string to `limit` characters for a meta description, appending `…`.
+ *
+ * ── WHY THIS IS NOT `slice` (T-0297) ────────────────────────────────────────
+ * `String.slice` cuts on UTF-16 CODE UNITS, and an emoji is two of them. A bio
+ * whose 159th and 160th units are the halves of one astral character therefore
+ * left a LONE HIGH SURROGATE at the end of the string — which serialises as
+ * U+FFFD, so the card read "…the left flank holds �…". Member bios are exactly
+ * the field that contains emoji.
+ *
+ * Spreading into an array iterates by code point, so a surrogate pair is one
+ * element and can never be split. `trimEnd` after the cut, so a bio broken at a
+ * space does not leave one dangling before the ellipsis.
+ *
+ * ⚠️ Mirrored by `cutForSnippet` in the frontend's `profile.component.ts`. Both
+ * surfaces build the same description for the same URL, so a fix on one side
+ * alone would REINTRODUCE the divergence rather than fix anything.
+ */
+export function cutForSnippet(value: string, limit: number): string {
+  const points = [...value];
+  if (points.length <= limit) return value;
+  return `${points
+    .slice(0, limit - 1)
+    .join('')
+    .trimEnd()}…`;
 }
 
 /** XML escape — a superset of what HTML needs, for the sitemap document. */

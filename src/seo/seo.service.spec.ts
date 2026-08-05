@@ -261,6 +261,29 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
 
       expect(html).toContain(`<meta name="description" content="${'x'.repeat(159)}… — Colonel`);
     });
+
+    it('never splits an emoji in half at the cut (T-0297)', async () => {
+      // `String.slice` cuts on UTF-16 CODE UNITS and an emoji is two of them, so
+      // a bio whose 159th and 160th units are the halves of one astral character
+      // left a LONE HIGH SURROGATE before the `…` — U+FFFD once serialised, so
+      // the card read "…holds �…". A bio is exactly the field people put emoji
+      // in. `cutForSnippet` iterates by code point, so a pair cannot split.
+      const bio = `${'x'.repeat(158)}🎺${'y'.repeat(50)}`;
+      const html = await render(profile({ bio }));
+
+      const match = html.match(/<meta name="description" content="([^"]*)"/);
+      expect(match).not.toBeNull();
+      const description = match![1];
+      // No unpaired surrogate anywhere in the emitted string.
+      expect(
+        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(description),
+      ).toBe(false);
+      expect(description).not.toContain('�');
+      // 159 code points of content, then the ellipsis. The trumpet is the 159th
+      // and survives INTACT — the old `slice` kept only its high surrogate.
+      expect(description.startsWith(`${'x'.repeat(158)}🎺…`)).toBe(true);
+      expect([...description.split(' — ')[0]]).toHaveLength(160);
+    });
   });
 
   /**
@@ -456,8 +479,17 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       // A REFERENCE to the node `/home` defines, not a fourth inline copy of it
       // (T-0297). Without the shared `@id` the graph held one unlinked
       // organisation per event and per profile, all merely sharing a name.
+      // The `@id` merges this with the node `/home` defines, so the graph holds
+      // ONE regiment rather than an unlinked organisation per event and per
+      // profile. The name and url ride along because a JSON-LD `@id` resolves
+      // within a document's OWN graph, and that node lives in a different
+      // document — a bare reference would dangle for anyone reading this page
+      // alone.
       expect(ld.organizer).toEqual({
+        '@type': 'Organization',
         '@id': `${SITE}/#organization`,
+        name: 'Lords Regiment',
+        url: SITE,
       });
     });
 
