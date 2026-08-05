@@ -56,11 +56,19 @@ import {
   SuspendMemberDto,
 } from './dto/member-admin.dto';
 import { CommandInfoDto, ServiceRecordEntryDto } from './dto/member-detail.dto';
+import { MemberSocialLinkDto } from './dto/member-social-link.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { MemberAvatarService } from './public/member-avatar.service';
+import {
+  isValidSocialHandle,
+  normalizeSocialHandle,
+  socialPlatformLabel,
+  socialPlatformPrecedence,
+} from './social-platforms';
 import { UsernameAvailability, UsernameService } from './username.service';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { Member } from './entities/member.entity';
+import { MemberSocialLink } from './entities/member-social-link.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 
 /**
@@ -111,6 +119,18 @@ function deriveUnavailable(reason: AdoptionUnavailableReason, name: string): Htt
 }
 
 /**
+ * One submitted social link after normalisation + validation, ready to become a
+ * `member_social_links` row. Structural on purpose: it is the shape
+ * {@link UpdateMemberDto}'s array reduces to, so the service never has to import
+ * the nested request DTO to talk about a link it has already checked.
+ */
+interface NormalizedSocialLink {
+  platform: string;
+  handle: string;
+  precedence: number;
+}
+
+/**
  * Roster read/profile + admin actions. Every query is scoped to the caller's
  * regiment (single-tenant) and excludes soft-deleted rows. Derived fields —
  * rank, rank image, medals and confirmed attendance count — are computed
@@ -137,6 +157,11 @@ export class MembersService {
     private readonly deletionRequests: Repository<AccountDeletionRequest>,
     @InjectRepository(Regiment)
     private readonly regiments: Repository<Regiment>,
+    // Member-authored social handles (T-0216). Written only by the self-edit
+    // below and by the GDPR erasure that hard-deletes them; read as a batched
+    // grouped query alongside the medals, never per row.
+    @InjectRepository(MemberSocialLink)
+    private readonly socialLinks: Repository<MemberSocialLink>,
     private readonly audit: AuditService,
     // Best-effort Discord side effects (role sync / ban role). Every call no-ops
     // unless the bot is enabled and the relevant switch is on; never throws.
@@ -209,11 +234,12 @@ export class MembersService {
 
     const [rows, total] = await qb.getManyAndCount();
 
-    // Batch the attendance counts + medals for the whole page in single grouped
-    // queries (no per-row N+1).
+    // Batch the attendance counts, medals + social links for the whole page in
+    // single grouped queries (no per-row N+1).
     const memberIds = rows.map((m) => m.id);
     const attendanceByMember = await this.attendanceCounts(memberIds);
     const medalsByMember = await this.medalsByMember(memberIds);
+    const socialLinksByMember = await this.socialLinksByMember(memberIds);
     // Resolved ONCE for the page (owner pointer + capability lookups), then
     // applied per row as a pure function — the flags must not cost a query per
     // member (T-0177).
@@ -225,6 +251,7 @@ export class MembersService {
         { eventsAttended: attendanceByMember.get(member.id) ?? 0 },
         medalsByMember.get(member.id) ?? [],
         permitted(member),
+        socialLinksByMember.get(member.id) ?? [],
       ),
     );
 
@@ -243,9 +270,26 @@ export class MembersService {
   /**
    * Self-service profile update. A member may only edit their own profile — any
    * mismatch with the authenticated member id is forbidden. Only the restricted
-   * set of fields (inGameName + avatar/banner via an uploaded storage key) is
-   * mutable here. Changing role/status/rank belongs to the admin actions below
-   * and is not permitted through this handler.
+   * set of fields (inGameName, vanity handle, bio, social links, and
+   * avatar/banner via an uploaded storage key) is mutable here. Changing
+   * role/status/rank belongs to the admin actions below and is not permitted
+   * through this handler.
+   *
+   * ── WHY THERE IS NO ROLE GUARD ON TOP OF THE SELF CHECK ─────────────────────
+   * `user.memberId !== id` is already applicant-proof and does not merely happen
+   * to be. An applicant has NO `members` row at all — the row is created by
+   * `ApplicationsService.approve` — so their session carries a null `memberId`,
+   * which can never equal the `id` in the path. Adding a role guard beside this
+   * would suggest the self check needs help; it does not, and a redundant guard
+   * is a second rule to keep in step with the first. A spec pins it.
+   *
+   * ── BIO AND SOCIAL LINKS (T-0216) ───────────────────────────────────────────
+   * Both are member-authored and self-published. The bio is trimmed HERE rather
+   * than in the DTO (house rule — gallery.service.ts does the same for a
+   * caption), so whitespace-only input has exactly one representation in the
+   * column: NULL. Social links are stored as HANDLES and the outbound URL is
+   * composed server-side from the registry, so a member can never publish an
+   * arbitrary link on their crawlable profile — see `social-platforms.ts`.
    */
   async updateSelf(id: string, dto: UpdateMemberDto, user: AuthenticatedUser): Promise<MemberDto> {
     if (user.memberId !== id) {
@@ -254,9 +298,24 @@ export class MembersService {
 
     const member = await this.loadMember(id, user.regimentId);
 
+    // Normalised + validated BEFORE anything is written, so a payload carrying
+    // one bad handle rejects the whole PATCH without having half-applied the
+    // in-game name, the bio or the avatar first. `undefined` means the caller
+    // said nothing about their links and the stored set is left alone.
+    const socialLinks =
+      dto.socialLinks === undefined ? undefined : this.validateSocialLinks(dto.socialLinks);
+
     // In-game name is self-editable; like the avatar/banner below it is
     // intentionally not audited (no security-relevant role/status/rank change).
     if (dto.inGameName !== undefined) member.inGameName = dto.inGameName;
+    // Trimmed in the SERVICE, not the DTO: the DTO bounds the length, this
+    // decides what "blank" means. A bio of spaces is not a bio, so it clears the
+    // column rather than persisting a paragraph made of nothing — the same
+    // collapse `null` performs explicitly.
+    if (dto.bio !== undefined) {
+      const trimmed = (dto.bio ?? '').trim();
+      member.bio = trimmed.length > 0 ? trimmed : null;
+    }
     // The handle is claimed in memory here and RESERVED only after the save
     // lands (below) — reserving the old one first would release a handle the
     // member still holds if the write then failed.
@@ -293,6 +352,11 @@ export class MembersService {
     // Now that the new handle is committed, put the old one beyond reach for
     // the cooldown window.
     await this.usernames.holdAfterRelease(releasedHandle, member.id);
+    // AFTER the row save, deliberately. The save is the write that can still
+    // fail on the vanity-handle UNIQUE index (the 409 above), and replacing a
+    // member's published links as part of a request we then reject would be a
+    // side effect of a failure.
+    if (socialLinks) await this.replaceSocialLinks(member.id, socialLinks);
     // A changed avatar invalidates the proxy's cached bytes; the URL is stable
     // by design, so nothing else would ever evict them.
     if (dto.avatarKey !== undefined) this.avatars.invalidate(member.id);
@@ -1012,6 +1076,11 @@ export class MembersService {
       member.avatarUrl = null;
       member.bannerUrl = null;
       member.standing = null;
+      // Member-authored free text, and the most personal thing on the row: a
+      // bio is whatever they chose to say about themselves. It is published on
+      // a crawlable page, so leaving it behind on an anonymised row would keep
+      // a departed member's own words attributed to '[deleted member]'.
+      member.bio = null;
       member.status = MemberStatus.Inactive;
       member.discordLinked = false;
       // MUST be null, not a placeholder. The row survives as a soft-delete and
@@ -1023,6 +1092,15 @@ export class MembersService {
       member.username = null;
       await mgr.getRepository(Member).save(member);
       await mgr.getRepository(Member).softRemove(member);
+
+      // ⚠️ HARD-deleted here, and it MUST be done explicitly.
+      // `member_social_links` carries ON DELETE CASCADE, but a cascade fires on
+      // a row being REMOVED and the line above SOFT-deletes: the members row
+      // survives with `deleted_at` set, so the constraint never runs and every
+      // handle the member published would outlive the erasure they confirmed.
+      // These are accounts on other services — the strongest cross-site
+      // identifier on the row — so this is a GDPR failure, not untidiness.
+      await mgr.getRepository(MemberSocialLink).delete({ memberId: member.id });
 
       // Hard-delete the linked identity (the sensitive PII — email, OAuth tokens —
       // lives here). Anonymising the fields in place would be silently undone on
@@ -1107,12 +1185,20 @@ export class MembersService {
     if (!user.memberId) throw new ForbiddenException('Only enrolled members can export data');
     const member = await this.loadMember(user.memberId, user.regimentId);
     const medals = await this.medalsByMember([member.id]);
+    const socialLinks = await this.socialLinksByMember([member.id]);
     const serviceRecord = await this.getServiceRecord(member.id, user);
 
     return {
       exportedAt: new Date().toISOString(),
       profile: await this.project(member, user),
       medals: medals.get(member.id) ?? [],
+      // Listed in their own right rather than left to ride along inside
+      // `profile`: an export is the answer to "what do you hold about me", and
+      // an account name on another service is exactly the kind of thing a
+      // member scanning that answer is looking for. Projected through the same
+      // mapper the wire uses, so the composed URL is the one their profile
+      // publishes — not a second URL builder that could disagree with it.
+      socialLinks: MemberSocialLinkDto.fromMany(socialLinks.get(member.id) ?? []),
       serviceRecord,
       discordIdentity: member.discordIdentity
         ? {
@@ -1167,7 +1253,11 @@ export class MembersService {
     return member;
   }
 
-  /** Project a single loaded member to a DTO, computing its metrics + medals. */
+  /**
+   * Project a single loaded member to a DTO, computing its metrics, medals and
+   * social links. Every write path returns through here, so the PATCH response
+   * carries the links the request just replaced without a second round trip.
+   */
   private async project(
     member: Member,
     user: AuthenticatedUser,
@@ -1175,8 +1265,9 @@ export class MembersService {
   ): Promise<MemberDto> {
     const eventsAttended = await this.attendees.count({ where: { memberId: member.id } });
     const medals = (await this.medalsByMember([member.id])).get(member.id) ?? [];
+    const socialLinks = (await this.socialLinksByMember([member.id])).get(member.id) ?? [];
     const permitted = await this.permittedActionsResolver(user, ownerMemberId);
-    return MemberDto.from(member, { eventsAttended }, medals, permitted(member));
+    return MemberDto.from(member, { eventsAttended }, medals, permitted(member), socialLinks);
   }
 
   /**
@@ -1376,5 +1467,118 @@ export class MembersService {
       map.set(award.memberId, list);
     }
     return map;
+  }
+
+  /**
+   * One query mapping memberId -> its published social links, for the given page
+   * of members (T-0216). Empty map for []. Deliberately the same shape as
+   * {@link medalsByMember}: a member's links are a small per-row collection that
+   * every roster row wants, which is the exact shape that becomes an N+1 the
+   * moment anybody reaches for it inside the `rows.map`.
+   *
+   * Ordered by the stored `precedence` (the registry's display order at insert
+   * time) with `platform` as the tiebreak. The tiebreak is not decoration: an
+   * unknown platform's precedence is a single sentinel shared by all of them
+   * (see `socialPlatformPrecedence`), so without it two retired rows could
+   * swap places between two identical requests. The DTO re-sorts by the LIVE
+   * registry when it projects, so this ordering is about a stable query, not
+   * about display.
+   */
+  private async socialLinksByMember(memberIds: string[]): Promise<Map<string, MemberSocialLink[]>> {
+    const map = new Map<string, MemberSocialLink[]>();
+    if (memberIds.length === 0) return map;
+
+    const links = await this.socialLinks.find({
+      where: { memberId: In(memberIds) },
+      order: { precedence: 'ASC', platform: 'ASC' },
+    });
+
+    for (const link of links) {
+      const list = map.get(link.memberId) ?? [];
+      list.push(link);
+      map.set(link.memberId, list);
+    }
+    return map;
+  }
+
+  /**
+   * Normalise + validate a submitted social-link array before a single row is
+   * touched. Rejections are BadRequest and NAME the platform, because "invalid
+   * handle" against a form with seven fields is a message that sends the member
+   * hunting.
+   *
+   * Two refusals, both structural rather than cosmetic:
+   *  - DUPLICATE PLATFORM. `UQ_member_social_link` is UNIQUE (member, platform),
+   *    so a payload with two Twitch entries is a row the database would refuse
+   *    anyway — as an opaque ER_DUP_ENTRY 500 rather than as an answer. It is
+   *    also genuinely ambiguous: neither entry is more "the" account than the
+   *    other, so guessing (last wins) would publish an account the member did
+   *    not choose.
+   *  - A HANDLE ITS PLATFORM'S PATTERN REJECTS. The pattern is what makes the
+   *    composed URL safe to publish — see `social-platforms.ts` — so this is the
+   *    check the handles-not-URLs decision rests on, not a formatting nicety.
+   *
+   * Normalisation runs FIRST (trim, one leading `@`, one trailing `/`), so a
+   * handle pasted off an overlay validates and STORES in its canonical form; the
+   * `@` a member typed is never persisted and never doubled into the URL.
+   *
+   * `precedence` is the REGISTRY's index, not the array index the member
+   * happened to submit. Display order is a property of the product (Twitch
+   * first, Medal.tv last) rather than of one member's form-filling order, so
+   * every profile lists its networks in the same sequence and the column stays
+   * a deterministic ORDER BY.
+   */
+  private validateSocialLinks(
+    submitted: readonly { platform: string; handle: string }[],
+  ): NormalizedSocialLink[] {
+    const seen = new Set<string>();
+    return submitted.map((link) => {
+      const label = socialPlatformLabel(link.platform);
+      if (seen.has(link.platform)) {
+        throw new BadRequestException(
+          `You can only publish one ${label} account — two were supplied`,
+        );
+      }
+      seen.add(link.platform);
+
+      const handle = normalizeSocialHandle(link.handle ?? '');
+      if (!isValidSocialHandle(link.platform, handle)) {
+        throw new BadRequestException(`That is not a valid ${label} handle`);
+      }
+      return {
+        platform: link.platform,
+        handle,
+        precedence: socialPlatformPrecedence(link.platform),
+      };
+    });
+  }
+
+  /**
+   * Replace a member's whole set of social links, transactionally.
+   *
+   * WHOLESALE REPLACE, mirroring how `gallery.service.ts` replaces an item's
+   * tags: the client sends the set it wants to end up with, and delete-then-
+   * insert is what turns that into rows without a per-platform diff. It is also
+   * the only shape that can REMOVE a link — a merge could add and update but
+   * never let a member take an account back down, which is the operation that
+   * matters most for something published on a crawlable page.
+   *
+   * The delete and the inserts share one transaction so a member's profile can
+   * never be observed mid-replace with its links half gone. Rows are written
+   * with `save()` and NOT `insert()`: the 12-char short id is minted by
+   * `ShortIdSubscriber.beforeInsert`, which only runs for entity listeners —
+   * `insert()` would try to write a null primary key.
+   */
+  private async replaceSocialLinks(memberId: string, links: NormalizedSocialLink[]): Promise<void> {
+    // `this.members.manager` — the same entity manager the erasure path and the
+    // derive already open their transactions from. Every repository here shares
+    // one, so this is the file's existing idiom rather than a second one.
+    await this.members.manager.transaction(async (mgr) => {
+      const repo = mgr.getRepository(MemberSocialLink);
+      await repo.delete({ memberId });
+      for (const link of links) {
+        await repo.save(repo.create({ memberId, ...link }));
+      }
+    });
   }
 }

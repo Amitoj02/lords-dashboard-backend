@@ -2,9 +2,9 @@
   "version": 1,
   "project": "lords-dashboard-backend",
   "lastSyncedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
-  "lastSyncedAt": "2026-08-04T22:10:00Z",
-  "notesForNextSession": "T-0215 is the live thread: the roster and member profiles are now PUBLIC, and the dashboard is staff-only. The frontend half is lords-regiment-dashboard T-0287, on branch feat/public-site-redesign in BOTH repos (PRs into dev, not main). FIVE things not to undo. (1) PublicMemberDto is a SEPARATE class with its own mapper, not MemberDto with conditional deletes \u2014 the sensitive fields are absent from the TYPE, and a spec asserts each one is missing from the serialized object; do not 'simplify' it back into one DTO. (2) ONE exclusion predicate (applyPublicPredicate) is shared by the roster, a profile, the sitemap and the crawler shell; splitting it would let a member stay indexed on a page they were removed from. (3) Only a deliberately DELETED account gets 410 \u2014 banned, suspended, applicant, pending and never-existed all collapse to an indistinguishable 404 so the endpoint cannot be used as an oracle for 'was this member disciplined?'. (4) The @ sigil in /u/@panda is MANDATORY: it is what keeps the vanity namespace disjoint from the 12-char short-id namespace, and it retires the reserved-word problem for routes. (5) og-html.ts must never regain its <meta http-equiv=refresh> \u2014 it pointed at the URL the crawler was rewritten FROM and looped for googlebot/bingbot/applebot. \u26a0\ufe0f NOTHING A CRAWLER CAN SEE IS LIVE UNTIL SOMEONE SSHes INTO THE BOX. lords-deploy only pins image tags; it never syncs the Caddyfile or the compose files. APEX_HOST must go into ~/lords/.env BEFORE the Caddyfile sync or caddy refuses to start (the :? default) and the site goes dark \u2014 caddy is the only container publishing ports. Full runbook in deploy/README.md ('Edge config is hand-synced'). Enable Authenticated Origin Pulls and TRUST_CF_CONNECTING_IP=true BEFORE submitting the sitemap, or a Googlebot burst 429s real members out of the shared 120/min bucket. Still open from before: T-0214 (SCHEMA.md \u00a73.5 documents the pre-T-0039 applications table); T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts); T-0209 left the resync fan-out with no batchId; T-0210 (suspension vs Discord roles) deferred and applyBanRoleOnBan still OFF in production; BACKUP_HEARTBEAT_URL still blank; the live medal cabinet still has a medal described 'Please update the description'.",
-  "nextIdCounter": 216,
+  "lastSyncedAt": "2026-08-05T04:20:00Z",
+  "notesForNextSession": "T-0216 (member bio + linked accounts) is in REVIEW on branch feat/member-bio-and-socials, coupled to frontend T-0289..T-0292 on the same branch name. MERGE THIS REPO FIRST - the SPA reads member.bio and member.socialLinks and treats both as absent-means-empty, so a wrong deploy order is cosmetic.\n\nThe decision worth not relitigating: handles are stored, URLs are BUILT. src/members/social-platforms.ts owns the regex and the template for all seven networks; socialProfileUrl THROWS on an unregistered platform (the column is an open varchar), so every read path must filter through isSupportedSocialPlatform first - which is why MemberSocialLinkDto.fromMany does it once and both from() bodies go through it rather than each caller remembering. Discord is deliberately NOT one of the seven: it already exists as discordTag on the signed-in projection, and adding it here would publish it.\n\nThe stored `precedence` int is a snapshot of the registry order at INSERT time; display order comes from the live registry via fromMany, so retiring a platform reorders existing rows correctly without a backfill.\n\nGDPR: executeSelfDeletion soft-removes the member, so ON DELETE CASCADE never fires on member_social_links - the explicit delete beside `member.bio = null` is what actually clears them, and account-deletion.e2e-spec now asserts it against the real table.\n\nENVIRONMENT FOOTGUN found while verifying: the host `nest build` and the api container's `nest start --watch` share tsconfig.build.tsbuildinfo, and nest-cli.json sets deleteOutDir: true. A host build leaves the buildinfo current, the container then deletes dist/ and emits nothing, and the API stays down through any number of restarts with \"Cannot find module /app/dist/main\". Clear the buildinfo and restart, or build inside the container. Worth a CONTRIBUTING note or a per-environment tsBuildInfoFile.\n\nVerification: npm run lint:check, npm run build, npm test (54 suites / 1249 tests), npm run format:check and npm run test:e2e (10 suites / 188 tests) all green; the migration was applied, reverted and re-applied against real MySQL 8. The migration HAS been applied to the shared dev database (lords_dashboard) so the redesigned profile could be walked in a browser.",
+  "nextIdCounter": 217,
   "connections": [],
   "tasks": [
     {
@@ -14580,7 +14580,7 @@
         },
         {
           "desc": "the UNATTENDED 03:30 UTC timer run succeeds - the manual run shares nothing with cron but the unit",
-          "status": "open"
+          "status": "pending"
         }
       ],
       "regressionRisk": [
@@ -15258,6 +15258,134 @@
           "note": "backend + Caddy/compose/docs shipped on feat/public-site-redesign; 1115 unit + 178 e2e green, live smoke-tested against a real MySQL"
         }
       ]
+    },
+    {
+      "id": "T-0216",
+      "title": "Member bio and linked accounts, stored as handles",
+      "summary": "Added an optional `bio` (text NULL on members, capped at 280 in the DTO, trimmed in the service, whitespace-only folded to NULL) and a `member_social_links` child table carrying seven optional linked accounts (Twitch, YouTube, Instagram, TikTok, X, Steam, Medal.tv). Handles are stored, never URLs: src/members/social-platforms.ts owns the per-platform regex and the URL template, so the `url` on the wire always points at a host we chose and no member can publish an arbitrary outbound link on a crawlable page. Both fields are published on PublicMemberDto as a deliberate, documented decision. Self-edit goes through the existing PATCH /members/:id, which is applicant-proof for free because an applicant has no members row at all. The crawler shell renders the bio as body copy and the links as an Elsewhere section with rel=\"nofollow ugc\"; the meta description was deliberately left alone so the shell and the SPA keep agreeing.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "bio-and-linked-accounts",
+      "repo": "",
+      "paths": [
+        "src/members/social-platforms.ts",
+        "src/members/entities/member-social-link.entity.ts",
+        "src/members/entities/member.entity.ts",
+        "src/members/dto/member-social-link.dto.ts",
+        "src/members/dto/public-member.dto.ts",
+        "src/members/dto/update-member.dto.ts",
+        "src/members/members.service.ts",
+        "src/members/public/public-members.service.ts",
+        "src/database/migrations/1784900006000-MemberBioAndSocialLinks.ts",
+        "src/seo/seo.service.ts",
+        "src/seo/html/page-shell.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0289",
+        "lords-regiment-dashboard:T-0290",
+        "lords-regiment-dashboard:T-0291"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "social-platforms: every platform accepts its own examples and rejects slash/scheme/whitespace",
+          "status": "passed"
+        },
+        {
+          "desc": "social-platforms: steamID64 routes to /profiles/, a vanity id to /id/",
+          "status": "passed"
+        },
+        {
+          "desc": "updateSelf: bio trimmed, whitespace-only becomes NULL, absent leaves it untouched",
+          "status": "passed"
+        },
+        {
+          "desc": "updateSelf: links replace wholesale; duplicate platform and invalid handle both 400 and write nothing",
+          "status": "passed"
+        },
+        {
+          "desc": "updateSelf: an applicant (memberId null) is Forbidden without a redundant role guard",
+          "status": "passed"
+        },
+        {
+          "desc": "PublicMemberDto: whole-class key allowlist still holds with bio and socialLinks added",
+          "status": "passed"
+        },
+        {
+          "desc": "GDPR: executeSelfDeletion nulls the bio and deletes the link rows inside the transaction",
+          "status": "passed"
+        },
+        {
+          "desc": "crawler shell: bio renders escaped as a paragraph; links carry rel=\"nofollow ugc\"",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: hostile handles all 400; the stored handle is normalised; the URL origin is never foreign",
+          "status": "passed"
+        },
+        {
+          "desc": "migration: up() then down() then up() against real MySQL 8; down() is a true inverse",
+          "status": "passed"
+        },
+        {
+          "desc": "no N+1: the link rows are batched per page on both the authenticated and public projections",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The per-platform regexes in src/members/social-platforms.ts are MIRRORED in the SPA at src/app/core/models/social-link.model.ts (frontend T-0291), including the deliberate single-trim in normalizeSocialHandle. Changing one side without the other tells a member their handle is fine and then 400s them on save.",
+          "status": "open",
+          "notedAt": "2026-08-05T04:20:00Z"
+        },
+        {
+          "desc": "PublicMemberDto now publishes two member-authored fields. The whole-class Object.keys allowlist spec is what stops a third arriving by accident; it must not be relaxed.",
+          "status": "open",
+          "notedAt": "2026-08-05T04:20:00Z"
+        },
+        {
+          "desc": "ShellLink gained an optional `rel`. Existing call sites emit byte-identical HTML because the attribute is omitted when the field is absent, but any future code that sets rel=\"\" would emit an empty attribute.",
+          "status": "open",
+          "notedAt": "2026-08-05T04:20:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "describeProfile still builds the generated meta description and ignores the bio. Using the bio there requires the SPA to build the identical string first, or Googlebot sees pass one and pass two disagree.",
+        "Social links are not emitted as JSON-LD sameAs. The handles are unverified, and sameAs is a claim of identity.",
+        "public-profile.e2e-spec.ts was left alone; the bio and rel=\"nofollow ugc\" crawler assertions went into the new member-bio-and-socials e2e suite instead of a shared spec owned by T-0215."
+      ],
+      "lastTouchedCommit": "",
+      "createdAt": "2026-08-05T04:20:00Z",
+      "updatedAt": "2026-08-05T04:20:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T04:20:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-08-05T04:20:00Z",
+          "from": "planned",
+          "to": "in_progress",
+          "by": "claude",
+          "note": "implemented on feat/member-bio-and-socials"
+        },
+        {
+          "at": "2026-08-05T04:20:00Z",
+          "from": "in_progress",
+          "to": "review",
+          "by": "claude",
+          "note": "opened for review; 1249 unit + 188 e2e green, lint/build/format clean, migration up-down-up verified on MySQL 8"
+        }
+      ]
     }
   ],
   "history": [
@@ -15275,6 +15403,11 @@
       "at": "2026-07-28T14:45:00Z",
       "by": "claude",
       "note": "T-0209 (Discord role purge + the 'Permission denied' the owner saw) implemented and opened for review in both repos; T-0210 split out for the deferred suspension/unban policy. Retired T-0159#0 and T-0204#2, narrowed T-0191#0."
+    },
+    {
+      "at": "2026-08-05T04:20:00Z",
+      "by": "claude",
+      "note": "T-0216 (member bio + handle-based linked accounts) implemented and opened for review, coupled to lords-regiment-dashboard T-0289..T-0292 on the matching branch feat/member-bio-and-socials. Merge THIS repo first."
     }
   ]
 }

@@ -273,6 +273,7 @@ The authoritative person record. Replaces the frontend's denormalized `rank`/`ch
 | `public_profile` | boolean NOT NULL DEFAULT true | self-service visibility |
 | `avatar_url` | varchar(512) NULL | |
 | `banner_url` | varchar(512) NULL | |
+| `bio` | text NULL | member-authored blurb on the public profile; NULL = never wrote one (whitespace-only is folded to NULL in the service). `text`, not varchar, because the 280-character ceiling is a **product** rule enforced in the DTO — moving it must not need a migration. Escaped at render time by `escapeHtml` in `src/seo` |
 | `standing` | varchar(40) NULL | e.g. "Good Order" |
 | `joined_at` | timestamp NULL | enlistment date |
 | `last_seen_at` | timestamp NULL | drives 30-day auto-inactive job |
@@ -383,6 +384,27 @@ Replaces `member.medals: MedalRibbon[]` (which lost medal identity).
 | `awarded_by_member_id` | char(36) NULL | FK → `members.id` |
 
 Indexes: `UNIQUE(member_id, medal_id)`.
+
+#### `member_social_links` (child, 1—*)
+The social accounts a member publishes on their profile. **Stores a handle, never a URL** — the
+outbound link is composed server-side from a hardcoded per-platform origin
+(`src/members/social-platforms.ts`), so a member cannot publish an arbitrary outbound link on a
+crawlable page whatever they type.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | char(12) PK | short id |
+| `member_id` | char(12) NOT NULL | FK → `members.id` (`FK_member_social_links_member`, ON DELETE CASCADE) |
+| `platform` | varchar(40) NOT NULL | open set (§2): `twitch`, `youtube`, `instagram`, `tiktok`, `x`, `steam`, `medal`. **Not** an ENUM — a network can be added without a migration. Discord is deliberately absent: it is already `members.discord_identity_id`, OAuth-proven rather than self-asserted |
+| `handle` | varchar(190) NOT NULL | account name, normalised (no leading `@`, no trailing `/`), case **preserved** for display. Far wider than any handle rule allows, so a ceiling can be raised without a migration |
+| `precedence` | int NOT NULL DEFAULT 0 | display order, from the registry's canonical ordering |
+| `created_at` | datetime(6) NOT NULL DEFAULT `CURRENT_TIMESTAMP(6)` | |
+
+Indexes: `UNIQUE(member_id, platform)` (named `UQ_member_social_link`) — one account per network per
+member; the key is the platform, so handle casing never affects it.
+Relationships: *—1 `members`. No `regiment_id` (a child reached only through a regiment-scoped
+parent, like `gallery_files`). CASCADE covers a **hard** delete only — members are soft-deleted, so
+the GDPR erasure path hard-deletes these rows itself.
 
 #### `role_permissions` (authorization matrix — source of truth)
 Capability × role booleans, per regiment. **Drives `RolesGuard`/capability checks.**
@@ -858,6 +880,7 @@ discord_identities ─1:0..1─ members       (identity = account; member create
 discord_identities ─1:*─ applications      (application *─0..1 members via promoted_member_id)
 ranks ─1:*─ members
 members ─*:*─ medals            (via member_medals: detail, awarded_at, awarded_by)
+members ─1:*─ member_social_links  (handles, not URLs — the link is built server-side)
 members ─1:*─ service_record_entries
 members ─1:*─ account_deletion_requests
 members ─1:*─ username_reservations  (by former_member_id — NO FK: a blocked row outlives the member)

@@ -13,6 +13,7 @@ import { GalleryModule } from '../gallery/gallery.module';
 import { RegimentSettings } from '../regiments/entities/regiment-settings.entity';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { Member } from './entities/member.entity';
+import { MemberSocialLink } from './entities/member-social-link.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 import { UsernameReservation } from './entities/username-reservation.entity';
 import { MembersController } from './members.controller';
@@ -45,6 +46,11 @@ import { UsernameService } from './username.service';
       // anonymous surface resolves the single-tenant regiment from (T-0215).
       UsernameReservation,
       RegimentSettings,
+      // Member-authored social handles (T-0216). Registered only here: both the
+      // authenticated self-edit (MembersService) and the anonymous projection
+      // (PublicMembersService) live in THIS module, and the SEO module consumes
+      // the projection rather than the repository.
+      MemberSocialLink,
     ]),
     // For enqueuing Discord role syncs on rank/role/medal changes and the
     // (flag-gated) kick on ban. DiscordModule exports DiscordSyncService.

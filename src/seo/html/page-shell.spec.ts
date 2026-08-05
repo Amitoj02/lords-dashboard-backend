@@ -117,4 +117,42 @@ describe('renderPageShell', () => {
 
     expect(html).not.toContain('<h2>Honours</h2>');
   });
+
+  it('emits rel on a link that asks for one, and NOTHING on one that does not (T-0216)', () => {
+    const html = renderPageShell({
+      ...page,
+      sections: [
+        {
+          heading: 'Elsewhere',
+          links: [
+            { href: 'https://www.twitch.tv/panda', label: 'Twitch — panda', rel: 'nofollow ugc' },
+            { href: 'https://lordsofholdfast.com/roster', label: 'Regimental Roster' },
+          ],
+        },
+      ],
+    });
+
+    expect(html).toContain(
+      '<a href="https://www.twitch.tv/panda" rel="nofollow ugc">Twitch — panda</a>',
+    );
+    // Every pre-existing call site passes no `rel`, and must keep emitting the
+    // exact markup it emitted before — an empty rel="" is a claim, not a no-op.
+    expect(html).toContain('<a href="https://lordsofholdfast.com/roster">Regimental Roster</a>');
+    expect(html).not.toContain('rel=""');
+  });
+
+  it('escapes rel like every other interpolated value', () => {
+    const html = renderPageShell({
+      ...page,
+      sections: [
+        {
+          heading: 'Elsewhere',
+          links: [{ href: 'https://x/', label: 'X', rel: '" onmouseover="alert(1)' }],
+        },
+      ],
+    });
+
+    expect(html).not.toContain('onmouseover="alert(1)"');
+    expect(html).toContain('rel="&quot; onmouseover=&quot;alert(1)"');
+  });
 });

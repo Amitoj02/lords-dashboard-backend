@@ -10,6 +10,7 @@ import { RegimentSettings } from '../../regiments/entities/regiment-settings.ent
 import { MemberMedalSummary } from '../dto/member.dto';
 import { PublicMemberDto } from '../dto/public-member.dto';
 import { Member } from '../entities/member.entity';
+import { MemberSocialLink } from '../entities/member-social-link.entity';
 import {
   UsernameReservation,
   UsernameReservationReason,
@@ -30,6 +31,11 @@ export class PublicMembersService {
     private readonly members: Repository<Member>,
     @InjectRepository(MemberMedal)
     private readonly memberMedals: Repository<MemberMedal>,
+    // Member-authored social handles (T-0216). Public by decision — see
+    // PublicMemberDto's companion note for why these two fields ARE published
+    // while the rest of the signed-in projection is not. Read-only here.
+    @InjectRepository(MemberSocialLink)
+    private readonly socialLinks: Repository<MemberSocialLink>,
     @InjectRepository(EventAttendee)
     private readonly attendees: Repository<EventAttendee>,
     @InjectRepository(UsernameReservation)
@@ -242,15 +248,23 @@ export class PublicMembersService {
   }
 
   /**
-   * Project a page of members. Attendance counts and medals are batched into
-   * two grouped queries for the whole page — the same no-N+1 shape the
-   * authenticated roster uses.
+   * Project a page of members. Attendance counts, medals and social links are
+   * batched into three grouped queries for the whole page — the same no-N+1
+   * shape the authenticated roster uses.
+   *
+   * The roster page loads links it will mostly not draw, and that is the right
+   * trade: `PublicMemberDto` is ONE class serving both the roster and the
+   * profile (a single projection is what keeps the two from drifting into
+   * different redactions), so every row it builds must be complete. Making the
+   * list a second, lighter shape would buy one query per page and cost the
+   * property this module is built on.
    */
   private async projectMany(rows: Member[]): Promise<PublicMemberDto[]> {
     const ids = rows.map((m) => m.id);
-    const [attendance, medals] = await Promise.all([
+    const [attendance, medals, socialLinks] = await Promise.all([
       this.attendanceCounts(ids),
       this.medalsByMember(ids),
+      this.socialLinksByMember(ids),
     ]);
     return rows.map((member) =>
       PublicMemberDto.from(
@@ -262,6 +276,7 @@ export class PublicMembersService {
         member.avatarUrl || member.discordIdentity?.avatarUrl
           ? this.avatars.pathFor(member.id)
           : null,
+        socialLinks.get(member.id) ?? [],
       ),
     );
   }
@@ -310,6 +325,30 @@ export class PublicMembersService {
         awardedAt: award.awardedAt.toISOString(),
       });
       map.set(award.memberId, list);
+    }
+    return map;
+  }
+
+  /**
+   * Social links for a page, ordered by the stored `precedence` with `platform`
+   * as the tiebreak — the same total ordering `MembersService` contracts for, so
+   * a member's links read identically signed-in and signed-out. No public
+   * predicate applies to the CHILD rows: they are reached only through a member
+   * the predicate has already admitted, exactly like the medals above.
+   */
+  private async socialLinksByMember(memberIds: string[]): Promise<Map<string, MemberSocialLink[]>> {
+    const map = new Map<string, MemberSocialLink[]>();
+    if (memberIds.length === 0) return map;
+
+    const links = await this.socialLinks.find({
+      where: { memberId: In(memberIds) },
+      order: { precedence: 'ASC', platform: 'ASC' },
+    });
+
+    for (const link of links) {
+      const list = map.get(link.memberId) ?? [];
+      list.push(link);
+      map.set(link.memberId, list);
     }
     return map;
   }

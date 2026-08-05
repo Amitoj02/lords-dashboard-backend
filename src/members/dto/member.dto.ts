@@ -1,6 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { MemberRole, MemberStatus } from '../../common/enums';
+import { MemberSocialLink } from '../entities/member-social-link.entity';
 import { Member } from '../entities/member.entity';
+import { MemberSocialLinkDto } from './member-social-link.dto';
 
 /** Computed/derived metrics passed into the {@link MemberDto} mapper. */
 export interface MemberMetrics {
@@ -145,6 +147,25 @@ export class MemberDto {
   @ApiProperty({ nullable: true })
   bannerUrl: string | null;
 
+  @ApiProperty({
+    nullable: true,
+    maxLength: 280,
+    description:
+      'Member-authored blurb (T-0216). null when never written — whitespace-only input is ' +
+      'normalised to null in the service, so "blank" has one representation, not two. Raw ' +
+      'text: it is escaped at render time, never pre-escaped in storage or on the wire.',
+  })
+  bio: string | null;
+
+  @ApiProperty({
+    type: [MemberSocialLinkDto],
+    description:
+      'Published social accounts (T-0216), in canonical display order. An empty array when ' +
+      'the member has published none — never null. Each `url` is composed server-side from ' +
+      'the stored handle; clients link to it and never build their own.',
+  })
+  socialLinks: MemberSocialLinkDto[];
+
   @ApiProperty({ nullable: true, description: 'Standing label (e.g. good/warning)' })
   standing: string | null;
 
@@ -185,12 +206,24 @@ export class MemberDto {
    * passed in separately (the caller batches the member_medals lookup), and so
    * is `permittedActions` — it depends on the CALLER, not on the member, and is
    * resolved once per request rather than per row (T-0177).
+   *
+   * `socialLinks` arrives as raw ENTITY rows, for the same batching reason as
+   * `medals` (the caller fetches `member_social_links` for a whole page in one
+   * grouped query). It is deliberately not a pre-built DTO array: `platform` is
+   * an open varchar set, so a stored row can outlive the registry entry that
+   * explains it, and `MemberSocialLinkDto.fromMany` — which drops exactly those
+   * rows and applies the canonical display order — has to run on EVERY wire
+   * projection. Taking entities here makes that mapper unbypassable rather than
+   * a step each caller has to remember. It defaults to `[]` so a call site that
+   * has not been taught to fetch them emits an empty array rather than
+   * `undefined` (T-0216).
    */
   static from(
     member: Member,
     metrics: MemberMetrics,
     medals: MemberMedalSummary[],
     permittedActions: PermittedActionsDto,
+    socialLinks: MemberSocialLink[] = [],
   ): MemberDto {
     const dto = new MemberDto();
     dto.id = member.id;
@@ -207,6 +240,8 @@ export class MemberDto {
     // Fall back to the linked Discord avatar when the member has no custom one.
     dto.avatarUrl = member.avatarUrl ?? member.discordIdentity?.avatarUrl ?? null;
     dto.bannerUrl = member.bannerUrl;
+    dto.bio = member.bio ?? null;
+    dto.socialLinks = MemberSocialLinkDto.fromMany(socialLinks);
     dto.standing = member.standing;
     dto.joinedAt = member.joinedAt ? member.joinedAt.toISOString() : null;
     dto.lastSeenAt = member.lastSeenAt ? member.lastSeenAt.toISOString() : null;
