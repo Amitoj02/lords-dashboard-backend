@@ -10,6 +10,7 @@ import { DiscordIdentity } from '../src/auth/entities/discord-identity.entity';
 import { AccountDeletionStatus, MemberRole, MemberStatus } from '../src/common/enums';
 import { AccountDeletionRequest } from '../src/members/entities/account-deletion-request.entity';
 import { Member } from '../src/members/entities/member.entity';
+import { MemberSocialLink } from '../src/members/entities/member-social-link.entity';
 import { Rank } from '../src/ranks/entities/rank.entity';
 import { Regiment } from '../src/regiments/entities/regiment.entity';
 
@@ -156,6 +157,19 @@ describe('Account deletion (e2e)', () => {
   it('request → confirm → execute soft-deletes and anonymises the member', async () => {
     const { member, token } = await createMember(DISCORD_ID_B);
 
+    // Self-published profile data (T-0216), set up so the erasure can be shown
+    // to reach it. The bio is the member's own words and the social links are
+    // their accounts on OTHER services — the strongest cross-site identifier on
+    // the row — and both are published on a crawlable page.
+    await request(app.getHttpServer())
+      .patch(`/api/members/${member.id}`)
+      .set(bearer(token))
+      .send({ bio: 'Holds the line.', socialLinks: [{ platform: 'twitch', handle: 'LordPanda' }] })
+      .expect(200);
+    expect(
+      await dataSource.getRepository(MemberSocialLink).count({ where: { memberId: member.id } }),
+    ).toBe(1);
+
     const req = await request(app.getHttpServer())
       .post('/api/members/me/deletion-request')
       .set(bearer(token))
@@ -190,6 +204,16 @@ describe('Account deletion (e2e)', () => {
     expect(deleted?.deletedAt).toBeTruthy();
     expect(deleted?.inGameName).toBe('[deleted member]');
     expect(deleted?.avatarUrl).toBeNull();
+    expect(deleted?.bio).toBeNull();
+
+    // `member_social_links` carries ON DELETE CASCADE, but the member row above
+    // is SOFT-deleted, so the constraint never fires: the erasure path has to
+    // remove these rows itself. Asserted against the real table rather than a
+    // mocked manager, because the whole failure mode is a cascade that looks
+    // like it covers this and does not.
+    expect(
+      await dataSource.getRepository(MemberSocialLink).count({ where: { memberId: member.id } }),
+    ).toBe(0);
 
     // The Discord identity (where the PII lives) is hard-deleted — durable erasure
     // that a later sign-in cannot silently repopulate. The member is de-linked.

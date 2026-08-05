@@ -221,6 +221,10 @@ services:
       - caddy-config:/config
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS e.g. "lordsofholdfast.com, www.lordsofholdfast.com"}
+      # The single canonical hostname www redirects TO. Listed separately from
+      # SITE_ADDRESS because that one is a comma-joined certificate list and
+      # cannot be used as a redirect target (T-0215).
+      APEX_HOST: ${APEX_HOST:?set APEX_HOST e.g. "lordsofholdfast.com"}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL for Let's Encrypt}
       CDN_ORIGIN: ${S3_PUBLIC_BASE_URL:?set S3_PUBLIC_BASE_URL}
       R2_S3_ORIGIN: ${S3_ENDPOINT:?set S3_ENDPOINT}

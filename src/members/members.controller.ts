@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ParseShortIdPipe } from '../common/ids/parse-short-id.pipe';
 import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -34,13 +35,17 @@ import { CommandInfoDto, ServiceRecordEntryDto } from './dto/member-detail.dto';
 import { MemberDto } from './dto/member.dto';
 import { MemberQueryDto } from './dto/member-query.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
+import { UsernameAvailabilityQueryDto } from './dto/username-availability-query.dto';
 import { MembersService } from './members.service';
+import { UsernameAvailability } from './username.service';
 
 /**
  * Members roster API. Reads require the ViewMembersDirectory capability (granted
- * to all enrolled roles); profile edits are self-service; admin actions (rank/
- * role/medal/suspend/ban) are capability-gated and audited in the service. All
- * routes are auth-guarded globally and scoped to the caller's regiment.
+ * to all enrolled roles); profile edits are self-service — in-game name, vanity
+ * handle, avatar/banner, and the member-authored bio and social links added in
+ * T-0216 — while admin actions (rank/role/medal/suspend/ban) are capability-gated
+ * and audited in the service. All routes are auth-guarded globally and scoped to
+ * the caller's regiment.
  *
  * The capability decorators below are only half the gate: they know the
  * caller's role but nothing about the TARGET, so every admin action is also
@@ -108,6 +113,24 @@ export class MembersController {
     return this.membersService.exportSelfData(user);
   }
 
+  @Get('me/username-available')
+  // Backs a keystroke-driven check, so it is deliberately cheaper than the
+  // global bucket allows a burst to be, and it answers only about the handle
+  // the caller typed — never enumerates.
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Whether the caller could claim a vanity handle right now',
+    description:
+      'Advisory: the UNIQUE index is what actually decides, so a PATCH can still 409 if ' +
+      'two members claim the same handle in the same instant.',
+  })
+  checkUsername(
+    @Query() query: UsernameAvailabilityQueryDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<UsernameAvailability> {
+    return this.membersService.checkUsername(query.username, user);
+  }
+
   // ── Single member reads ──────────────────────────────────────────────────────
 
   @Get(':id')
@@ -168,8 +191,16 @@ export class MembersController {
   @ApiOperation({
     summary: 'Update your own profile (self-service)',
     description:
-      'A member may edit only their own profile and only a restricted set of fields. ' +
-      'Changing role/status/rank is not permitted here.',
+      'A member may edit only their own profile and only a restricted set of fields: ' +
+      'in-game name, vanity handle, avatar/banner (by uploaded storage key), the bio, and ' +
+      'the social links. Changing role/status/rank is not permitted here. `bio` is trimmed ' +
+      'server-side and whitespace-only is stored as null; send null to clear it. ' +
+      '`socialLinks` is a WHOLESALE REPLACE — omit it to leave the stored set alone, or send ' +
+      'the complete set you want to end up with (an empty array removes them all). Links are ' +
+      'stored as HANDLES, never URLs: each handle is normalised (one leading @ and one ' +
+      'trailing / are stripped) and must match its platform pattern, and the published URL is ' +
+      'composed server-side from a hardcoded origin. A handle its platform rejects, or two ' +
+      'entries for one platform, is a 400 naming that platform.',
   })
   @ApiOkResponse({ description: 'The updated member projection', type: MemberDto })
   update(

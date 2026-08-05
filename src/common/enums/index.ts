@@ -36,6 +36,32 @@ export enum Platform {
   PlayStation = 'ps',
 }
 
+/**
+ * Social networks a member may publish a HANDLE for on their profile (T-0216).
+ *
+ * Lowercase values, matching the {@link Platform}/{@link MediaProvider}
+ * precedent — these keys travel on the wire to the Angular frontend, which uses
+ * them as icon keys.
+ *
+ * Discord is deliberately ABSENT. It is already modelled as
+ * `Member.discordIdentity`/`discordTag`, it is proven by OAuth rather than typed
+ * in, and it is signed-in-only — a self-asserted `discord` handle here would be
+ * a second, weaker, publicly visible source of truth for the same fact.
+ *
+ * The handle rules, display labels and the server-side URL builder for these
+ * live in ONE place, `src/members/social-platforms.ts`. Nothing else may
+ * hardcode a pattern or a profile URL for them.
+ */
+export enum MemberSocialPlatform {
+  Twitch = 'twitch',
+  YouTube = 'youtube',
+  Instagram = 'instagram',
+  TikTok = 'tiktok',
+  X = 'x',
+  Steam = 'steam',
+  MedalTv = 'medal',
+}
+
 export enum EventStatus {
   Upcoming = 'upcoming',
   Ongoing = 'ongoing',

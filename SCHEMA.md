@@ -5,6 +5,12 @@ MySQL 8 (the Docker Compose `db` service), database **`lords_dashboard`**, chars
 camelCase in code, columns/tables are `snake_case` in MySQL). Schema is owned exclusively by
 **migrations** — `synchronize` is permanently off.
 
+That collation is **case-insensitive, accent-insensitive and PAD SPACE**, and every unique index
+inherits it. For `UQ_members_username` (§3.2) that is load-bearing rather than incidental: `Panda`
+cannot be claimed while `panda` exists, `pánda` cannot either, and neither can `panda ` — deliberate
+anti-impersonation behaviour, obtained with no lower-cased shadow column, no generated column and no
+functional index. Nothing overrides it with a per-column `COLLATE`, on purpose.
+
 This document is the normalized (3NF) data model derived from the Angular frontend
 (`lords-regiment-dashboard`): its `core/models`, `core/services`, every feature component, and the
 `design-reference/` wireframes (the canonical UI/UX source). It is the single source of truth for the
@@ -257,6 +263,8 @@ The authoritative person record. Replaces the frontend's denormalized `rank`/`ch
 | `rank_id` | char(36) NOT NULL | FK → `ranks.id` (**replaces free-string rank**; chevrons derive from rank) |
 | `name` | varchar(120) NOT NULL | display/full name |
 | `in_game_name` | varchar(120) NULL | min 2 |
+| `username` | varchar(32) NULL UNIQUE | optional vanity handle behind `/u/@panda`; NULL = never claimed (MySQL treats NULLs as distinct in a unique index, so "optional AND unique" needs no shadow column). Column is wider than the 3–20 char format so the ceiling can move without a migration |
+| `username_changed_at` | datetime(6) NULL | last rename, for the 30-day cooldown — **not** `updated_at`, which every self-edit bumps |
 | `role` | enum `member_role` NOT NULL DEFAULT `'Applicant'` | authorization |
 | `status` | enum `member_status` NOT NULL DEFAULT `'Pending'` | |
 | `platform` | enum `platform` NULL | |
@@ -265,6 +273,7 @@ The authoritative person record. Replaces the frontend's denormalized `rank`/`ch
 | `public_profile` | boolean NOT NULL DEFAULT true | self-service visibility |
 | `avatar_url` | varchar(512) NULL | |
 | `banner_url` | varchar(512) NULL | |
+| `bio` | text NULL | member-authored blurb on the public profile; NULL = never wrote one (whitespace-only is folded to NULL in the service). `text`, not varchar, because the 280-character ceiling is a **product** rule enforced in the DTO — moving it must not need a migration. Escaped at render time by `escapeHtml` in `src/seo` |
 | `standing` | varchar(40) NULL | e.g. "Good Order" |
 | `joined_at` | timestamp NULL | enlistment date |
 | `last_seen_at` | timestamp NULL | drives 30-day auto-inactive job |
@@ -274,12 +283,47 @@ The authoritative person record. Replaces the frontend's denormalized `rank`/`ch
 | `deleted_at` | timestamp NULL | soft-delete (GDPR) |
 
 Indexes: `INDEX(regiment_id)`, `INDEX(rank_id)`, `INDEX(role)`, `INDEX(status)`,
-`UNIQUE(discord_identity_id)`.
+`UNIQUE(discord_identity_id)`, `UNIQUE(username)` (named `UQ_members_username`).
 Derived (not columns): `events_attended_count`, `attendance_percent`, `chevrons` (← rank).
 Relationships: *—1 `ranks`, *—1 `regiments`, **0..1—1 `discord_identities`** (a member optionally maps
 to one OAuth identity), *—* `medals` via `member_medals`, 1—* `event_rsvps` / `gallery_items` (author)
 / `service_record_entries`. Applications attach to the **identity** (1—*), not the member; the approved
 one points back via `applications.promoted_member_id`.
+
+#### `username_reservations`
+A handle nobody holds that nobody may claim. `UQ_members_username` answers *"is someone using this?"*;
+it cannot answer *"did someone just **stop** using this?"* — and that gap is precisely the window an
+impersonator polls for.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `username` | varchar(32) PK | the normalised (lowercase) handle — no surrogate id, the handle **is** the key |
+| `reason` | enum(`cooldown`, `blocked`) NOT NULL | why the hold exists (below) |
+| `former_member_id` | char(12) NULL | who held it, for support questions — **deliberately not an FK** |
+| `held_until` | datetime(6) NULL | when the hold lapses; **NULL = never** |
+| `created_at` | datetime(6) NOT NULL DEFAULT `CURRENT_TIMESTAMP(6)` | |
+
+Two reasons, one table:
+
+- **`cooldown`** — the holder renamed. The old handle stays live in Discord messages, event embeds and
+  bookmarks for a while, so `held_until` is 30 days out (`USERNAME_COOLDOWN_DAYS`) instead of being
+  handed to whoever was polling. After that the row is dead weight and the next claim just wins — the
+  hold expires by comparison, so no sweeper job has to exist for correctness.
+- **`blocked`** — the holder deleted their account. `held_until` is `NULL`, i.e. forever: the handle
+  survives in the audit ledger and in the regiment's memory, and impersonating a departed member is
+  the one squat with an actual victim.
+
+`former_member_id` carries **no foreign key**, and that is the design rather than an omission. A
+`blocked` row has to outlive the member row it names — that is the entire point of it — so a FK would
+either block the GDPR erasure (`RESTRICT`) or delete the protection along with the person (`CASCADE`);
+`SET NULL` would keep the block but throw away the only answer to "whose handle was this?".
+
+Reserved *words* (`admin`, `api`, `roster`, `support`, …) are **not** rows here. They live in
+`src/common/ids/username.ts` because they are a property of the routing table and of what a handle
+implies when printed next to a face, so a deploy must be able to add one without a migration.
+
+No `regiment_id`: unlike every other domain table (design principle 3) the public handle namespace is
+global, because the URL space it reserves is.
 
 #### `ranks` (lookup table, per regiment)
 | Column | Type | Notes |
@@ -340,6 +384,27 @@ Replaces `member.medals: MedalRibbon[]` (which lost medal identity).
 | `awarded_by_member_id` | char(36) NULL | FK → `members.id` |
 
 Indexes: `UNIQUE(member_id, medal_id)`.
+
+#### `member_social_links` (child, 1—*)
+The social accounts a member publishes on their profile. **Stores a handle, never a URL** — the
+outbound link is composed server-side from a hardcoded per-platform origin
+(`src/members/social-platforms.ts`), so a member cannot publish an arbitrary outbound link on a
+crawlable page whatever they type.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | char(12) PK | short id |
+| `member_id` | char(12) NOT NULL | FK → `members.id` (`FK_member_social_links_member`, ON DELETE CASCADE) |
+| `platform` | varchar(40) NOT NULL | open set (§2): `twitch`, `youtube`, `instagram`, `tiktok`, `x`, `steam`, `medal`. **Not** an ENUM — a network can be added without a migration. Discord is deliberately absent: it is already `members.discord_identity_id`, OAuth-proven rather than self-asserted |
+| `handle` | varchar(190) NOT NULL | account name, normalised (no leading `@`, no trailing `/`), case **preserved** for display. Far wider than any handle rule allows, so a ceiling can be raised without a migration |
+| `precedence` | int NOT NULL DEFAULT 0 | display order, from the registry's canonical ordering |
+| `created_at` | datetime(6) NOT NULL DEFAULT `CURRENT_TIMESTAMP(6)` | |
+
+Indexes: `UNIQUE(member_id, platform)` (named `UQ_member_social_link`) — one account per network per
+member; the key is the platform, so handle casing never affects it.
+Relationships: *—1 `members`. No `regiment_id` (a child reached only through a regiment-scoped
+parent, like `gallery_files`). CASCADE covers a **hard** delete only — members are soft-deleted, so
+the GDPR erasure path hard-deletes these rows itself.
 
 #### `role_permissions` (authorization matrix — source of truth)
 Capability × role booleans, per regiment. **Drives `RolesGuard`/capability checks.**
@@ -815,8 +880,10 @@ discord_identities ─1:0..1─ members       (identity = account; member create
 discord_identities ─1:*─ applications      (application *─0..1 members via promoted_member_id)
 ranks ─1:*─ members
 members ─*:*─ medals            (via member_medals: detail, awarded_at, awarded_by)
+members ─1:*─ member_social_links  (handles, not URLs — the link is built server-side)
 members ─1:*─ service_record_entries
 members ─1:*─ account_deletion_requests
+members ─1:*─ username_reservations  (by former_member_id — NO FK: a blocked row outlives the member)
 
 events ─1:*─ event_rsvps ─*:1─ members
 events ─*:*─ members            (via event_attendees)

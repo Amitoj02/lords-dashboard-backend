@@ -348,6 +348,10 @@ describe('AuthService', () => {
       await expect(service.getCurrentUser(user)).resolves.toEqual({
         id: 'member-1',
         inGameName: 'Lord Commander',
+        // The caller's own vanity handle (T-0215). Null here because the member
+        // fixture has not claimed one; the SPA needs it to route "my profile"
+        // straight to /u/@handle rather than to the short-id URL.
+        username: null,
         rank: 'General',
         role: MemberRole.Owner,
         discordTag: null,
@@ -431,6 +435,10 @@ describe('AuthService', () => {
       await expect(service.getCurrentUser(user)).resolves.toEqual({
         id: 'identity-1',
         inGameName: 'New Bie',
+        // ALWAYS null on the identity-only projection (T-0215): a caller who is
+        // not on the roster has no handle to claim yet, and the Discord username
+        // is a different namespace entirely.
+        username: null,
         rank: null,
         role: MemberRole.Applicant,
         discordTag: '@newbie',

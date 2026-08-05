@@ -148,6 +148,153 @@ the last 60 lines of API logs; a human decides.
 
 ---
 
+## Edge config is hand-synced (T-0215)
+
+`lords-deploy` pins image tags, pulls and restarts. **It never writes the
+`Caddyfile`, either compose file, or `.env`** — its allowlist contains no command
+that could, which is the entire point of the forced command. Those files live
+under `~/lords/` and are hand-synced.
+
+So rolling T-0215 out through the deploy workflow ships the new `/api/seo/*` and
+`/api/sitemap.xml` endpoints and **changes nothing a crawler can see.** The
+crawler rewrite, the `/sitemap.xml` route and the www→apex 301 are all edge
+config. Until someone SSHes in, Googlebot keeps receiving the same empty
+`<app-root></app-root>` for every profile on the roster, and `/sitemap.xml` keeps
+falling through to the SPA and returning `index.html` at 200 `text/html`.
+
+Do the steps in this order. Step 1 before step 2 is not a preference: the caddy
+service now declares `APEX_HOST: ${APEX_HOST:?…}`, so with the variable unset
+compose **refuses to start caddy at all** — and caddy is the only container that
+publishes ports, so the site goes dark rather than degrading. This is by far the
+most likely way to break this rollout.
+
+**1 — `APEX_HOST` into `.env`, first.**
+
+```bash
+ssh ovh-lords
+cd ~/lords
+grep -q '^APEX_HOST=' .env || printf 'APEX_HOST=lordsofholdfast.com\n' >> .env
+```
+
+Bare host: no scheme, no trailing slash, no `www.`. It is the redirect *target*,
+which is why it cannot simply be `SITE_ADDRESS` — that stays the comma-joined
+pair, because the certificate still has to cover both names.
+
+**2 — sync BOTH files**, from a checkout at the tag you just deployed:
+
+```bash
+scp Caddyfile docker-compose.prod.yml ovh-lords:~/lords/
+```
+
+The compose file is not optional here. A container sees only the variables its
+service block lists, so a Caddyfile-only sync leaves `{$APEX_HOST}` expanding to
+empty — `@www host www.` then matches nothing and the redirect silently never
+fires. www keeps serving a full duplicate of the site and there is no error
+anywhere to tell you.
+
+**3 — validate, then reload.** Both checks, in this order: `config` proves every
+variable resolves, `validate` proves the Caddyfile itself adapts.
+
+```bash
+ssh ovh-lords && cd ~/lords
+docker compose -f docker-compose.yml -f docker-compose.prod.yml config >/dev/null
+docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm --no-deps \
+  --entrypoint caddy caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy
+```
+
+Only caddy is recreated, so this costs no API restart — no gateway reconnect, no
+paused outbox.
+
+**4 — verify.** Five checks, and the last is the one people skip:
+
+```bash
+GB='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+DB='Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'
+
+# Real server-rendered HTML, not the empty shell.
+curl -sS -A "$GB" https://lordsofholdfast.com/roster      | grep -c '<app-root'      # 0
+curl -sS -A "$GB" https://lordsofholdfast.com/u/@<handle> | grep -o '<title>[^<]*'   # the member's name
+
+# Every page the matcher now covers has a shell behind it (T-0293). A path
+# listed in the Caddyfile with no route under /api/seo/* returns a JSON 404,
+# which an unfurler renders as a broken preview — so this loop is what proves
+# the API tag and the edge config are in step.
+for p in /home /roster /events /gallery; do
+  printf '%-10s ' "$p"
+  curl -sS -A "$DB" "https://lordsofholdfast.com$p" | grep -o '<title>[^<]*'
+done
+
+# The sitemap is generated, and must not arrive as text/html.
+curl -sSI https://lordsofholdfast.com/sitemap.xml | grep -i '^content-type'          # application/xml
+
+# One canonical hostname.
+curl -sSI https://www.lordsofholdfast.com/roster | grep -iE '^(HTTP/|location:)'     # 301 → apex
+
+# ⚠️ AND humans must still get the app. A matcher that is too broad serves the
+# crawler shell to everyone, and that looks perfectly fine until you read it.
+# Check the paths the matcher GREW into, not just the one that was there before.
+curl -sS https://lordsofholdfast.com/roster  | grep -c '<app-root'                   # 1
+curl -sS https://lordsofholdfast.com/home    | grep -c '<app-root'                   # 1
+curl -sS https://lordsofholdfast.com/gallery | grep -c '<app-root'                   # 1
+```
+
+A 404 on the profile check is not necessarily a failure. `/api/seo/u/:handle`
+returns **honest status codes** — that is most of why it exists — and 404 is what
+an Applicant, or a pending, banned, suspended or never-named member is supposed
+to produce. Pick a handle you can already see signed-out. `/api/seo/events/:id`
+behaves the same way. `/api/seo/gallery/:id` deliberately does NOT: it always
+answers 200 with a `noindex` generic card, because a Discord unfurl of a 404
+body renders as a broken preview rather than as "this one is gone".
+
+**⚠️ `/` is deliberately NOT in the matcher, and putting it there is not a
+one-line change.** It renders the same landing page as `/home`, but it is the one
+path a Cloudflare Cache Rule covers — and Cloudflare honours `Vary` for
+`Accept-Encoding` and nothing else. A UA-varying `/` therefore ends up with the
+crawler document in the edge cache, served to every human who opens the front
+page. `/home` is what `/` redirects to and what both surfaces declare canonical,
+so nothing is lost by leaving the root alone. Change the Cloudflare rule first if
+this ever has to move.
+
+To see what a share really looks like before announcing it, paste the URL into
+Discord's own tool at `https://discord.com/developers/embed-debugger?url=…`
+(sign-in required). Discord caches an unfurl for roughly 30 minutes with no
+purge, so append a throwaway query string when re-testing a URL you have already
+pasted somewhere.
+
+**5 — roll back** by restoring the previous pair of files. Nothing else moves.
+
+```bash
+scp <previous>/Caddyfile <previous>/docker-compose.prod.yml ovh-lords:~/lords/
+ssh ovh-lords 'cd ~/lords && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy'
+```
+
+Leave `APEX_HOST` in `.env` afterwards — the old Caddyfile and compose file
+simply never read it. Removing it while the new pair is live is what breaks.
+
+### Sequence the crawl before you invite it
+
+The public endpoints are throttled at 60–120 requests/minute, and the throttler
+still keys on `req.ip` — which, behind Cloudflare, is always Caddy. **The whole
+internet therefore shares one bucket, signed-in members included.** Nothing has
+noticed because nothing crawls the site yet, and a Googlebot pass over a few
+hundred profiles is precisely the traffic shape that drains that bucket and
+starts 429ing real people mid-session.
+
+So, before the sitemap goes anywhere near Search Console:
+
+1. Enable [Authenticated Origin Pulls](#authenticated-origin-pulls-lda-h3) — the
+   full procedure, including the ordering that avoids 520s, is below.
+2. Set `TRUST_CF_CONNECTING_IP=true` in `.env` and `up -d api`, so the throttler
+   keys on the real client address and a crawler gets a bucket of its own.
+3. **Then** submit `https://lordsofholdfast.com/sitemap.xml`.
+
+Step 2 is only sound after step 1: without AOP anyone can reach the origin
+directly and forge `Cf-Connecting-Ip`, which converts a shared rate limit into no
+rate limit at all.
+
+---
+
 ## Backups
 
 Nightly at 03:30 UTC (before the 04:30 unattended-upgrades reboot window), to

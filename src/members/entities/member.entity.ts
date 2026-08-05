@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { ShortIdEntity } from '../../common/ids/short-id-entity.base';
+import { USERNAME_MAX_LENGTH } from '../../common/ids/username';
 import { DiscordIdentity } from '../../auth/entities/discord-identity.entity';
 import { MemberRole, MemberStatus } from '../../common/enums';
 import { Rank } from '../../ranks/entities/rank.entity';
@@ -45,6 +46,25 @@ export class Member extends ShortIdEntity {
   @Column({ type: 'varchar', length: 120 })
   inGameName: string;
 
+  /**
+   * Optional vanity handle backing `/u/@panda` (T-0215). NULL for a member who
+   * never claimed one — MySQL treats NULLs as distinct inside a unique index,
+   * which is the whole reason "optional AND unique" needs no shadow column.
+   * The `utf8mb4_unicode_ci` collation makes this index case- and
+   * accent-insensitive for free; see the migration for why that is deliberate.
+   */
+  @Index({ unique: true })
+  @Column({ type: 'varchar', length: USERNAME_MAX_LENGTH, nullable: true })
+  username: string | null;
+
+  /**
+   * When the handle was last changed, for the rename cooldown. Separate from
+   * `updatedAt` on purpose — every self-edit bumps that one, so it cannot tell
+   * a handle change from an avatar upload.
+   */
+  @Column({ type: 'datetime', precision: 6, nullable: true })
+  usernameChangedAt: Date | null;
+
   @Index()
   @Column({ type: 'enum', enum: MemberRole, default: MemberRole.Applicant })
   role: MemberRole;
@@ -64,6 +84,22 @@ export class Member extends ShortIdEntity {
 
   @Column({ type: 'varchar', length: 512, nullable: true })
   bannerUrl: string | null;
+
+  /**
+   * Member-authored blurb shown on the public profile (T-0216). NULL means the
+   * member never wrote one — and whitespace-only input is normalised to NULL in
+   * the service, so "blank" has exactly one representation rather than two that
+   * render identically and compare differently.
+   *
+   * `text` rather than a varchar: the LENGTH LIMIT IS A PRODUCT RULE (280
+   * characters, so the blurb stays one paragraph beside the avatar) and product
+   * rules that move belong in the DTO, not in a column type that needs a
+   * migration to relax. There is no sanitizer library in this codebase; the bio
+   * is escaped at RENDER time by `escapeHtml` in `src/seo`, which is where every
+   * other member-authored string is already made safe.
+   */
+  @Column({ type: 'text', nullable: true })
+  bio: string | null;
 
   @Column({ type: 'varchar', length: 40, nullable: true })
   standing: string | null;

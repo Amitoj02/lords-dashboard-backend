@@ -18,6 +18,7 @@ import { MedalsModule } from './medals/medals.module';
 import { MembersModule } from './members/members.module';
 import { RanksModule } from './ranks/ranks.module';
 import { RegimentsModule } from './regiments/regiments.module';
+import { SeoModule } from './seo/seo.module';
 import { SettingsModule } from './settings/settings.module';
 import { StorageModule } from './storage/storage.module';
 
@@ -54,6 +55,9 @@ import { StorageModule } from './storage/storage.module';
     SettingsModule,
     DiscordModule,
     StorageModule,
+    // Crawler-facing HTML + the sitemap. Owns no data — it renders what the
+    // public members/regiment services already return (T-0215).
+    SeoModule,
   ],
   providers: [
     // Throttle every route globally; individual routes can override with @Throttle/@SkipThrottle.

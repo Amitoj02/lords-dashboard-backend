@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "034462e1ac573dd632231d986193ca5216d0aad7",
-  "lastSyncedAt": "2026-08-04T00:30:00Z",
-  "notesForNextSession": "T-0213 is the live thread and it is HALF A TASK ON ITS OWN \u2014 the frontend half is lords-regiment-dashboard's companion commit, open as feat/why-join-required in BOTH repos (PRs into dev, not main). The optional \"Note to the recruiting officer\" is now the REQUIRED question \"Why do you want to join the Lords Regiment?\". Four things not to undo: (1) the property is still `representativeNote` and the column is still `representative_note` \u2014 the user explicitly chose a labels-only rename so there is NO migration, so do not \"finish the job\" by renaming it to whyJoin without asking; (2) the column stays NULLable even though intake requires it, because applications submitted before this have no answer \u2014 the admin page's @if guard and the embed composer's blank-field omission are what keep those rows renderable, and Discord rejects an empty field value (50035) so the omission is correctness, not polish; (3) UpdateMyApplicationDto is PartialType(CreateApplicationDto), so PATCH /applications/mine stays optional per-field \u2014 that is deliberate; (4) the READ models on the frontend keep `representativeNote?` for the same legacy-null reason, only CreateApplicationPayload went required. T-0214 is newly filed: SCHEMA.md section 3.5 still documents the PRE-T-0039 applications table (phantom why_join, platform, timezone, prior_experience, age_confirmed, how_found-as-enum; missing the four columns T-0039 added). T-0213 fixed only the one row it touched and left a drift warning. Local-env gotchas worth keeping: port 3000 is an unrelated capybara Grafana container, so run the API on 3001 and set DISCORD_CALLBACK_URL through the 4200 proxy or the OAuth state cookie is lost; `nest start` wipes dist but a stale tsconfig.build.tsbuildinfo then makes tsc emit nothing, so rm it before a dev start; the dev DB's Owner member is bound to a REAL Discord snowflake, so the mock `owner` persona is only an Applicant there \u2014 point the API at lords_dashboard_e2e to get a real mock owner. Still open from before: T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts `denyReason`); T-0209 left the resync fan-out with no batchId; T-0210 (suspension/unban vs Discord roles) still deferred and applyBanRoleOnBan still OFF in production; BACKUP_HEARTBEAT_URL in ~/lords/backup.env is still blank and the first unattended 03:30 UTC backup run is still unconfirmed; the live medal cabinet still has a medal whose description reads 'Please update the description'.",
-  "nextIdCounter": 215,
+  "lastSyncedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
+  "lastSyncedAt": "2026-08-05T05:40:00Z",
+  "notesForNextSession": "T-0217..T-0219 (share cards + SEO for every public URL) are in REVIEW, coupled to frontend T-0293..T-0295.\n\nDEPLOY ORDER: API first, then the web image, then hand-sync the Caddyfile. The @crawler matcher now lists /home /events /events/* /gallery /gallery/* alongside /u/* and /roster, and a path listed there with no route under /api/seo/* returns a JSON 404 that an unfurler renders as a broken preview. deploy/README.md step 4 carries the verification loop, including the check people skip (humans must still get <app-root> on /home and /gallery).\n\nNon-obvious decisions worth not relitigating. (1) / is NOT in the matcher and /home is there instead - Cloudflare caches / and honours Vary only for Accept-Encoding, so a UA-varying / puts this document in the edge cache in front of every human. The sitemap lists /home for the same reason. (2) The gallery shell renders a full page now, not a head full of meta tags: googlebot is in the same UA regex as discordbot, and a stub for a search engine while humans get the Angular page is cloaking whatever the intent was. (3) GalleryShareService is EXPORTED and SeoService delegates to it, so /api/share/gallery/:id and /api/seo/gallery/:id are one implementation - the legacy path has to keep working while the Caddyfile on the box is un-synced. (4) The gallery shell will not resolve a member handle to link an author's profile: MembersModule already imports GalleryModule, so that edge is a cycle. (5) A VideoObject is only claimed with a poster AND an upload date; without them it degrades to CreativeWork, because an incomplete VideoObject is a structured-data error. (6) Titles are '<page> | <Regiment>' on both surfaces now via documentTitle() in seo/html/brand.ts - the shells used an em dash while the SPA used a pipe, so every crawlable URL had two titles. (7) og-html.ts is gone; escapeHtml lives in seo/html/escape-html.ts.\n\nVerification state: 1270 tests green, eslint + prettier clean, tsc clean. Routing exercised against a throwaway Caddy on :8899 in front of the dev stack. NOT done: there is no uploaded VIDEO in the dev gallery, so the og:video path is unit-tested only and has never been pasted into a real Discord channel - that is the one pending testPlan item on T-0218.\n\nDev-container trap hit twice this session: a stale root-owned tsconfig.build.tsbuildinfo makes `nest start --watch` report 'Found 0 errors' and emit nothing, so the container boots with 'Cannot find module /app/dist/main' and serves the PREVIOUS build. `docker compose exec api rm -f /app/tsconfig.build.tsbuildinfo && docker compose restart api` fixes it.",
+  "nextIdCounter": 220,
   "connections": [],
   "tasks": [
     {
@@ -14580,7 +14580,7 @@
         },
         {
           "desc": "the UNATTENDED 03:30 UTC timer run succeeds - the manual run shares nothing with cron but the unit",
-          "status": "open"
+          "status": "pending"
         }
       ],
       "regressionRisk": [
@@ -15159,6 +15159,467 @@
           "note": "discovered during T-0213 \u2014 SCHEMA.md documented a phantom why_join column"
         }
       ]
+    },
+    {
+      "id": "T-0215",
+      "title": "Public roster + member profiles, vanity handles, and the crawler surface",
+      "summary": "Opened the roster and every member profile to anonymous readers behind a structurally separate PublicMemberDto, added optional vanity handles (members.username + username_reservations) backing /u/@handle, proxied avatars so no Discord snowflake reaches public HTML, trimmed turnout out of the public event projection and windowed its history to 90 days, and added a crawler-facing HTML surface (/api/seo/*) plus a dynamic sitemap. Fixed a live redirect-loop bug in the gallery share shell along the way.",
+      "status": "review",
+      "type": "feature",
+      "size": "XL",
+      "sizeWeight": 8,
+      "area": "roster",
+      "feature": "public-profiles",
+      "subfeature": "anonymous-projection",
+      "repo": "",
+      "paths": [
+        "src/members/public/",
+        "src/members/dto/public-member.dto.ts",
+        "src/members/username.service.ts",
+        "src/members/entities/username-reservation.entity.ts",
+        "src/common/ids/username.ts",
+        "src/seo/",
+        "src/database/migrations/1784900005000-PublicProfilesAndUsernames.ts",
+        "Caddyfile",
+        "test/public-profile.e2e-spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PublicMemberDto omits every sensitive field on the SERIALIZED object",
+          "status": "passed"
+        },
+        {
+          "desc": "username validation, cooldown, reservation and ER_DUP_ENTRY handling",
+          "status": "passed"
+        },
+        {
+          "desc": "crawler shell escapes member-authored text and emits no meta refresh",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: anonymous roster/profile, @handle + shortId resolution, 404 vs 410, sitemap",
+          "status": "passed"
+        },
+        {
+          "desc": "live smoke: exclusion predicate against banned/suspended/applicant/pending rows",
+          "status": "passed"
+        },
+        {
+          "desc": "Caddy rewrite + sitemap route verified ON THE BOX after the manual sync",
+          "status": "pending"
+        },
+        {
+          "desc": "Search Console: submit sitemap AFTER Authenticated Origin Pulls is on",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The public EventDto dropped rsvpCounts/attendeesCount/expectedAttendance/attendanceGoal. Any anonymous consumer that read them now sees undefined; the SPA was updated in the same change, but a third-party or cached client would not be.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        },
+        {
+          "desc": "og-html.ts no longer emits a meta refresh. A human who opens /api/share/gallery/:id directly now stays on the plain shell instead of bouncing to the SPA \u2014 deliberate, but it is a visible behaviour change on a route that is directly linkable.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        },
+        {
+          "desc": "members.username is UNIQUE under utf8mb4_unicode_ci, so uniqueness is case- AND accent-insensitive AND PAD SPACE. CI runs mysql:8.0 without the conf.d mount and lords_e2e_test is utf8mb4_0900_ai_ci (NO PAD), so a trailing-whitespace or accent uniqueness test can pass in CI and fail in prod.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        },
+        {
+          "desc": "Account deletion now purges the member's R2 avatar/banner objects. Best-effort and outside the transaction, but it is the first code path that deletes member media.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did NOT move status/suspendedUntil/bannedAt behind view_audit_log for INTERNAL callers. Every enrolled member including a Mercenary still reads another member's discipline state on the authenticated roster. Out of scope here (the public projection simply never carries them) but worth its own task.",
+        "Did NOT wire the dead members.public_profile column. The owner chose no per-member opt-out, so the column stays unread \u2014 as does `standing`, which only the dev-owner seeder ever writes.",
+        "No username_history table, so a renamed handle's old URL 404s after the 30-day cooldown rather than redirecting forever.",
+        "The sitemap is a single document capped at 5000 profiles, not a sitemap index. Fine at regiment scale; it would need splitting at 50k URLs.",
+        "Cloudflare Authenticated Origin Pulls and TRUST_CF_CONNECTING_IP=true are documented in deploy/README.md but NOT enabled. Until they are, the whole internet shares one 120/min bucket keyed on Caddy's IP and a crawl burst can 429 real members.",
+        "Did not add a robots meta or noindex to /api/seo/* responses themselves \u2014 they are only ever reached through the Caddy UA rewrite, never linked."
+      ],
+      "lastTouchedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
+      "createdAt": "2026-08-04T22:10:00Z",
+      "updatedAt": "2026-08-04T22:10:00Z",
+      "history": [
+        {
+          "at": "2026-08-04T22:10:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "backend + Caddy/compose/docs shipped on feat/public-site-redesign; 1115 unit + 178 e2e green, live smoke-tested against a real MySQL"
+        }
+      ]
+    },
+    {
+      "id": "T-0216",
+      "title": "Member bio and linked accounts, stored as handles",
+      "summary": "Added an optional `bio` (text NULL on members, capped at 280 in the DTO, trimmed in the service, whitespace-only folded to NULL) and a `member_social_links` child table carrying seven optional linked accounts (Twitch, YouTube, Instagram, TikTok, X, Steam, Medal.tv). Handles are stored, never URLs: src/members/social-platforms.ts owns the per-platform regex and the URL template, so the `url` on the wire always points at a host we chose and no member can publish an arbitrary outbound link on a crawlable page. Both fields are published on PublicMemberDto as a deliberate, documented decision. Self-edit goes through the existing PATCH /members/:id, which is applicant-proof for free because an applicant has no members row at all. The crawler shell renders the bio as body copy and the links as an Elsewhere section with rel=\"nofollow ugc\"; the meta description was deliberately left alone so the shell and the SPA keep agreeing.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "roster",
+      "feature": "members",
+      "subfeature": "bio-and-linked-accounts",
+      "repo": "",
+      "paths": [
+        "src/members/social-platforms.ts",
+        "src/members/entities/member-social-link.entity.ts",
+        "src/members/entities/member.entity.ts",
+        "src/members/dto/member-social-link.dto.ts",
+        "src/members/dto/public-member.dto.ts",
+        "src/members/dto/update-member.dto.ts",
+        "src/members/members.service.ts",
+        "src/members/public/public-members.service.ts",
+        "src/database/migrations/1784900006000-MemberBioAndSocialLinks.ts",
+        "src/seo/seo.service.ts",
+        "src/seo/html/page-shell.ts",
+        "SCHEMA.md"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0289",
+        "lords-regiment-dashboard:T-0290",
+        "lords-regiment-dashboard:T-0291"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "social-platforms: every platform accepts its own examples and rejects slash/scheme/whitespace",
+          "status": "passed"
+        },
+        {
+          "desc": "social-platforms: steamID64 routes to /profiles/, a vanity id to /id/",
+          "status": "passed"
+        },
+        {
+          "desc": "updateSelf: bio trimmed, whitespace-only becomes NULL, absent leaves it untouched",
+          "status": "passed"
+        },
+        {
+          "desc": "updateSelf: links replace wholesale; duplicate platform and invalid handle both 400 and write nothing",
+          "status": "passed"
+        },
+        {
+          "desc": "updateSelf: an applicant (memberId null) is Forbidden without a redundant role guard",
+          "status": "passed"
+        },
+        {
+          "desc": "PublicMemberDto: whole-class key allowlist still holds with bio and socialLinks added",
+          "status": "passed"
+        },
+        {
+          "desc": "GDPR: executeSelfDeletion nulls the bio and deletes the link rows inside the transaction",
+          "status": "passed"
+        },
+        {
+          "desc": "crawler shell: bio renders escaped as a paragraph; links carry rel=\"nofollow ugc\"",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: hostile handles all 400; the stored handle is normalised; the URL origin is never foreign",
+          "status": "passed"
+        },
+        {
+          "desc": "migration: up() then down() then up() against real MySQL 8; down() is a true inverse",
+          "status": "passed"
+        },
+        {
+          "desc": "no N+1: the link rows are batched per page on both the authenticated and public projections",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The per-platform regexes in src/members/social-platforms.ts are MIRRORED in the SPA at src/app/core/models/social-link.model.ts (frontend T-0291), including the deliberate single-trim in normalizeSocialHandle. Changing one side without the other tells a member their handle is fine and then 400s them on save.",
+          "status": "open",
+          "notedAt": "2026-08-05T04:20:00Z"
+        },
+        {
+          "desc": "PublicMemberDto now publishes two member-authored fields. The whole-class Object.keys allowlist spec is what stops a third arriving by accident; it must not be relaxed.",
+          "status": "open",
+          "notedAt": "2026-08-05T04:20:00Z"
+        },
+        {
+          "desc": "ShellLink gained an optional `rel`. Existing call sites emit byte-identical HTML because the attribute is omitted when the field is absent, but any future code that sets rel=\"\" would emit an empty attribute.",
+          "status": "open",
+          "notedAt": "2026-08-05T04:20:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "describeProfile still builds the generated meta description and ignores the bio. Using the bio there requires the SPA to build the identical string first, or Googlebot sees pass one and pass two disagree.",
+        "Social links are not emitted as JSON-LD sameAs. The handles are unverified, and sameAs is a claim of identity.",
+        "public-profile.e2e-spec.ts was left alone; the bio and rel=\"nofollow ugc\" crawler assertions went into the new member-bio-and-socials e2e suite instead of a shared spec owned by T-0215."
+      ],
+      "lastTouchedCommit": "5050e5348068e1e8643ff2b2fb18b07e0e391b1a",
+      "createdAt": "2026-08-05T04:20:00Z",
+      "updatedAt": "2026-08-05T04:20:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T04:20:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created"
+        },
+        {
+          "at": "2026-08-05T04:20:00Z",
+          "from": "planned",
+          "to": "in_progress",
+          "by": "claude",
+          "note": "implemented on feat/member-bio-and-socials"
+        },
+        {
+          "at": "2026-08-05T04:20:00Z",
+          "from": "in_progress",
+          "to": "review",
+          "by": "claude",
+          "note": "opened for review; 1249 unit + 188 e2e green, lint/build/format clean, migration up-down-up verified on MySQL 8 PRs: backend https://github.com/Amitoj02/lords-dashboard-backend/pull/81 and frontend https://github.com/Amitoj02/lords-regiment-dashboard/pull/67, both into dev; merge this repo first."
+        }
+      ]
+    },
+    {
+      "id": "T-0217",
+      "title": "Teach the page shell the tags an unfurler actually reads",
+      "summary": "renderPageShell gained og:locale, theme-color, the full og:image:* set (secure_url, type, width, height, alt), the full og:video:* set with twitter:player:stream, article timestamps, twitter:label/data for Slack, and a body <img>/<video> so a crawler sees the subject and not only a description of it. twitter:card is now three-way: player when there is a clip AND a poster, summary_large_image for a wide image, summary for a square one - Discord inspects the real file and demotes a square avatar whatever the tag claims. Video dimensions are halved above 1920 and doubled below 400, which is the workaround FxEmbed carries in production because Discord sizes its player purely from the declared numbers. escapeHtml moved out of gallery/share into seo/html, reversing an import that had the general renderer reaching into one feature's share code.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 5,
+      "area": "seo",
+      "feature": "crawler-shell",
+      "subfeature": "page-shell",
+      "repo": "",
+      "paths": [
+        "src/seo/html/page-shell.ts",
+        "src/seo/html/page-shell.spec.ts",
+        "src/seo/html/escape-html.ts",
+        "src/seo/html/media-type.ts",
+        "src/seo/html/brand.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "shell: the mp4 tag set (og:video + secure_url + type + w/h + twitter:player:stream) is emitted together",
+          "status": "passed"
+        },
+        {
+          "desc": "shell: a video with no poster falls back to the image card rather than a player card nothing will render",
+          "status": "passed"
+        },
+        {
+          "desc": "shell: a 4K clip halves and a 320p clip doubles in the declared dimensions",
+          "status": "passed"
+        },
+        {
+          "desc": "shell: og:image:secure_url is never claimed of an http url",
+          "status": "passed"
+        },
+        {
+          "desc": "shell: an indexable page opts into max-image-preview:large; a noIndex one does not",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Every shell now emits a robots meta where before only noIndex pages did. If max-image-preview:large is ever unwanted on a page it has to be opted out here, not per call site.",
+          "status": "open",
+          "notedAt": "2026-08-05T05:40:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
+      "createdAt": "2026-08-05T05:40:00Z",
+      "updatedAt": "2026-08-05T05:40:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": null,
+          "to": "planned"
+        },
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": "planned",
+          "to": "in_progress"
+        },
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": "in_progress",
+          "to": "review"
+        }
+      ]
+    },
+    {
+      "id": "T-0218",
+      "title": "Server-render the home, events, event, gallery and gallery-item pages",
+      "summary": "The module covered /roster and /u/* only, so an event or a dispatch pasted into Discord unfurled with the site's generic title, generic blurb and no banner - identical for every event the regiment has ever run, because no unfurler runs JavaScript. SeoService gained renderHome, renderEvents, renderEvent and delegates the gallery to GalleryShareService, which was rebuilt onto renderPageShell: its entire body used to be one anchor, which is the right document for Discord and the wrong one for Google, and the same UA matcher sends both there. Structured data is per type - Organization+WebSite, ItemList, Event, ImageGallery, ImageObject/VideoObject - and a VideoObject is only claimed when there is a poster AND an upload date, because an incomplete one is an error rather than a partial win. The sitemap now lists every public event and approved dispatch, and /home rather than /, which redirects.",
+      "status": "review",
+      "type": "feature",
+      "size": "L",
+      "sizeWeight": 8,
+      "area": "seo",
+      "feature": "crawler-shell",
+      "subfeature": "public-pages",
+      "repo": "",
+      "paths": [
+        "src/seo/seo.service.ts",
+        "src/seo/seo.service.spec.ts",
+        "src/seo/seo.controller.ts",
+        "src/seo/seo.module.ts",
+        "src/gallery/share/gallery-share.service.ts",
+        "src/gallery/share/gallery-share.service.spec.ts",
+        "src/gallery/share/gallery-share.controller.ts",
+        "src/gallery/gallery.module.ts"
+      ],
+      "dependsOn": [
+        "T-0217"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "seo: /api/seo/{home,events,events/:id,gallery,gallery/:id,roster,u/:handle} all render HTML",
+          "status": "passed"
+        },
+        {
+          "desc": "seo: an event renders its banner, its own timezone and an Event payload with the absolute startDate",
+          "status": "passed"
+        },
+        {
+          "desc": "seo: a missing profile 404s and a missing event 404s; a missing dispatch is a 200 noindex card",
+          "status": "passed"
+        },
+        {
+          "desc": "seo: the sitemap carries every event and dispatch, and drops a section it cannot read rather than failing",
+          "status": "passed"
+        },
+        {
+          "desc": "seo: a private calendar or gallery does not 500 the sitemap",
+          "status": "passed"
+        },
+        {
+          "desc": "LIVE: og:video on a real uploaded clip, pasted into a Discord channel",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "SeoModule now imports EventsModule and GalleryModule, and GalleryModule imports RegimentsModule. No cycle today (nothing under those imports SeoModule) but the gallery shell deliberately does NOT resolve a member handle for the author link, because MembersModule already imports GalleryModule and that edge would cycle.",
+          "status": "open",
+          "notedAt": "2026-08-05T05:40:00Z"
+        },
+        {
+          "desc": "The crawlable surface went from two path families to six while the throttler still keys on req.ip, which behind Cloudflare is always Caddy - so the whole internet shares one 60/min bucket. A first Googlebot pass over events + gallery + profiles is exactly the traffic shape deploy/README warns drains it.",
+          "status": "open",
+          "notedAt": "2026-08-05T05:40:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not surface RSVP tallies on the event shell: rsvpCounts and attendeesCount are member-projection fields on purpose (turnout is unit strength), so showing them to a crawler would break the equivalence rule as well as the policy."
+      ],
+      "lastTouchedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
+      "createdAt": "2026-08-05T05:40:00Z",
+      "updatedAt": "2026-08-05T05:40:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": null,
+          "to": "planned"
+        },
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": "planned",
+          "to": "in_progress"
+        },
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": "in_progress",
+          "to": "review"
+        }
+      ]
+    },
+    {
+      "id": "T-0219",
+      "title": "Route every public path to the shell at the edge, and document the deploy order",
+      "summary": "The @crawler matcher grew from '/u/* /roster /roster/*' to include /events, /events/*, /gallery, /gallery/* and /home. The bare forms are written out because Caddy treats slashes as significant - /gallery/* does not match /gallery. / is deliberately excluded and /home stands in for it: / is the one path a Cloudflare Cache Rule covers and Cloudflare honours Vary only for Accept-Encoding, so a UA-varying / would end up serving the crawler document to humans out of the edge cache. The shells now send Vary: User-Agent. The legacy /api/share/gallery/:id block is kept because this file is hand-synced and both versions have to work between an API deploy and someone SSHing in.",
+      "status": "review",
+      "type": "chore",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "infra",
+      "feature": "edge",
+      "subfeature": "crawler-routing",
+      "repo": "",
+      "paths": [
+        "Caddyfile",
+        "deploy/README.md"
+      ],
+      "dependsOn": [
+        "T-0218"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "caddy validate adapts the config",
+          "status": "passed"
+        },
+        {
+          "desc": "routing: a Discordbot UA gets the shell on all seven URLs and a browser UA still gets <app-root>",
+          "status": "passed"
+        },
+        {
+          "desc": "routing: bare /gallery and bare /events match, not just their /* forms",
+          "status": "passed"
+        },
+        {
+          "desc": "routing: / still serves the static index.html to a bot (it is NOT in the matcher)",
+          "status": "passed"
+        },
+        {
+          "desc": "PROD: hand-sync the Caddyfile and re-run deploy/README step 4",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The Caddyfile is hand-synced; the API must ship BEFORE it. A path listed in @crawler with no route under /api/seo/* returns a JSON 404, which an unfurler renders as a broken preview rather than falling back to the app.",
+          "status": "open",
+          "notedAt": "2026-08-05T05:40:00Z"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "a126ab0c0b30708fcc5140433e1fc0c38a11f23b",
+      "createdAt": "2026-08-05T05:40:00Z",
+      "updatedAt": "2026-08-05T05:40:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": null,
+          "to": "planned"
+        },
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": "planned",
+          "to": "in_progress"
+        },
+        {
+          "at": "2026-08-05T05:40:00Z",
+          "from": "in_progress",
+          "to": "review"
+        }
+      ]
     }
   ],
   "history": [
@@ -15176,6 +15637,11 @@
       "at": "2026-07-28T14:45:00Z",
       "by": "claude",
       "note": "T-0209 (Discord role purge + the 'Permission denied' the owner saw) implemented and opened for review in both repos; T-0210 split out for the deferred suspension/unban policy. Retired T-0159#0 and T-0204#2, narrowed T-0191#0."
+    },
+    {
+      "at": "2026-08-05T04:20:00Z",
+      "by": "claude",
+      "note": "T-0216 (member bio + handle-based linked accounts) implemented and opened for review, coupled to lords-regiment-dashboard T-0289..T-0292 on the matching branch feat/member-bio-and-socials. Merge THIS repo first. PRs: backend https://github.com/Amitoj02/lords-dashboard-backend/pull/81 and frontend https://github.com/Amitoj02/lords-regiment-dashboard/pull/67, both into dev; merge this repo first."
     }
   ]
 }

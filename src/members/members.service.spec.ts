@@ -30,7 +30,10 @@ import { Regiment } from '../regiments/entities/regiment.entity';
 import { AccountDeletionRequest } from './entities/account-deletion-request.entity';
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 import { Member } from './entities/member.entity';
+import { MemberSocialLink } from './entities/member-social-link.entity';
 import { MembersService } from './members.service';
+import { MemberAvatarService } from './public/member-avatar.service';
+import { UsernameService } from './username.service';
 import {
   ACTION_CAPABILITY,
   DECORATION_ACTIONS,
@@ -133,6 +136,10 @@ describe('MembersService', () => {
     save: jest.fn(),
     create: jest.fn((x: unknown) => x),
   };
+  // Social links are READ through this repo and WRITTEN through the transaction
+  // manager above (`txRepo`), which is why only `find` is needed here — the
+  // delete-then-insert replace never touches the injected repository directly.
+  const socialLinkRepo = { find: jest.fn() };
   const deletionRepo = { findOne: jest.fn(), save: jest.fn(), create: jest.fn((x: unknown) => x) };
   const regimentRepo = { findOne: jest.fn() };
   const audit = { record: jest.fn() };
@@ -161,6 +168,10 @@ describe('MembersService', () => {
   };
   const storage = {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+    // Account deletion purges the departed member's avatar/banner objects
+    // (T-0215) — the bytes stay publicly fetchable otherwise, and the path
+    // embeds the member id that is also the profile URL.
+    deleteObject: jest.fn().mockResolvedValue(undefined),
   };
   // Capability gate for self-OR-admin service-record reads (T-0101).
   const authz = { can: jest.fn() };
@@ -169,11 +180,23 @@ describe('MembersService', () => {
     listAttendedByMember: jest.fn(),
     listRsvpsByMember: jest.fn(),
   };
+  // Vanity-handle rules (T-0215). `claimFor` resolving to null is "no handle was
+  // released", which is what every test in this file needs.
+  const usernames = {
+    claimFor: jest.fn().mockResolvedValue(null),
+    check: jest.fn().mockResolvedValue({ available: true }),
+    holdAfterRelease: jest.fn().mockResolvedValue(undefined),
+    blockPermanently: jest.fn().mockResolvedValue(undefined),
+    isDuplicateHandleError: jest.fn().mockReturnValue(false),
+    renameCooldownFor: jest.fn().mockReturnValue(null),
+  };
+  const avatars = { invalidate: jest.fn(), pathFor: jest.fn(() => '/api/avatar') };
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    // Default: nobody holds medals unless a test says otherwise.
+    // Default: nobody holds medals or social links unless a test says otherwise.
     memberMedalRepo.find.mockResolvedValue([]);
+    socialLinkRepo.find.mockResolvedValue([]);
     memberMedalRepo.save.mockImplementation((x: unknown) => Promise.resolve(x));
     serviceRecordRepo.save.mockImplementation((x: unknown) => Promise.resolve(x));
     regimentRepo.findOne.mockResolvedValue({ id: REGIMENT, ownerMemberId: 'owner-member' });
@@ -208,6 +231,7 @@ describe('MembersService', () => {
         { provide: getRepositoryToken(Medal), useValue: medalRepo },
         { provide: getRepositoryToken(MemberMedal), useValue: memberMedalRepo },
         { provide: getRepositoryToken(ServiceRecordEntry), useValue: serviceRecordRepo },
+        { provide: getRepositoryToken(MemberSocialLink), useValue: socialLinkRepo },
         { provide: getRepositoryToken(AccountDeletionRequest), useValue: deletionRepo },
         { provide: getRepositoryToken(Regiment), useValue: regimentRepo },
         { provide: AuditService, useValue: audit },
@@ -217,6 +241,10 @@ describe('MembersService', () => {
         { provide: StorageService, useValue: storage },
         { provide: AuthzService, useValue: authz },
         { provide: EventsService, useValue: eventsService },
+        // Handle rules and the avatar proxy cache (T-0215). Neither is exercised
+        // by the admin-action tests below; UsernameService has its own spec.
+        { provide: UsernameService, useValue: usernames },
+        { provide: MemberAvatarService, useValue: avatars },
       ],
     }).compile();
 
@@ -537,6 +565,234 @@ describe('MembersService', () => {
       await expect(
         service.updateSelf('member-1', { inGameName: 'X' }, user({ memberId: 'member-1' })),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    /**
+     * The reason this endpoint needs no role guard, written down as a test so
+     * nobody "hardens" it by adding one. An applicant has NO members row — it is
+     * created by ApplicationsService.approve — so their session's `memberId` is
+     * null and cannot equal any id in the path. The self check is the guard.
+     */
+    it('is unreachable by an applicant, who has no member row for the id to match', async () => {
+      await expect(
+        service.updateSelf(
+          'member-1',
+          { bio: 'Let me in' },
+          user({ memberId: null, role: MemberRole.Applicant }),
+        ),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(memberRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    // ── Bio + social links (T-0216) ──────────────────────────────────────────
+    describe('bio', () => {
+      beforeEach(() => {
+        memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
+        attendeeRepo.count.mockResolvedValue(0);
+      });
+
+      it('trims the bio before persisting it', async () => {
+        // Trimmed in the SERVICE, not the DTO — the house rule gallery.service.ts
+        // follows for a caption.
+        memberRepo.findOne.mockResolvedValue(buildMember());
+
+        await service.updateSelf(
+          'member-1',
+          { bio: '   Line infantry, mostly.  ' },
+          user({ memberId: 'member-1' }),
+        );
+
+        const saved = memberRepo.save.mock.calls[0][0] as Member;
+        expect(saved.bio).toBe('Line infantry, mostly.');
+      });
+
+      it('stores a whitespace-only bio as null, so "blank" has one representation', async () => {
+        memberRepo.findOne.mockResolvedValue(buildMember({ bio: 'Something' }));
+
+        await service.updateSelf('member-1', { bio: '  \n\t ' }, user({ memberId: 'member-1' }));
+
+        const saved = memberRepo.save.mock.calls[0][0] as Member;
+        expect(saved.bio).toBeNull();
+      });
+
+      it('clears the bio when null is sent explicitly', async () => {
+        memberRepo.findOne.mockResolvedValue(buildMember({ bio: 'Something' }));
+
+        await service.updateSelf('member-1', { bio: null }, user({ memberId: 'member-1' }));
+
+        const saved = memberRepo.save.mock.calls[0][0] as Member;
+        expect(saved.bio).toBeNull();
+      });
+
+      it('leaves the stored bio untouched when the field is absent', async () => {
+        // `undefined` is "I said nothing about my bio", which is a different
+        // instruction from `null` ("clear it") — a PATCH must not erase a field
+        // the caller never mentioned.
+        memberRepo.findOne.mockResolvedValue(buildMember({ bio: 'Existing' }));
+
+        await service.updateSelf(
+          'member-1',
+          { inGameName: 'NewIGN' },
+          user({ memberId: 'member-1' }),
+        );
+
+        const saved = memberRepo.save.mock.calls[0][0] as Member;
+        expect(saved.bio).toBe('Existing');
+      });
+    });
+
+    describe('social links', () => {
+      beforeEach(() => {
+        memberRepo.findOne.mockResolvedValue(buildMember());
+        memberRepo.save.mockImplementation((m: Member) => Promise.resolve(m));
+        attendeeRepo.count.mockResolvedValue(0);
+      });
+
+      it('replaces the whole set: delete-then-insert, precedence from the registry', async () => {
+        await service.updateSelf(
+          'member-1',
+          // Submitted OUT of registry order on purpose: the stored precedence is
+          // the registry's index (twitch 0, x 4), not the order the member typed.
+          {
+            socialLinks: [
+              { platform: 'x', handle: 'lordpanda' },
+              { platform: 'twitch', handle: 'LordPanda' },
+            ],
+          },
+          user({ memberId: 'member-1' }),
+        );
+
+        expect(txRepo.delete).toHaveBeenCalledWith({ memberId: 'member-1' });
+        expect(txRepo.save).toHaveBeenCalledWith({
+          memberId: 'member-1',
+          platform: 'x',
+          handle: 'lordpanda',
+          precedence: 4,
+        });
+        expect(txRepo.save).toHaveBeenCalledWith({
+          memberId: 'member-1',
+          platform: 'twitch',
+          handle: 'LordPanda',
+          precedence: 0,
+        });
+      });
+
+      it('an empty array takes every published link down', async () => {
+        // The operation that matters most on a crawlable page: a member must be
+        // able to un-publish, which only a wholesale replace can express.
+        await service.updateSelf('member-1', { socialLinks: [] }, user({ memberId: 'member-1' }));
+
+        expect(txRepo.delete).toHaveBeenCalledWith({ memberId: 'member-1' });
+        expect(txRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('leaves the stored links alone when the field is absent', async () => {
+        await service.updateSelf(
+          'member-1',
+          { inGameName: 'NewIGN' },
+          user({ memberId: 'member-1' }),
+        );
+
+        expect(memberRepo.manager.transaction).not.toHaveBeenCalled();
+        expect(txRepo.delete).not.toHaveBeenCalled();
+      });
+
+      it('normalises a pasted handle — one leading @, one trailing / — before storage', async () => {
+        await service.updateSelf(
+          'member-1',
+          { socialLinks: [{ platform: 'twitch', handle: '  @LordPanda/ ' }] },
+          user({ memberId: 'member-1' }),
+        );
+
+        // Case PRESERVED (the member sees what they typed); sigil and slash gone.
+        expect(txRepo.save).toHaveBeenCalledWith(
+          expect.objectContaining({ platform: 'twitch', handle: 'LordPanda' }),
+        );
+      });
+
+      it('rejects two links for one platform, naming it, and writes nothing', async () => {
+        // UNIQUE (member, platform) would refuse the second row as an opaque
+        // 500; and neither entry is more "the" account than the other, so
+        // last-wins would publish one the member did not choose.
+        await expect(
+          service.updateSelf(
+            'member-1',
+            {
+              socialLinks: [
+                { platform: 'twitch', handle: 'LordPanda' },
+                { platform: 'twitch', handle: 'LordPandaLive' },
+              ],
+            },
+            user({ memberId: 'member-1' }),
+          ),
+        ).rejects.toMatchObject({
+          constructor: BadRequestException,
+          message: expect.stringContaining('Twitch'),
+        });
+
+        // Validated BEFORE any write: the in-game name in the same payload is
+        // not half-applied on the way to the rejection.
+        expect(memberRepo.save).not.toHaveBeenCalled();
+        expect(txRepo.delete).not.toHaveBeenCalled();
+      });
+
+      it('rejects a handle its platform refuses, naming the platform', async () => {
+        // 'ab' is under Twitch's 4-character floor. The pattern is what makes
+        // the composed URL safe to publish, so this is the check the whole
+        // handles-not-URLs decision rests on.
+        await expect(
+          service.updateSelf(
+            'member-1',
+            { socialLinks: [{ platform: 'twitch', handle: 'ab' }] },
+            user({ memberId: 'member-1' }),
+          ),
+        ).rejects.toMatchObject({
+          constructor: BadRequestException,
+          message: expect.stringContaining('Twitch'),
+        });
+
+        expect(memberRepo.save).not.toHaveBeenCalled();
+        expect(txRepo.delete).not.toHaveBeenCalled();
+      });
+
+      it('reports the platform that failed, not the first one in the payload', async () => {
+        await expect(
+          service.updateSelf(
+            'member-1',
+            {
+              socialLinks: [
+                { platform: 'twitch', handle: 'LordPanda' },
+                { platform: 'medal', handle: '!' },
+              ],
+            },
+            user({ memberId: 'member-1' }),
+          ),
+        ).rejects.toMatchObject({ message: expect.stringContaining('Medal.tv') });
+      });
+
+      it('returns the links on the PATCH response, composed server-side', async () => {
+        // The response is what the profile re-renders from, so the write path
+        // has to project the links it just replaced rather than leave the
+        // client to refetch.
+        socialLinkRepo.find.mockResolvedValue([
+          { memberId: 'member-1', platform: 'twitch', handle: 'LordPanda', precedence: 0 },
+        ]);
+
+        const dto = await service.updateSelf(
+          'member-1',
+          { socialLinks: [{ platform: 'twitch', handle: 'LordPanda' }] },
+          user({ memberId: 'member-1' }),
+        );
+
+        expect(dto.socialLinks).toEqual([
+          {
+            platform: 'twitch',
+            label: 'Twitch',
+            handle: 'LordPanda',
+            url: 'https://www.twitch.tv/LordPanda',
+          },
+        ]);
+      });
     });
   });
 
@@ -1681,6 +1937,36 @@ describe('MembersService', () => {
         expect.objectContaining({ action: 'member.deletion.execute' }),
       );
       expect(sessionContext.invalidateSessions).toHaveBeenCalledWith('identity-1');
+    });
+
+    /**
+     * T-0216 — the erasure half of bio + social links, and a real bug if it is
+     * missed. `member_social_links` carries ON DELETE CASCADE, but the member
+     * row is SOFT-deleted, so the constraint never fires: the rows have to be
+     * hard-deleted by hand, inside the same transaction, or a departed member's
+     * accounts on seven other services outlive the erasure they confirmed.
+     */
+    it('executeSelfDeletion nulls the bio and hard-deletes the social links (T-0216)', async () => {
+      deletionRepo.findOne.mockResolvedValue({
+        id: 'req-1',
+        memberId: 'member-1',
+        status: AccountDeletionStatus.Confirmed,
+        executedAt: null as Date | null,
+      });
+      deletionRepo.save.mockImplementation((r: unknown) => Promise.resolve(r));
+      const member = buildMember({
+        discordIdentityId: 'identity-1',
+        bio: 'Cavalry, mostly. Ask me about the Waterloo campaign.',
+      });
+      memberRepo.findOne.mockResolvedValue(member);
+
+      await service.executeSelfDeletion(user({ memberId: 'member-1' }), null);
+
+      // The most personal free text on the row, and published on a crawlable page.
+      expect(member.bio).toBeNull();
+      // Hard-deleted through the transaction manager, beside the soft-remove.
+      expect(txRepo.delete).toHaveBeenCalledWith({ memberId: 'member-1' });
+      expect(txRepo.softRemove).toHaveBeenCalledWith(member);
     });
 
     it('executeSelfDeletion 404s when there is no confirmed request', async () => {

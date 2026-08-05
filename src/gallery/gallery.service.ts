@@ -111,6 +111,37 @@ export class GalleryService {
     return this.listItems(settings.regimentId, GalleryStatus.Approved, query, null);
   }
 
+  /**
+   * The approved items submitted by one member, for their PUBLIC profile
+   * (T-0215). Honours `publicGallery` the same way {@link findPublic} does.
+   *
+   * This closes a real gap rather than adding a convenience: until now the
+   * profile's Gallery tab fetched the whole public feed and filtered it by
+   * author in the browser, capped at 6, with a comment admitting it was waiting
+   * for exactly this endpoint. On a public page that stopgap would have shipped
+   * the entire gallery to every profile visit.
+   */
+  async findPublicByAuthor(
+    authorMemberId: string,
+    query: GalleryQueryDto,
+  ): Promise<PaginatedResponseDto<GalleryItemDto>> {
+    const settings = await this.resolveSettings();
+    if (settings && settings.publicGallery === false) {
+      throw new ForbiddenException('The gallery is private');
+    }
+    if (!settings) {
+      return new PaginatedResponseDto([], 0, query.page, query.limit);
+    }
+    return this.listItems(
+      settings.regimentId,
+      GalleryStatus.Approved,
+      query,
+      null,
+      false,
+      authorMemberId,
+    );
+  }
+
   /** Public view of a single approved item (404 otherwise). Honours `publicGallery`. */
   async findOnePublic(id: string): Promise<GalleryItemDto> {
     const settings = await this.resolveSettings();
@@ -546,6 +577,7 @@ export class GalleryService {
     query: GalleryQueryDto,
     viewerMemberId: string | null,
     includeApprover = false,
+    authorMemberId?: string,
   ): Promise<PaginatedResponseDto<GalleryItemDto>> {
     const qb = this.items
       .createQueryBuilder('item')
@@ -563,6 +595,9 @@ export class GalleryService {
 
     if (query.type) {
       qb.andWhere('item.type = :type', { type: query.type });
+    }
+    if (authorMemberId) {
+      qb.andWhere('item.authorMemberId = :authorMemberId', { authorMemberId });
     }
 
     const [rows, total] = await qb
