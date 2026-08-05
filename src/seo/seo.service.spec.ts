@@ -1,6 +1,10 @@
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { MemberRole } from '../common/enums';
+import { EventDto } from '../events/dto/event.dto';
+import { EventsService } from '../events/events.service';
+import { GalleryService } from '../gallery/gallery.service';
+import { GalleryShareService } from '../gallery/share/gallery-share.service';
 import { PublicMemberDto } from '../members/dto/public-member.dto';
 import { PublicMembersService } from '../members/public/public-members.service';
 import { socialProfileUrl } from '../members/social-platforms';
@@ -30,6 +34,13 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
   let service: SeoService;
   const members = { findByHandle: jest.fn(), list: jest.fn(), listForSitemap: jest.fn() };
   const regiments = { getProfile: jest.fn() };
+  // The three collaborators the widened module took on (T-0293). None of them is
+  // touched by a profile render, so they are here purely to satisfy the
+  // injector — a spec that stubbed them with behaviour would be asserting
+  // something this file does not test.
+  const events = { listPublic: jest.fn(), getPublic: jest.fn() };
+  const galleryShare = { renderItem: jest.fn(), renderIndex: jest.fn(), renderFallback: jest.fn() };
+  const gallery = { findPublic: jest.fn() };
 
   /**
    * A public profile, built as a literal rather than through
@@ -58,6 +69,31 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
     ...overrides,
   });
 
+  /**
+   * A public event projection. `as EventDto` because `listPublic`/`getPublic`
+   * leave every member-only field undefined, so a structurally complete literal
+   * would assert a shape the shell never actually receives.
+   */
+  const eventDto = (overrides: Record<string, unknown> = {}): EventDto =>
+    ({
+      id: 'ccc333DDD444',
+      title: 'Drill night',
+      description: 'Formation drill.',
+      bannerUrl: null,
+      startsAt: '2026-09-12T19:00:00.000Z',
+      endsAt: null,
+      timezone: 'UTC',
+      status: 'upcoming',
+      isRecurring: false,
+      outcome: null,
+      twitchUrl: null,
+      platforms: [],
+      tags: [],
+      hasServerName: false,
+      hasServerPassword: false,
+      ...overrides,
+    }) as EventDto;
+
   const link = (platform: string, label: string, handle: string) => ({
     platform,
     label,
@@ -79,6 +115,9 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
         SeoService,
         { provide: PublicMembersService, useValue: members },
         { provide: RegimentsService, useValue: regiments },
+        { provide: EventsService, useValue: events },
+        { provide: GalleryShareService, useValue: galleryShare },
+        { provide: GalleryService, useValue: gallery },
         {
           provide: ConfigService,
           useValue: { get: jest.fn((key: string) => (key === 'frontend' ? { url: SITE } : 'api')) },
@@ -191,7 +230,207 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       expect(html).not.toContain('<meta name="description" content="I mostly play the drum');
     });
   });
+
+  /**
+   * T-0293. The card a member's profile turns into when it is pasted somewhere.
+   *
+   * The image choice is the whole of it: Discord inspects the real file, so a
+   * square avatar asked to fill a wide card is demoted to a thumbnail anyway
+   * and the result reads as broken. Declaring the layout the asset can actually
+   * fill is the difference between a deliberate card and a failed one.
+   */
+  describe('the profile card', () => {
+    it('uses the BANNER and asks for the wide card when the member has one', async () => {
+      const html = await render(profile({ bannerUrl: 'https://cdn.example/banner.png' }));
+
+      expect(html).toContain(
+        '<meta property="og:image" content="https://cdn.example/banner.png" />',
+      );
+      expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
+    });
+
+    it('uses the avatar and asks for the SMALL card when there is no banner', async () => {
+      const html = await render(profile({ avatarUrl: '/api/public/members/abc123XYZ456/avatar' }));
+
+      // The avatar is a path on THIS origin (the proxy that keeps a member's
+      // Discord snowflake out of the markup), so it has to be made absolute —
+      // an unfurler will not resolve a relative one.
+      expect(html).toContain(
+        `<meta property="og:image" content="${SITE}/api/public/members/abc123XYZ456/avatar" />`,
+      );
+      expect(html).toContain('<meta name="twitter:card" content="summary" />');
+    });
+
+    it('still shows the site banner for a member with neither', async () => {
+      const html = await render(profile({ avatarUrl: null, bannerUrl: null }));
+
+      expect(html).toContain(
+        `<meta property="og:image" content="${SITE}/assets/images/banner.png" />`,
+      );
+    });
+
+    it('paints the Discord embed stripe and titles itself the way the SPA does', async () => {
+      const html = await render(profile());
+
+      expect(html).toContain('<meta name="theme-color" content="#c69a45" />');
+      // `|`, not an em dash: `SeoService.apply()` in the SPA builds the same
+      // string, and two titles for one URL is the divergence to avoid.
+      expect(html).toContain('<title>Amitoj (@panda) | Lords Regiment</title>');
+    });
+  });
+
+  /**
+   * T-0293. The pages that had no shell at all until now — which is to say, the
+   * pages a regiment actually shares.
+   */
+  describe('the pages added in T-0293', () => {
+    it('renders the landing page from the LIVE regiment profile', async () => {
+      regiments.getProfile.mockResolvedValue({
+        name: 'The Lords',
+        missionStatement: 'Discipline, honour, and the line.',
+        crestUrl: 'https://cdn.example/crest.png',
+        bannerUrl: null,
+        establishedYear: 2023,
+        memberCount: 48,
+        discordInviteUrl: 'https://discord.gg/abc',
+        presentation: { heroBannerUrl: 'https://cdn.example/hero.png' },
+      });
+
+      const html = await service.renderHome();
+      const ld = jsonLdAll(html);
+
+      expect(html).toContain('<title>The Lords</title>');
+      expect(html).toContain(
+        '<meta name="description" content="Discipline, honour, and the line." />',
+      );
+      // `/home`, not `/`: the router redirects the root there, so that is the
+      // URL both surfaces declare canonical.
+      expect(html).toContain(`<link rel="canonical" href="${SITE}/home" />`);
+      expect(html).toContain('<meta property="og:image" content="https://cdn.example/hero.png" />');
+      expect(html).toContain('<dt>Members</dt><dd>48</dd>');
+      expect(ld[0]['@type']).toBe('Organization');
+      expect(ld[0].logo).toBe('https://cdn.example/crest.png');
+      // The regiment's OWN published account — unlike a member's social handle,
+      // which nothing verifies and which therefore never becomes a sameAs.
+      expect(ld[0].sameAs).toEqual(['https://discord.gg/abc']);
+    });
+
+    it('survives a regiment row that does not exist yet', async () => {
+      regiments.getProfile.mockRejectedValue(new Error('no regiment'));
+
+      const html = await service.renderHome();
+
+      expect(html).toContain('<title>Lords Regiment</title>');
+      expect(html).toContain(
+        `<meta property="og:image" content="${SITE}/assets/images/banner.png" />`,
+      );
+    });
+
+    it('gives the calendar the NEXT event’s banner as its card', async () => {
+      events.listPublic.mockResolvedValue({
+        data: [
+          eventDto({ id: 'aaa111BBB222', status: 'previous', bannerUrl: 'https://cdn/old.png' }),
+          eventDto({ id: 'ccc333DDD444', status: 'upcoming', bannerUrl: 'https://cdn/next.png' }),
+        ],
+        meta: { page: 1, limit: 50, total: 2, totalPages: 1, hasNext: false, hasPrev: false },
+      });
+
+      const html = await service.renderEvents(1);
+
+      expect(html).toContain('<meta property="og:image" content="https://cdn/next.png" />');
+      expect(html).toContain(`<a href="${SITE}/events/ccc333DDD444">Drill night</a>`);
+      expect(html).toContain('<title>Events &amp; Orders | Lords Regiment</title>');
+    });
+
+    it('renders one event with its banner, its own timezone and Event structured data', async () => {
+      events.getPublic.mockResolvedValue(
+        eventDto({
+          id: 'ccc333DDD444',
+          title: 'Rhine crossing',
+          description: 'Massed line battle, 64 per side.',
+          bannerUrl: 'https://cdn.example/rhine.png',
+          startsAt: '2026-09-12T19:00:00.000Z',
+          endsAt: '2026-09-12T22:00:00.000Z',
+          timezone: 'Europe/London',
+          tags: ['line-battle'],
+        }),
+      );
+
+      const html = await service.renderEvent('ccc333DDD444');
+      const ld = jsonLdAll(html)[0];
+
+      expect(html).toContain('<title>Rhine crossing | Lords Regiment</title>');
+      expect(html).toContain(
+        '<meta name="description" content="Massed line battle, 64 per side." />',
+      );
+      expect(html).toContain(
+        '<meta property="og:image" content="https://cdn.example/rhine.png" />',
+      );
+      // 19:00Z is 20:00 in London in September, and the zone is NAMED so the
+      // reader cannot mistake it for their own.
+      expect(html).toContain('<dt>Starts</dt><dd>12 September 2026 at 20:00 BST</dd>');
+      expect(ld['@type']).toBe('Event');
+      // The absolute instant, never the rendered wall clock.
+      expect(ld.startDate).toBe('2026-09-12T19:00:00.000Z');
+      expect(ld.organizer).toEqual({
+        '@type': 'Organization',
+        name: 'Lords Regiment',
+        url: SITE,
+      });
+    });
+
+    it('falls back to a generated line naming the date when an event has no description', async () => {
+      events.getPublic.mockResolvedValue(
+        eventDto({ description: null, startsAt: '2026-09-12T19:00:00.000Z', timezone: 'UTC' }),
+      );
+
+      expect(await service.renderEvent('ccc333DDD444')).toContain(
+        '<meta name="description" content="Drill night — a Lords Regiment operation on ' +
+          '12 September 2026." />',
+      );
+    });
+
+    it('lists every event and gallery item in the sitemap', async () => {
+      members.listForSitemap.mockResolvedValue([]);
+      events.listPublic.mockResolvedValue({
+        data: [eventDto({ id: 'ccc333DDD444' })],
+        meta: { page: 1, limit: 100, total: 1, totalPages: 1, hasNext: false, hasPrev: false },
+      });
+      gallery.findPublic.mockResolvedValue({
+        data: [{ id: 'eee555FFF666' }],
+        meta: { page: 1, limit: 100, total: 1, totalPages: 1, hasNext: false, hasPrev: false },
+      });
+
+      const xml = await service.renderSitemap();
+
+      expect(xml).toContain(`<loc>${SITE}/events/ccc333DDD444</loc>`);
+      expect(xml).toContain(`<loc>${SITE}/gallery/eee555FFF666</loc>`);
+      // `/home`, not `/` — submitting a URL that immediately redirects is a
+      // wasted entry.
+      expect(xml).toContain(`<loc>${SITE}/home</loc>`);
+      expect(xml).not.toContain(`<loc>${SITE}/</loc>`);
+    });
+
+    it('drops a section it cannot read rather than failing the whole sitemap', async () => {
+      members.listForSitemap.mockResolvedValue([]);
+      events.listPublic.mockRejectedValue(new Error('Events are private'));
+      gallery.findPublic.mockRejectedValue(new Error('The gallery is private'));
+
+      const xml = await service.renderSitemap();
+
+      expect(xml).toContain(`<loc>${SITE}/roster</loc>`);
+      expect(xml).not.toContain('/events/');
+    });
+  });
 });
+
+/** Every ld+json block in the document, parsed. */
+function jsonLdAll(html: string): Record<string, unknown>[] {
+  const match = html.match(/<script type="application\/ld\+json">(.*?)<\/script>/s);
+  if (!match) throw new Error('no ld+json block in the rendered shell');
+  const parsed: unknown = JSON.parse(match[1].replace(/\\u003c/g, '<'));
+  return (Array.isArray(parsed) ? parsed : [parsed]) as Record<string, unknown>[];
+}
 
 function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;

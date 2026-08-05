@@ -92,24 +92,17 @@
 	@www host www.{$APEX_HOST}
 	redir @www https://{$APEX_HOST}{uri} permanent
 
-	# ── Link unfurlers only: server-rendered Open Graph cards (T-0197) ──────────
+	# ── The legacy gallery share path (T-0197, superseded by @crawler in T-0293) ─
 	#
-	# A share link is an SPA route, and the SPA is a static client-side build, so
-	# a crawler that does not run JavaScript sees the same generic <head> for
-	# every item — one title, one description, no image. This sends KNOWN
-	# unfurler user-agents (and nobody else) to the API's share shell, which
-	# renders per-item og:*/twitter:* tags. Humans keep getting the real app.
+	# `/api/share/gallery/:id` and `/api/seo/gallery/:id` render from the SAME
+	# service, so this block and the one below produce identical bytes. It is kept
+	# for exactly one reason: this file is HAND-SYNCED to the box, so between an
+	# API deploy and someone SSHing in, whichever version of the Caddyfile is
+	# live has to keep working. Delete it only once the box is confirmed to be
+	# running the config below.
 	#
-	# ⚠️ THIS BLOCK MUST STAY ABOVE `handle /api/*`. Sibling `handle` blocks are
-	# mutually exclusive and evaluated in file order; below it, it would still
-	# work for /gallery/* (which does not match /api/*) but the ordering would be
-	# accidental rather than intended.
-	#
-	# ⚠️ UA-varying response on a path Cloudflare could be told to cache. Nothing
-	# caches /gallery/* today (nginx sends no-store, and the CF cache rules cover
-	# only hashed assets, /, /index.html and /api/*). If a cache rule is ever
-	# added for it, this needs `Vary: User-Agent` or humans will be served the
-	# crawler shell.
+	# ⚠️ MUST STAY ABOVE `handle /api/*`. Sibling `handle` blocks are mutually
+	# exclusive and evaluated in file order.
 	@unfurler {
 		path /gallery/*
 		header_regexp User-Agent "(?i)(discordbot|facebookexternalhit|twitterbot|whatsapp|slackbot|telegrambot|linkedinbot|redditbot|skypeuripreview|iframely|embedly|googlebot|bingbot|applebot|mastodon|matrix|signal)"
@@ -119,28 +112,50 @@
 		reverse_proxy api:3000
 	}
 
-	# ── The public roster and member profiles, for search engines (T-0215) ──────
+	# ── Every public page, for search engines and unfurlers (T-0215/T-0293) ─────
 	#
-	# Same trick as @unfurler above, different destination and a different reason.
-	# /roster and /u/* are SPA routes, so a crawler receives one <app-root></app-root>
-	# that is byte-identical for every member on the roster — no name, no rank, no
-	# medals, nothing to index. These requests are rewritten to /api/seo/*, which
-	# renders the same facts the SPA renders, as real HTML with rel=canonical,
-	# og:*, JSON-LD, crawlable <a href> links, and — crucially — HONEST STATUS
-	# CODES. The SPA cannot return one: its wildcard route redirects every unknown
-	# URL to /home and nginx 200s everything, so a deleted profile is a soft-404.
+	# These are all SPA routes, and the SPA is a static client-side build, so a
+	# client that does not run JavaScript receives one <app-root></app-root> that
+	# is byte-identical for every member, every event and every dispatch on the
+	# site — no name, no rank, no banner, nothing to index and nothing to unfurl.
+	# NO unfurler runs JavaScript, so this rewrite is not an optimisation for
+	# them; it is the only thing that makes a link preview exist at all.
+	#
+	# These requests go to /api/seo/*, which renders the same facts the SPA
+	# renders, as real HTML with rel=canonical, og:*/twitter:*, JSON-LD, crawlable
+	# <a href> links, and — crucially — HONEST STATUS CODES. The SPA cannot return
+	# one: nginx 200s everything, so a deleted profile is a soft-404.
+	#
+	# ⚠️ THE PATH LIST IS EXACT, AND THE BARE FORMS ARE NOT REDUNDANT. Caddy's
+	# path matcher treats slashes as significant: `/gallery/*` matches `/gallery/`
+	# and `/gallery/abc` but NOT `/gallery`. Both spellings of every list page
+	# have to be written out, which is why `/roster` already sat beside
+	# `/roster/*` before this grew.
+	#
+	# ⚠️ `/` IS DELIBERATELY ABSENT, and `/home` is here in its place. They render
+	# the same landing component, but `/` is the one path a Cloudflare Cache Rule
+	# covers — and Cloudflare honours `Vary` for `Accept-Encoding` and nothing
+	# else, so a UA-varying `/` would eventually put this crawler document in the
+	# edge cache and serve it to every human. `/home` is the URL the router
+	# redirects `/` to and the one both surfaces declare canonical, so nothing is
+	# lost. Do not add `/` here without changing the Cloudflare rule first.
+	#
+	# ⚠️ Same caveat for the rest: if a Cloudflare cache rule is ever added for
+	# /roster, /u/*, /events*, /gallery* or /home, it must key on User-Agent or
+	# humans get the shell. The API already sends `Vary: User-Agent`.
 	#
 	# ⚠️ WHAT IS SERVED HERE MUST STAY EQUIVALENT TO WHAT A HUMAN SEES. Both come
-	# from PublicMembersService and its one exclusion predicate, which is what
+	# from the same services and the same exclusion predicates, which is what
 	# keeps this dynamic rendering rather than cloaking. Do not "optimise" the
 	# shell down to bare meta tags.
 	#
 	# ⚠️ MUST STAY ABOVE `handle /api/*`, like @unfurler, and for the same reason.
 	#
-	# ⚠️ Same UA-varying caveat: if a Cloudflare cache rule is ever added for
-	# /roster or /u/*, this needs `Vary: User-Agent` or humans get the shell.
+	# ⚠️ SHIP THE API FIRST. Every path listed here needs a route under
+	# /api/seo/*; one that does not have one returns a JSON 404, which an
+	# unfurler renders as a broken preview.
 	@crawler {
-		path /u/* /roster /roster/*
+		path /u/* /roster /roster/* /events /events/* /gallery /gallery/* /home
 		header_regexp User-Agent "(?i)(discordbot|facebookexternalhit|twitterbot|whatsapp|slackbot|telegrambot|linkedinbot|redditbot|skypeuripreview|iframely|embedly|googlebot|bingbot|applebot|duckduckbot|yandexbot|mastodon|matrix|signal)"
 	}
 	handle @crawler {
