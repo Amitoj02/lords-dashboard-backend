@@ -206,14 +206,24 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d caddy
 Only caddy is recreated, so this costs no API restart — no gateway reconnect, no
 paused outbox.
 
-**4 — verify.** Four checks, and the fourth is the one people skip:
+**4 — verify.** Five checks, and the last is the one people skip:
 
 ```bash
 GB='Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'
+DB='Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'
 
 # Real server-rendered HTML, not the empty shell.
 curl -sS -A "$GB" https://lordsofholdfast.com/roster      | grep -c '<app-root'      # 0
 curl -sS -A "$GB" https://lordsofholdfast.com/u/@<handle> | grep -o '<title>[^<]*'   # the member's name
+
+# Every page the matcher now covers has a shell behind it (T-0293). A path
+# listed in the Caddyfile with no route under /api/seo/* returns a JSON 404,
+# which an unfurler renders as a broken preview — so this loop is what proves
+# the API tag and the edge config are in step.
+for p in /home /roster /events /gallery; do
+  printf '%-10s ' "$p"
+  curl -sS -A "$DB" "https://lordsofholdfast.com$p" | grep -o '<title>[^<]*'
+done
 
 # The sitemap is generated, and must not arrive as text/html.
 curl -sSI https://lordsofholdfast.com/sitemap.xml | grep -i '^content-type'          # application/xml
@@ -223,13 +233,34 @@ curl -sSI https://www.lordsofholdfast.com/roster | grep -iE '^(HTTP/|location:)'
 
 # ⚠️ AND humans must still get the app. A matcher that is too broad serves the
 # crawler shell to everyone, and that looks perfectly fine until you read it.
-curl -sS https://lordsofholdfast.com/roster | grep -c '<app-root'                    # 1
+# Check the paths the matcher GREW into, not just the one that was there before.
+curl -sS https://lordsofholdfast.com/roster  | grep -c '<app-root'                   # 1
+curl -sS https://lordsofholdfast.com/home    | grep -c '<app-root'                   # 1
+curl -sS https://lordsofholdfast.com/gallery | grep -c '<app-root'                   # 1
 ```
 
 A 404 on the profile check is not necessarily a failure. `/api/seo/u/:handle`
 returns **honest status codes** — that is most of why it exists — and 404 is what
 an Applicant, or a pending, banned, suspended or never-named member is supposed
-to produce. Pick a handle you can already see signed-out.
+to produce. Pick a handle you can already see signed-out. `/api/seo/events/:id`
+behaves the same way. `/api/seo/gallery/:id` deliberately does NOT: it always
+answers 200 with a `noindex` generic card, because a Discord unfurl of a 404
+body renders as a broken preview rather than as "this one is gone".
+
+**⚠️ `/` is deliberately NOT in the matcher, and putting it there is not a
+one-line change.** It renders the same landing page as `/home`, but it is the one
+path a Cloudflare Cache Rule covers — and Cloudflare honours `Vary` for
+`Accept-Encoding` and nothing else. A UA-varying `/` therefore ends up with the
+crawler document in the edge cache, served to every human who opens the front
+page. `/home` is what `/` redirects to and what both surfaces declare canonical,
+so nothing is lost by leaving the root alone. Change the Cloudflare rule first if
+this ever has to move.
+
+To see what a share really looks like before announcing it, paste the URL into
+Discord's own tool at `https://discord.com/developers/embed-debugger?url=…`
+(sign-in required). Discord caches an unfurl for roughly 30 minutes with no
+purge, so append a throwaway query string when re-testing a URL you have already
+pasted somewhere.
 
 **5 — roll back** by restoring the previous pair of files. Nothing else moves.
 

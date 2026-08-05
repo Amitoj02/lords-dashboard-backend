@@ -42,17 +42,19 @@ export class GalleryShareController {
     // render the generic card, not a 400 JSON body that an unfurler would show
     // as a broken link.
     const html = SHORT_ID_REGEX.test(id)
-      ? ((await this.share.renderItem(id)) ?? this.share.renderFallback())
-      : this.share.renderFallback();
+      ? ((await this.share.renderItem(id)) ?? (await this.share.renderFallback()))
+      : await this.share.renderFallback();
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     // Overrides the app-wide `no-store`. Unfurlers cache aggressively anyway and
     // this is public, immutable-ish content; ten minutes keeps a re-titled item
     // from staying stale for long while absorbing a burst of crawlers on one link.
     res.setHeader('Cache-Control', 'public, max-age=600');
-    // The card varies only by id, never by cookie — say so explicitly, since the
-    // response is cacheable and the route is reachable with a session cookie set.
-    res.setHeader('Vary', 'Accept-Encoding');
+    // The card varies only by id, never by cookie. `User-Agent` is named because
+    // the EDGE reached this document by matching one (T-0293): the same URL
+    // returns the Angular shell to a browser, so any shared cache that keeps
+    // this copy without keying on the UA would serve it to humans.
+    res.setHeader('Vary', 'User-Agent, Accept-Encoding');
     res.send(html);
   }
 }
