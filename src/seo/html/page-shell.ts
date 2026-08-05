@@ -6,6 +6,20 @@ export interface ShellLink {
   label: string;
   /** Optional muted second line (rank, date, caption…). */
   meta?: string | null;
+  /**
+   * `rel` for this anchor, omitted entirely when absent (T-0216).
+   *
+   * Every link this shell rendered before now pointed at our own site, where a
+   * `rel` would be noise. Member social links do not: they are the first
+   * MEMBER-AUTHORED outbound links on the origin, so they carry
+   * `rel="nofollow ugc"` — `ugc` says the destination was chosen by a user and
+   * not by us, and `nofollow` stops a member's own profile page from spending
+   * this domain's crawl equity on it. The set of hosts is closed (the seven in
+   * the social-platform registry) and the URL is composed server-side from a
+   * stored handle, so this is reputational hygiene rather than a containment
+   * measure — the containment is that a member cannot name the host at all.
+   */
+  rel?: string;
 }
 
 /** A `<dt>/<dd>` pair in the facts list. */
@@ -164,7 +178,11 @@ function section(input: { heading: string; links: ShellLink[] }): string {
   const items = input.links
     .map((link) => {
       const meta = link.meta ? ` <span>${escapeHtml(link.meta)}</span>` : '';
-      return `      <li><a href="${escapeHtml(link.href)}">${escapeHtml(link.label)}</a>${meta}</li>`;
+      // No `rel` attribute at all when the field is absent, rather than an empty
+      // one: `rel=""` is legal but it is a claim the previous markup never made,
+      // and every existing call site must keep emitting byte-identical HTML.
+      const rel = link.rel ? ` rel="${escapeHtml(link.rel)}"` : '';
+      return `      <li><a href="${escapeHtml(link.href)}"${rel}>${escapeHtml(link.label)}</a>${meta}</li>`;
     })
     .join('\n');
   return `    <h2>${escapeHtml(input.heading)}</h2>\n    <ul>\n${items}\n    </ul>`;

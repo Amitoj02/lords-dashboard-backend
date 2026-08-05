@@ -94,6 +94,19 @@ export class SeoService {
     const name = this.displayName(dto);
     const handleLabel = dto.username ? `@${dto.username}` : null;
 
+    // ── THE BIO IS THE ONLY UNIQUE BODY COPY A PROFILE HAS (T-0216) ──────────
+    // `page-shell.ts` argues at length that a crawler must not be served less
+    // than a human, and the medal citations were this page's answer to the
+    // adjacent worry: that a profile is a THIN page. Everything else here is
+    // generated from structured fields, so every profile says it in the same
+    // words with the nouns swapped — which is what a doorway page looks like.
+    // A bio is hand-written prose that exists on no other URL on the internet,
+    // so it is the single strongest thing this document can carry, and it must
+    // be in the shell because the SPA renders it directly under the name on the
+    // second pass. Trimmed and dropped when blank: the service stores NULL for
+    // whitespace-only, and an empty `<p>` would be markup asserting nothing.
+    const bio = dto.bio?.trim() ?? '';
+
     const facts = [
       { label: 'In-game name', value: dto.inGameName },
       ...(handleLabel ? [{ label: 'Handle', value: handleLabel }] : []),
@@ -114,6 +127,9 @@ export class SeoService {
       subheading: [dto.rank, dto.role].filter(Boolean).join(' · ') || null,
       imageUrl: dto.avatarUrl ? `${this.siteUrl()}${dto.avatarUrl}` : null,
       paragraphs: [
+        // The member's own words lead, as they do in the SPA (the bio is the
+        // paragraph under the name); the generated sentence follows it.
+        ...(bio ? [bio] : []),
         `${name} serves with ${regimentName}, a Holdfast: Nations at War regiment` +
           (dto.rank ? `, at the rank of ${dto.rank}` : '') +
           (dto.joinedAt ? `, since ${this.formatDate(dto.joinedAt)}` : '') +
@@ -130,6 +146,37 @@ export class SeoService {
             href: `${this.siteUrl()}/roster`,
             label: medal.title,
             meta: medal.description ?? this.formatDate(medal.awardedAt),
+          })),
+        },
+        {
+          // ── MEMBER-AUTHORED OUTBOUND LINKS (T-0216) ─────────────────────────
+          // `href` is NOT member input, and that distinction is the entire
+          // reason social links are stored as HANDLES: the DTO carries a URL
+          // composed server-side from the stored handle against one of the
+          // seven hardcoded origins in `members/social-platforms.ts`, so the
+          // set of hosts this page can ever link to is fixed and a member
+          // cannot widen it. What a member controls is the path segment, which
+          // is bounded by that platform's handle pattern.
+          //
+          // They still get `rel="nofollow ugc"`: the destination is a user's
+          // choice, not an editorial endorsement by the regiment, and this
+          // domain should not spend crawl equity on it. For the same reason
+          // they are NOT added to the JSON-LD `Person` as `sameAs`: that
+          // property asserts "this account IS this person", and nothing here
+          // verifies a handle — anyone can type someone else's. An unverified
+          // `sameAs` is a false structured-data claim; an anchor is just a link.
+          //
+          // Nothing is filtered here on purpose. The shell's one job is to say
+          // exactly what the SPA says, so a link dropped HERE would be a link
+          // the crawler misses on pass one and finds on pass two — the precise
+          // disagreement this module exists to avoid. A row whose platform has
+          // no registry entry is dropped once, in the projection that builds
+          // `socialLinks`, and is therefore absent from both surfaces.
+          heading: 'Elsewhere',
+          links: dto.socialLinks.map((link) => ({
+            href: link.url,
+            label: `${link.label} — ${link.handle}`,
+            rel: 'nofollow ugc',
           })),
         },
         {
@@ -232,6 +279,34 @@ export class SeoService {
     return member.username ? `${member.inGameName} (@${member.username})` : member.inGameName;
   }
 
+  /**
+   * The `<meta name="description">` for a profile.
+   *
+   * ── WHY THE BIO IS DELIBERATELY *NOT* IN HERE (T-0216) ──────────────────────
+   * On the merits the bio belongs here: a hand-written sentence outperforms this
+   * generated "Rank in Regiment · N decorations · N events attended" line as a
+   * search snippet, and truncating it to ~160 characters is trivial. It is left
+   * out anyway, and the reason is the equivalence rule at the top of this file.
+   *
+   * The SPA builds a description for the SAME URL, in its own `describe()` used
+   * by `applySeo` in the frontend repo, and Googlebot renders that second pass
+   * and compares it with this one. Two different descriptions for one URL is
+   * exactly the disagreement that makes dynamic rendering look like cloaking —
+   * and the description is worse than the body copy in that respect, because it
+   * is a single short string where a diff is unambiguous rather than prose where
+   * whitespace differs harmlessly. The shell is the copy served to the crawler,
+   * so it is the copy that must not move first.
+   *
+   * Adopting the bio later is one coupled deploy, not a change here: the
+   * frontend's `describe()` has to implement the identical rule first — bio when
+   * non-blank, trimmed, cut at the same character boundary with the same
+   * ellipsis, falling back to this exact generated string when blank — and only
+   * then does this method follow. Anything short of byte-for-byte agreement is
+   * worse than keeping the generated line on both sides.
+   *
+   * The bio still reaches the crawler: it is the first body paragraph in
+   * {@link renderProfile}, which is where unique copy actually earns its keep.
+   */
   private describeProfile(member: PublicMemberDto, regimentName: string): string {
     const parts = [
       member.rank ? `${member.rank} in ${regimentName}` : `Member of ${regimentName}`,

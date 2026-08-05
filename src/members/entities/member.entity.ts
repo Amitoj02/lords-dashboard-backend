@@ -85,6 +85,22 @@ export class Member extends ShortIdEntity {
   @Column({ type: 'varchar', length: 512, nullable: true })
   bannerUrl: string | null;
 
+  /**
+   * Member-authored blurb shown on the public profile (T-0216). NULL means the
+   * member never wrote one — and whitespace-only input is normalised to NULL in
+   * the service, so "blank" has exactly one representation rather than two that
+   * render identically and compare differently.
+   *
+   * `text` rather than a varchar: the LENGTH LIMIT IS A PRODUCT RULE (280
+   * characters, so the blurb stays one paragraph beside the avatar) and product
+   * rules that move belong in the DTO, not in a column type that needs a
+   * migration to relax. There is no sanitizer library in this codebase; the bio
+   * is escaped at RENDER time by `escapeHtml` in `src/seo`, which is where every
+   * other member-authored string is already made safe.
+   */
+  @Column({ type: 'text', nullable: true })
+  bio: string | null;
+
   @Column({ type: 'varchar', length: 40, nullable: true })
   standing: string | null;
 
