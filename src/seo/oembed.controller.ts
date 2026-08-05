@@ -1,8 +1,10 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Response } from 'express';
 import { Public } from '../auth/decorators/public.decorator';
+import { AppConfig } from '../config/configuration';
 
 /**
  * The longest `author_name` this endpoint will echo back.
@@ -61,25 +63,39 @@ const FIELD_LIMIT = 255;
 @ApiExcludeController()
 @Controller('oembed')
 export class OEmbedController {
+  constructor(private readonly config: ConfigService<AppConfig, true>) {}
+
   @Public()
   @Get()
-  // Fetched once per unfurl alongside the HTML, so this shares the shells'
-  // budget rather than getting a tighter one of its own.
-  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  // Fetched once per unfurl alongside the HTML, so it gets the shells' ceiling
+  // rather than a tighter one of its own — see `SHELL_RATE_LIMIT` in
+  // `seo.controller.ts` for why 60 was not enough once the routing went live.
+  @Throttle({ default: { limit: 300, ttl: 60_000 } })
   oembed(
-    @Query('author') author: string | undefined,
-    @Query('author_url') authorUrl: string | undefined,
-    @Query('provider') provider: string | undefined,
-    @Query('provider_url') providerUrl: string | undefined,
+    @Query('author') author: unknown,
+    @Query('author_url') authorUrl: unknown,
+    @Query('provider') provider: unknown,
+    @Query('provider_url') providerUrl: unknown,
     @Res() res: Response,
   ): void {
+    // ── EVERY PARAMETER IS `unknown` UNTIL `str()` HAS SEEN IT ────────────────
+    // These were typed `string | undefined`, which is a claim Express does not
+    // honour: its `qs` parser yields a `string[]` for a repeated key and a plain
+    // object for a bracketed one, and the global ValidationPipe does not coerce
+    // a String-typed `@Query` (it converts only Number and Boolean). So
+    // `?author=a&author=b` reached `.replace` on an array and returned a 500
+    // from a `@Public()` route, and `?author_url=https://ok&author_url=javascript:…`
+    // slipped past the scheme check entirely — `RegExp.test` stringifies its
+    // argument, so the array joined to a string that began with `https://` and
+    // matched, after which the ARRAY was spread into the response.
+    const origin = this.siteOrigin();
     const payload = {
       version: '1.0',
       type: 'link',
-      ...(provider ? { provider_name: clamp(provider) } : {}),
-      ...(providerUrl && isHttpUrl(providerUrl) ? { provider_url: providerUrl } : {}),
-      ...(author ? { author_name: clamp(author) } : {}),
-      ...(authorUrl && isHttpUrl(authorUrl) ? { author_url: authorUrl } : {}),
+      ...field('provider_name', str(provider)),
+      ...urlField('provider_url', str(providerUrl), origin),
+      ...field('author_name', str(author)),
+      ...urlField('author_url', str(authorUrl), origin),
     };
 
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -88,22 +104,69 @@ export class OEmbedController {
     res.setHeader('Cache-Control', 'public, max-age=600');
     res.json(payload);
   }
-}
 
-function clamp(value: string): string {
-  const collapsed = value.replace(/\s+/g, ' ').trim();
-  return collapsed.length > FIELD_LIMIT ? collapsed.slice(0, FIELD_LIMIT) : collapsed;
+  /**
+   * The only origin a URL field may point at.
+   *
+   * `undefined` when the site URL is unset or unparseable, which relaxes
+   * {@link urlField} to a scheme check rather than rejecting every URL — a
+   * misconfigured `FRONTEND_URL` should cost the author line's link, not the
+   * whole oEmbed response, because an invalid response is discarded by Discord
+   * and takes the author line with it.
+   */
+  private siteOrigin(): string | undefined {
+    const configured = this.config.get('frontend', { infer: true }).url;
+    if (!configured) return undefined;
+    try {
+      return new URL(configured).origin;
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 /**
- * A URL field is only emitted when it is one — and specifically not when it is
- * `javascript:`.
+ * The single narrowing point: anything that is not a plain string becomes null.
  *
- * These values are ours today, composed server-side from a member's id. They are
- * still checked, because the only thing standing between "ours" and "anyone's"
- * is that nobody has yet written a caller that forwards a parameter, and
- * `author_url` becomes the click target of a line inside a Discord embed.
+ * Not `String(value)` — an array must be REJECTED, not joined. Coercing
+ * `['https://ok', 'javascript:…']` into one string is precisely how the scheme
+ * check was defeated, and a joined value is not something a caller asked for
+ * either way.
  */
-function isHttpUrl(value: string): boolean {
-  return /^https?:\/\//i.test(value);
+function str(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/** A text field, whitespace-collapsed and length-capped, or nothing. */
+function field(key: string, value: string | null): Record<string, string> {
+  if (!value) return {};
+  const collapsed = value.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return {};
+  return { [key]: collapsed.length > FIELD_LIMIT ? collapsed.slice(0, FIELD_LIMIT) : collapsed };
+}
+
+/**
+ * A URL field, emitted only when it points at THIS site.
+ *
+ * The check used to be "does it start with http(s)", which let any third party
+ * put a discovery `<link>` on their own page naming this endpoint and have the
+ * regiment's apex domain serve the author line for a URL of their choosing.
+ * They gain little — they control their own page's tags anyway — but there is
+ * no call site that legitimately needs an off-site URL here: the shell composes
+ * both of these from `siteUrl()`, so anything else is by definition not ours.
+ *
+ * `URL` parsing rather than a prefix match, because `https://lordsofholdfast.com.evil.test/`
+ * passes `startsWith` and is a different origin.
+ */
+function urlField(key: string, value: string | null, origin?: string): Record<string, string> {
+  if (!value) return {};
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return {};
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return {};
+  if (origin && parsed.origin !== origin) return {};
+  return { [key]: parsed.toString() };
 }
