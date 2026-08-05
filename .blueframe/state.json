@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
-  "lastSyncedAt": "2026-08-05T18:30:00Z",
-  "notesForNextSession": "T-0297..T-0299 are in REVIEW as PR #84, coupled to frontend PR 71 (T-0297..T-0299 there). MERGE BOTH or neither.\n\nTHE ROOT CAUSE, so nobody re-diagnoses it: every link on the site unfurled identically NOT because the shells were wrong but because production ran a Caddyfile predating even the T-0197 gallery unfurler. /api/seo/* has been correct and live the whole time. Four commands prove it and they are now in deploy/README.md: a crawler-path response carrying `Vary: Accept-Encoding` + `Cache-Control: no-store` is the WEB NGINX answering (the API sends Vary: User-Agent + max-age=600); `cf-cache-status: DYNAMIC` rules Cloudflare out; www/home returning 200 not 301 and /sitemap.xml returning text/html each independently prove the Caddyfile is old. Cloudflare's certificate setup is NOT involved - that was the first guess and it was wrong.\n\nWHAT CHANGED SO IT CANNOT RECUR: the frontend's nginx.conf now carries the same crawler routing and ships inside the web image, so `deploy web <tag>` is enough. Caddy still wins when synced (handle blocks are mutually exclusive and file-ordered), so the two layers cannot disagree - both proxy the same path to the same API. The Caddyfile is STILL worth syncing: nginx cannot do the www->apex 301 because it never sees a request Caddy answered on another hostname.\n\nDECISIONS TAKEN WITH THE OWNER, do not relitigate. (1) The profile card image is the AVATAR always, not the banner - his call, and it means twitter:card is `summary` (small thumbnail) by design; shape:'square' DECLARES that rather than suffering Discord's demotion of a square file. The banner renders in the body instead. (2) The attendance count is dead everywhere - roster column, profile particulars, CSV export and both meta descriptions. It read 0 for most of the roster. (3) The Discord tag stays in the Owner-only CSV export but is gone from the roster row; flagged in the PR as reversible.\n\nTWO LIVE BUGS FIXED IN PASSING, both silent: ROSTER_PAGE_SIZE was 50 against the SPA's 25, so /roster?page=2 served members 51-100 to a crawler and 26-50 to Googlebot's render pass. And no member past roster page 1 had a single internal link pointing at them anywhere on the site (rel=prev/next stopped being an indexing signal in 2019; the SPA paginates with buttons).\n\nNOT DONE. (a) The e2e suite has not been run against the isolated database this session - unit + spec suites are green (1286 BE, 802 FE) and test/post-mvp.e2e-spec.ts WAS edited for the T-0298 projection change, so run it before merging. (b) Nothing has been pasted into a real Discord channel; the oEmbed author line is unit-tested only. Discord caches an unfurl ~30min with no purge, so append a throwaway query string when re-testing. (c) The Caddyfile on the box is still un-synced. (d) Search Console: the sitemap has never been submitted, and deploy/README.md is explicit that Authenticated Origin Pulls + TRUST_CF_CONNECTING_IP must land FIRST - the throttler keys on req.ip which behind Cloudflare is always Caddy, so one Googlebot pass drains the bucket for every signed-in member.\n\nAn auditor flagged `eventStatus: EventScheduled` on concluded events as a bug. It is not - schema.org's enum has no 'already happened' member, and a past endDate is what conveys that. Left alone deliberately, with a comment saying so.",
-  "nextIdCounter": 300,
+  "lastSyncedCommit": "66f761add2143ef71722883fec34249a80ef6697",
+  "lastSyncedAt": "2026-08-05T19:45:00Z",
+  "notesForNextSession": "T-0301 is in REVIEW as PR #86, coupled to frontend PR 73. T-0297/T-0298 are merged into DEV (PR #84) but NOT on main.\n\n⚠️ NOTHING FROM THIS WORK IS IN PRODUCTION YET. main is the production branch; dev has to be promoted to main and the WEB image redeployed. The crawler routing now lives in the frontend's nginx.conf, so `deploy web <tag>` is what makes link previews start working — the API half has been correct and deployed since T-0293.\n\nVERIFY AFTER DEPLOY (the fast tell): a crawler-path response carrying `Vary: Accept-Encoding` + `Cache-Control: no-store` is the web nginx answering; the API sends `Vary: User-Agent` + `max-age=600`. As of the last check production still returns the former, i.e. the old build.\n\nTHE ROOT CAUSE nobody should re-diagnose: link previews were identical everywhere because production ran a Caddyfile predating even the T-0197 gallery unfurler. /api/seo/* was always correct. Cloudflare's certificate config is NOT involved — that was the first hypothesis and it was wrong (cf-cache-status was DYNAMIC throughout).\n\nTHE LESSON FROM THE REVIEW, worth keeping: the two bugs that mattered were both in code I had written careful comments about. /api/oembed declared `@Query('author') author: string | undefined` — Express does not honour that, `qs` yields string[] for a repeated key, and the global ValidationPipe coerces only Number and Boolean. That 500'd a @Public() route AND defeated a URL scheme check, because RegExp.test stringifies its argument. **Every other @Query typed `string` in this codebase has the same latent bug** and was NOT audited — that is the open regressionRisk on T-0301 and the most valuable thing to pick up next. Separately, describeEvents was changed without its seo-copy.ts twin, in the same PR whose comments warn three times about exactly that.\n\nSTILL NOT DONE. (a) Nothing pasted into a real Discord channel — the oEmbed author line is unit-tested only, and Discord caches an unfurl ~30min with no purge, so append a throwaway query string when re-testing. (b) The Caddyfile on the box is un-synced; it no longer blocks previews but still owns the www→apex 301, which nginx cannot do. (c) Search Console: the sitemap has never been submitted, and deploy/README.md is explicit that Authenticated Origin Pulls + TRUST_CF_CONNECTING_IP must land FIRST — until then every crawler shares one bucket per route, which is why the shell limit went 60→300 as a stopgap.",
+  "nextIdCounter": 302,
   "connections": [],
   "tasks": [
     {
@@ -15646,7 +15646,7 @@
       "id": "T-0297",
       "title": "Make a shared link say what the page is about",
       "summary": "The profile card leads with the member's bio (cut at 160) instead of a generated stat line whose middle clause read '0 events attended'; the card image is the AVATAR always, with the banner moved into the body; profile:username is emitted. A new stateless /api/oembed supplies the one Discord embed slot Open Graph cannot reach — the bold author line above the title. Organization gets a stable @id that every memberOf/organizer references, BreadcrumbList lands on profiles and events, the fabricated ProfilePage.dateModified is dropped, and the sitemap loses <priority>/<changefreq> (Google ignores both). Two live bugs fixed: ROSTER_PAGE_SIZE was 50 against the SPA's 25 (one URL, two member sets), and no member past roster page 1 had any internal link pointing at them.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -15699,7 +15699,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
       "createdAt": "2026-08-05T18:30:00Z",
-      "updatedAt": "2026-08-05T18:30:00Z",
+      "updatedAt": "2026-08-05T19:45:00Z",
       "history": [
         {
           "at": "2026-08-05T18:30:00Z",
@@ -15707,6 +15707,13 @@
           "to": "review",
           "by": "claude",
           "note": "built and pushed as PR #84"
+        },
+        {
+          "at": "2026-08-05T19:45:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged into dev as PR #84; NOT yet on main, so not in production"
         }
       ]
     },
@@ -15714,7 +15721,7 @@
       "id": "T-0298",
       "title": "Publish an event’s server binding, keep the password behind sign-in",
       "summary": "serverName and serverRegion move out of the includeServer branch in EventDto.from. That flag gated turnout AND the binding, so it could not simply be flipped without publishing unit strength. The password does not move and cannot: it is not a field on EventDto on any branch, so no option value or future call site can make the DTO carry one. Reveal still needs a session, the reveal_event_passwords capability and a live non-declined RSVP. The event shell lists Server/Region as public facts and names the server in the JSON-LD VirtualLocation.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -15759,7 +15766,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
       "createdAt": "2026-08-05T18:30:00Z",
-      "updatedAt": "2026-08-05T18:30:00Z",
+      "updatedAt": "2026-08-05T19:45:00Z",
       "history": [
         {
           "at": "2026-08-05T18:30:00Z",
@@ -15767,6 +15774,13 @@
           "to": "review",
           "by": "claude",
           "note": "built and pushed as PR #84"
+        },
+        {
+          "at": "2026-08-05T19:45:00Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "merged into dev as PR #84; NOT yet on main, so not in production"
         }
       ]
     },
@@ -15819,7 +15833,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
       "createdAt": "2026-08-05T18:30:00Z",
-      "updatedAt": "2026-08-05T18:30:00Z",
+      "updatedAt": "2026-08-05T19:45:00Z",
       "history": [
         {
           "at": "2026-08-05T18:30:00Z",
@@ -15827,6 +15841,80 @@
           "to": "review",
           "by": "claude",
           "note": "built and pushed as PR #84"
+        },
+        {
+          "at": "2026-08-05T19:45:00Z",
+          "from": "review",
+          "to": "review",
+          "by": "claude",
+          "note": "merged into dev as PR #84; NOT yet on main, so not in production"
+        }
+      ]
+    },
+    {
+      "id": "T-0301",
+      "title": "Close the holes an adversarial review of #84 found",
+      "summary": "Four review lenses over the merged T-0297..T-0299 diff, every finding adversarially verified: 26 raised, 17 survived. /api/oembed typed its @Query params `string | undefined`, which Express does not honour — a repeated key arrives as string[] and 500'd a @Public() route via clamp(), and the same array defeated the scheme check outright because RegExp.test stringifies its argument, after which the ARRAY (javascript: member included) was spread into the response. Every param is `unknown` now behind one narrowing point that REJECTS a non-string rather than joining it, and the URL check compares a parsed origin against siteUrl() instead of matching a prefix. describeEvents had been changed without its seo-copy.ts twin, so /events served two descriptions for one URL. memberOf/organizer were bare @id references to a node defined only in another document, so they dangled. The bio cut split UTF-16 surrogate pairs. Shell routes went 60->300 req/min because the throttler keys on req.ip and the whole internet shares one bucket per route now that the routing is live.",
+      "status": "review",
+      "type": "fix",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "seo",
+      "feature": "crawler-shell",
+      "subfeature": "review-followups",
+      "repo": "",
+      "paths": [
+        "src/seo/oembed.controller.ts",
+        "src/seo/oembed.controller.spec.ts",
+        "src/seo/seo.controller.ts",
+        "src/seo/seo.service.ts",
+        "src/seo/seo.service.spec.ts"
+      ],
+      "dependsOn": [
+        "T-0297",
+        "lords-regiment-dashboard:T-0301"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "repeated / bracketed / array-smuggled query params neither 500 nor bypass the URL guard",
+          "status": "passed"
+        },
+        {
+          "desc": "a cross-origin author_url is dropped",
+          "status": "passed"
+        },
+        {
+          "desc": "the bio cut never emits a lone surrogate",
+          "status": "passed"
+        },
+        {
+          "desc": "watch for 429s on /api/seo/u/:handle once a real crawl starts",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "every other @Query in the codebase typed `string` carries the same latent shape bug — Express yields string[] for a repeated key and the ValidationPipe coerces only Number and Boolean, so any handler calling a string method on one 500s from an unauthenticated request",
+          "status": "open",
+          "notedAt": "2026-08-05T19:45:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not audit every other @Query in the codebase for the same non-string shape bug — the review only covered this diff, and the pattern is almost certainly not unique to /api/oembed.",
+        "Did not add a cross-repo CI guard that the two description builders stay byte-identical; the coupling is enforced only by comments and by a reviewer noticing."
+      ],
+      "lastTouchedCommit": "66f761add2143ef71722883fec34249a80ef6697",
+      "createdAt": "2026-08-05T19:45:00Z",
+      "updatedAt": "2026-08-05T19:45:00Z",
+      "history": [
+        {
+          "at": "2026-08-05T19:45:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "raised and fixed from the adversarial review; PR #86"
         }
       ]
     }
@@ -15856,6 +15944,11 @@
       "at": "2026-08-05T18:30:00Z",
       "by": "claude",
       "note": "T-0297..T-0299 created (link previews, public server binding, crawler routing off the hand-synced Caddyfile); T-0217..T-0219 advanced review->deployed"
+    },
+    {
+      "at": "2026-08-05T19:45:00Z",
+      "by": "claude",
+      "note": "T-0301 created from the adversarial review of #84; T-0297/T-0298 merged to dev"
     }
   ]
 }
