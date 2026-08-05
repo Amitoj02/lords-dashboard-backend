@@ -3,6 +3,7 @@ import { EventsModule } from '../events/events.module';
 import { GalleryModule } from '../gallery/gallery.module';
 import { MembersModule } from '../members/members.module';
 import { RegimentsModule } from '../regiments/regiments.module';
+import { OEmbedController } from './oembed.controller';
 import { SeoController, SitemapController } from './seo.controller';
 import { SeoService } from './seo.service';
 
@@ -35,7 +36,7 @@ import { SeoService } from './seo.service';
  */
 @Module({
   imports: [MembersModule, RegimentsModule, EventsModule, GalleryModule],
-  controllers: [SeoController, SitemapController],
+  controllers: [SeoController, SitemapController, OEmbedController],
   providers: [SeoService],
 })
 export class SeoModule {}

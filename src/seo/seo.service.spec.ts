@@ -91,6 +91,9 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       tags: [],
       hasServerName: false,
       hasServerPassword: false,
+      // Public since T-0298 — always projected, null when nothing is bound.
+      serverName: null,
+      serverRegion: null,
       ...overrides,
     }) as EventDto;
 
@@ -217,17 +220,69 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
   });
 
   describe('the meta description', () => {
-    it('is deliberately NOT rebuilt from the bio — the SPA builds that string too', async () => {
-      // Changing this without the frontend's `describe()` changing in the same
-      // deploy would give one URL two different descriptions across the two
-      // rendering passes, which is the disagreement that reads as cloaking.
+    it('leads with the bio, then says who this is (T-0297)', async () => {
+      // The frontend's `describe()` builds this identical string in the same
+      // deploy. One URL with two different descriptions across the two rendering
+      // passes is the disagreement that reads as cloaking, and a description is
+      // the worst place for it: a single short string where a diff is
+      // unambiguous.
       const html = await render(profile({ bio: 'I mostly play the drum.' }));
 
       expect(html).toContain(
-        '<meta name="description" content="Colonel in Lords Regiment · 0 decorations · ' +
-          '42 events attended · serving since 5 January 2026." />',
+        '<meta name="description" content="I mostly play the drum. — Colonel in ' +
+          'Lords Regiment, a Holdfast: Nations at War regiment." />',
       );
-      expect(html).not.toContain('<meta name="description" content="I mostly play the drum');
+    });
+
+    it('falls back to rank and decorations when the member wrote no bio', async () => {
+      const html = await render(profile({ bio: null }));
+
+      expect(html).toContain(
+        '<meta name="description" content="Colonel in Lords Regiment · 0 decorations · ' +
+          'serving since 5 January 2026. A Holdfast: Nations at War regiment." />',
+      );
+    });
+
+    it('never mentions attendance, on either branch (T-0297)', async () => {
+      // The count came out of the roster table, the profile particulars and both
+      // descriptions together. "0 events attended" made every member of a
+      // regiment that does not track attendance look like a dead account, in the
+      // one string a Discord card is guaranteed to show.
+      const withBio = await render(profile({ bio: 'Drummer.' }));
+      const without = await render(profile({ bio: null }));
+
+      expect(withBio).not.toContain('events attended');
+      expect(without).not.toContain('events attended');
+      expect(without).not.toContain('Events attended');
+    });
+
+    it('cuts a long bio at the shared limit rather than letting it run', async () => {
+      const html = await render(profile({ bio: 'x'.repeat(400) }));
+
+      expect(html).toContain(`<meta name="description" content="${'x'.repeat(159)}… — Colonel`);
+    });
+
+    it('never splits an emoji in half at the cut (T-0297)', async () => {
+      // `String.slice` cuts on UTF-16 CODE UNITS and an emoji is two of them, so
+      // a bio whose 159th and 160th units are the halves of one astral character
+      // left a LONE HIGH SURROGATE before the `…` — U+FFFD once serialised, so
+      // the card read "…holds �…". A bio is exactly the field people put emoji
+      // in. `cutForSnippet` iterates by code point, so a pair cannot split.
+      const bio = `${'x'.repeat(158)}🎺${'y'.repeat(50)}`;
+      const html = await render(profile({ bio }));
+
+      const match = html.match(/<meta name="description" content="([^"]*)"/);
+      expect(match).not.toBeNull();
+      const description = match![1];
+      // No unpaired surrogate anywhere in the emitted string.
+      expect(
+        /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(description),
+      ).toBe(false);
+      expect(description).not.toContain('�');
+      // 159 code points of content, then the ellipsis. The trumpet is the 159th
+      // and survives INTACT — the old `slice` kept only its high surrogate.
+      expect(description.startsWith(`${'x'.repeat(158)}🎺…`)).toBe(true);
+      expect([...description.split(' — ')[0]]).toHaveLength(160);
     });
   });
 
@@ -240,17 +295,16 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
    * fill is the difference between a deliberate card and a failed one.
    */
   describe('the profile card', () => {
-    it('uses the BANNER and asks for the wide card when the member has one', async () => {
-      const html = await render(profile({ bannerUrl: 'https://cdn.example/banner.png' }));
-
-      expect(html).toContain(
-        '<meta property="og:image" content="https://cdn.example/banner.png" />',
+    it('uses the AVATAR and asks for the small card, even when a banner exists (T-0297)', async () => {
+      // The banner used to win here, because a landscape image fills the wide
+      // card. That optimised the card's SIZE at the cost of what it is about:
+      // half the roster shared their profile and got a picture of a battlefield.
+      const html = await render(
+        profile({
+          avatarUrl: '/api/public/members/abc123XYZ456/avatar',
+          bannerUrl: 'https://cdn.example/banner.png',
+        }),
       );
-      expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
-    });
-
-    it('uses the avatar and asks for the SMALL card when there is no banner', async () => {
-      const html = await render(profile({ avatarUrl: '/api/public/members/abc123XYZ456/avatar' }));
 
       // The avatar is a path on THIS origin (the proxy that keeps a member's
       // Discord snowflake out of the markup), so it has to be made absolute —
@@ -258,7 +312,30 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       expect(html).toContain(
         `<meta property="og:image" content="${SITE}/api/public/members/abc123XYZ456/avatar" />`,
       );
+      // `summary` is DECLARED, not suffered: Discord inspects the real file and
+      // demotes a square image regardless, so a page that asked for the wide
+      // card and lost renders as broken rather than as small.
       expect(html).toContain('<meta name="twitter:card" content="summary" />');
+    });
+
+    it('renders the banner in the BODY, so it is not simply discarded', async () => {
+      const html = await render(
+        profile({
+          avatarUrl: '/api/public/members/abc123XYZ456/avatar',
+          bannerUrl: 'https://cdn.example/banner.png',
+        }),
+      );
+
+      expect(html).toContain('<img src="https://cdn.example/banner.png"');
+    });
+
+    it('falls back to the banner as the card when the member has no avatar', async () => {
+      const html = await render(
+        profile({ avatarUrl: null, bannerUrl: 'https://cdn.example/b.png' }),
+      );
+
+      expect(html).toContain('<meta property="og:image" content="https://cdn.example/b.png" />');
+      expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
     });
 
     it('still shows the site banner for a member with neither', async () => {
@@ -267,6 +344,33 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       expect(html).toContain(
         `<meta property="og:image" content="${SITE}/assets/images/banner.png" />`,
       );
+    });
+
+    it('declares the handle as profile:username on the profile vertical (T-0297)', async () => {
+      const html = await render(profile());
+
+      // `og:type: profile` has been claimed since T-0293 with none of the
+      // vertical's own properties populated. This is the machine-readable
+      // statement tying the page to the string a person types into a search box.
+      expect(html).toContain('<meta property="og:type" content="profile" />');
+      expect(html).toContain('<meta property="profile:username" content="panda" />');
+    });
+
+    it('points at an oEmbed endpoint carrying the rank as the author line (T-0297)', async () => {
+      // The bold line ABOVE the title on a Discord card. No Open Graph tag
+      // produces it — oEmbed `author_name` is the only source — and discovery is
+      // via this <link> only: Discord does not honour the `Link:` header form.
+      const html = await render(profile({ rank: 'Colonel' }));
+
+      const match = html.match(
+        /<link rel="alternate" type="application\/json\+oembed" href="([^"]+)"/,
+      );
+      expect(match).not.toBeNull();
+      const href = new URL(unescapeHtml(match![1]));
+      expect(href.pathname).toBe('/api/oembed');
+      expect(href.searchParams.get('author')).toBe('Colonel · 0 decorations');
+      expect(href.searchParams.get('author_url')).toBe(`${SITE}/u/@panda`);
+      expect(href.searchParams.get('provider')).toBe('Lords Regiment');
     });
 
     it('paints the Discord embed stripe and titles itself the way the SPA does', async () => {
@@ -372,8 +476,18 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       expect(ld['@type']).toBe('Event');
       // The absolute instant, never the rendered wall clock.
       expect(ld.startDate).toBe('2026-09-12T19:00:00.000Z');
+      // A REFERENCE to the node `/home` defines, not a fourth inline copy of it
+      // (T-0297). Without the shared `@id` the graph held one unlinked
+      // organisation per event and per profile, all merely sharing a name.
+      // The `@id` merges this with the node `/home` defines, so the graph holds
+      // ONE regiment rather than an unlinked organisation per event and per
+      // profile. The name and url ride along because a JSON-LD `@id` resolves
+      // within a document's OWN graph, and that node lives in a different
+      // document — a bare reference would dangle for anyone reading this page
+      // alone.
       expect(ld.organizer).toEqual({
         '@type': 'Organization',
+        '@id': `${SITE}/#organization`,
         name: 'Lords Regiment',
         url: SITE,
       });
@@ -420,6 +534,110 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
 
       expect(xml).toContain(`<loc>${SITE}/roster</loc>`);
       expect(xml).not.toContain('/events/');
+    });
+
+    it('emits no <priority> or <changefreq> — Google documents that it ignores both', async () => {
+      members.listForSitemap.mockResolvedValue([]);
+      events.listPublic.mockRejectedValue(new Error('nope'));
+      gallery.findPublic.mockRejectedValue(new Error('nope'));
+
+      const xml = await service.renderSitemap();
+
+      // A document full of fields nothing consumes is a document nobody audits.
+      expect(xml).not.toContain('<priority>');
+      expect(xml).not.toContain('<changefreq>');
+    });
+  });
+
+  /**
+   * The roster shell (T-0297).
+   *
+   * Two of these defend properties that were BROKEN in production, silently, and
+   * neither would have surfaced as an error: a page-size that disagreed with the
+   * SPA, and a list page from which no member past the first page had a single
+   * internal link pointing at them.
+   */
+  describe('the roster shell', () => {
+    const rosterOf = (total: number) => {
+      members.list.mockImplementation((query: { page: number; limit: number }) => {
+        const start = (query.page - 1) * query.limit;
+        const data = Array.from({ length: Math.min(query.limit, total - start) }, (_, i) => ({
+          ...profile(),
+          id: `m${start + i}`,
+          username: `member${start + i}`,
+          canonicalPath: `/u/@member${start + i}`,
+        }));
+        return Promise.resolve({
+          data,
+          meta: {
+            page: query.page,
+            limit: query.limit,
+            total,
+            totalPages: Math.ceil(total / query.limit),
+            hasNext: start + query.limit < total,
+            hasPrev: query.page > 1,
+          },
+        });
+      });
+    };
+
+    it('asks for the SAME page size the SPA does', async () => {
+      // 50 here against the SPA's 25 meant `/roster?page=2` served members
+      // 51–100 to a crawler and 26–50 to Googlebot's render pass — one URL, two
+      // different member sets, and `ItemList` positions that disagreed. That is
+      // the divergence this whole module exists to prevent, and it was live.
+      rosterOf(120);
+
+      await service.renderRoster(1);
+
+      expect(members.list).toHaveBeenCalledWith(expect.objectContaining({ limit: 25 }));
+    });
+
+    it('renders a real anchor per roster page, not just rel=prev/next', async () => {
+      // Google dropped `rel=next/prev` as an indexing signal in 2019 and the SPA
+      // paginates with `<button (click)>`, so between them every member past the
+      // first page had NO internal link anywhere on the site pointing at their
+      // profile — discoverable only from the sitemap, the weakest signal there
+      // is.
+      rosterOf(120);
+
+      const html = await service.renderRoster(1);
+
+      expect(html).toContain(`<a href="${SITE}/roster?page=2">Page 2</a>`);
+      expect(html).toContain(`<a href="${SITE}/roster?page=5">Page 5</a>`);
+      expect(html).not.toContain('page=6');
+    });
+
+    it('omits the page list entirely for a roster that fits on one page', async () => {
+      rosterOf(4);
+
+      const html = await service.renderRoster(1);
+
+      expect(html).not.toContain('Roster pages');
+    });
+
+    it('links back out to the rest of the site instead of being a link sink', async () => {
+      rosterOf(4);
+
+      const html = await service.renderRoster(1);
+
+      expect(html).toContain(`<a href="${SITE}/home">Lords Regiment</a>`);
+      expect(html).toContain(`<a href="${SITE}/events">Events</a>`);
+      expect(html).toContain(`<a href="${SITE}/gallery">Gallery</a>`);
+    });
+
+    it("uses the regiment's own banner rather than the shipped brand asset", async () => {
+      rosterOf(4);
+      regiments.getProfile.mockResolvedValue({
+        name: 'Lords Regiment',
+        bannerUrl: 'https://cdn.example/regiment.png',
+      });
+
+      const html = await service.renderRoster(1);
+
+      expect(html).toContain(
+        '<meta property="og:image" content="https://cdn.example/regiment.png" />',
+      );
     });
   });
 });
