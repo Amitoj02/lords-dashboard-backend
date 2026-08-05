@@ -118,6 +118,32 @@ export interface ShellPage {
   /** Rendered into the body as a real `<img>`/`<video>`. */
   media?: ShellMedia | null;
   ogType?: 'website' | 'profile' | 'article' | 'video.other';
+  /**
+   * The handle behind an `og:type: profile` page, emitted as `profile:username`
+   * (T-0297).
+   *
+   * Part of the Open Graph `profile` vertical the page already claims to be but
+   * has never populated. Nothing renders it visibly; what it does is tell a
+   * consumer that this document is *about an account with this name*, which is
+   * the one machine-readable statement tying `/u/@panda` to the string a person
+   * typed into a search box.
+   */
+  profileUsername?: string | null;
+  /**
+   * Absolute URL of the oEmbed endpoint describing this page (T-0297).
+   *
+   * ── WHY THIS EXISTS WHEN EVERY VISIBLE FIELD IS ALREADY AN OG TAG ───────────
+   * Discord's embed has one slot Open Graph cannot reach: the small bold line
+   * ABOVE the title. It comes from oEmbed `author_name` and from nothing else —
+   * there is no `og:author`, and `article:author` does not feed it. That line is
+   * the difference between a card that reads as a generic web page and one that
+   * reads as "Captain · 9 decorations" before the name is even parsed.
+   *
+   * Discovery is via this `<link>` element ONLY. Discord does not honour the
+   * `Link:` HTTP header form the oEmbed spec also permits (discord-api-docs
+   * #7370, open and unanswered), so the tag has to be in the document.
+   */
+  oEmbedUrl?: string | null;
   /** Tell search engines not to index this page (suspended member, paginated tail…). */
   noIndex?: boolean;
   /**
@@ -224,6 +250,12 @@ export function renderPageShell(page: ShellPage): string {
     meta('og:url', page.canonicalUrl),
     meta('og:title', page.title),
     meta('og:description', page.description),
+    page.ogType === 'profile' ? meta('profile:username', page.profileUsername) : '',
+    // Emitted before the og:image block purely so a human reading the source
+    // finds the two "who is this by" signals — provider and author — together.
+    page.oEmbedUrl
+      ? `    <link rel="alternate" type="application/json+oembed" href="${escapeHtml(page.oEmbedUrl)}" title="${escapeHtml(page.siteName)}" />`
+      : '',
     ...imageTags(image),
     ...videoTags(video),
     // `article:*` only means anything on an article-shaped page, and Discord

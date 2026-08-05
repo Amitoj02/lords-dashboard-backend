@@ -162,6 +162,44 @@ config. Until someone SSHes in, Googlebot keeps receiving the same empty
 `<app-root></app-root>` for every profile on the roster, and `/sitemap.xml` keeps
 falling through to the SPA and returning `index.html` at 200 `text/html`.
 
+### ⚠️ This is not hypothetical — it happened, for months (T-0299)
+
+The step above was written down and did not get done. Production ran a
+`Caddyfile` predating even the T-0197 gallery unfurler, which was diagnosable
+from outside in about four commands:
+
+```bash
+DB='Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'
+# All identical, all 28835 bytes, all the Angular shell:
+for p in /home /roster /u/@panda /events /gallery; do
+  curl -s -A "$DB" -o /dev/null -w "%{size_download} $p\n" "https://lordsofholdfast.com$p"
+done
+curl -sI https://lordsofholdfast.com/roster | grep -i '^vary'   # Accept-Encoding = nginx, not the API
+curl -sI https://www.lordsofholdfast.com/home | head -1         # 200, not 301 → @www block absent
+curl -sI https://lordsofholdfast.com/sitemap.xml | grep -i type # text/html → handle block absent
+```
+
+`Vary` is the fastest tell. The API sends `Vary: User-Agent, Accept-Encoding`
+and `Cache-Control: public, max-age=600`; the `web` nginx sends
+`Vary: Accept-Encoding` and `Cache-Control: no-store`. If a crawler-path response
+carries the second pair, Caddy handed it to `web:80` and no rewrite is live.
+`cf-cache-status: DYNAMIC` on the same response rules Cloudflare out — which is
+worth checking first, because "is Cloudflare caching this?" is the natural first
+guess and it is wrong here.
+
+**The frontend repo's `nginx.conf` now carries the same crawler routing**, so
+this can no longer silently not-happen: it ships inside the `web` image and
+reaches production on any ordinary `deploy web <tag>`. Caddy's `handle` blocks
+are mutually exclusive and evaluated in file order, so a synced Caddyfile still
+wins and nginx never sees those requests; an un-synced one falls through and
+nginx answers. Both proxy the same path to the same API, so the bytes are
+identical either way.
+
+**Syncing the Caddyfile is still worth doing** — nginx does not and cannot do the
+www→apex 301 (it never sees a request Caddy has already answered on another
+hostname), and belt-and-braces at the edge is cheaper than at the origin. But it
+is no longer what stands between a deploy and a working link preview.
+
 Do the steps in this order. Step 1 before step 2 is not a preference: the caddy
 service now declares `APEX_HOST: ${APEX_HOST:?…}`, so with the variable unset
 compose **refuses to start caddy at all** — and caddy is the only container that

@@ -42,11 +42,15 @@ export interface EventDtoOptions {
 
 /**
  * Projection of a {@link RegimentEvent}. The same class serves both the public
- * view and the authenticated member view: public callers get only the safe
- * fields (server name/region/password are REDACTED — omitted entirely, leaving
- * just the boolean presence flags), while `includeServer` unlocks the
- * member-only fields. The server password is NEVER projected here; it is only
- * returned by the dedicated reveal endpoint.
+ * view and the authenticated member view: `includeServer` unlocks the
+ * member-only fields — turnout (RSVP counts, attendance), draft/archive state,
+ * recurrence internals and timestamps.
+ *
+ * The server NAME and REGION are public (T-0298): they are how somebody turns
+ * up, and this page's job is to advertise a muster to people who are not in the
+ * regiment yet. The server PASSWORD is NEVER projected here on any branch; it is
+ * returned only by the dedicated reveal endpoint, behind a session, the
+ * `reveal_event_passwords` capability and a live non-declined RSVP.
  */
 export class EventDto {
   @ApiProperty({ format: 'uuid' })
@@ -93,10 +97,25 @@ export class EventDto {
 
   @ApiProperty({
     description:
-      'Whether a game server is bound to this event. Public: the name itself stays ' +
-      'redacted, but the flag lets an unauthenticated calendar say "server details for members".',
+      'Whether a game server is bound to this event. Kept alongside the now-public ' +
+      '`serverName` so a caller can distinguish "no server bound" from "bound but blank".',
   })
   hasServerName: boolean;
+
+  @ApiProperty({
+    nullable: true,
+    description:
+      'The game server this event runs on. PUBLIC (T-0298) — it is how somebody turns up, ' +
+      'and an event page that advertises a muster to people outside the regiment withheld ' +
+      'the one detail that let them come. The PASSWORD is not here on any branch.',
+  })
+  serverName: string | null;
+
+  @ApiProperty({
+    nullable: true,
+    description: 'Region the server runs in (e.g. "EU"). Public, for the same reason as the name.',
+  })
+  serverRegion: string | null;
 
   @ApiProperty({
     description:
@@ -130,12 +149,6 @@ export class EventDto {
       'publicly — it is guild configuration, not calendar information.',
   })
   announceRoleId?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
-  serverName?: string | null;
-
-  @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
-  serverRegion?: string | null;
 
   @ApiPropertyOptional({ nullable: true, description: 'Member view only' })
   recurrenceRule?: string | null;
@@ -197,10 +210,13 @@ export class EventDto {
   /**
    * Build the projection from an event plus its batched child collections/counts.
    * Public callers pass `includeServer: false` (the default), which omits every
-   * member-only field so the raw entity's server binding never leaks — only the
-   * `hasServerName`/`hasServerPassword` presence flags cross that line. When
-   * `includeServer` is set the server name/region are added — but never the
-   * password, which only the reveal endpoint returns.
+   * member-only field: turnout, draft/archive state, recurrence internals,
+   * timestamps and the caller's own RSVP.
+   *
+   * The server name and region are set unconditionally (T-0298). The password is
+   * not set on any branch — it is not a field on this class at all, which is the
+   * strongest form the guarantee can take: there is no `includeServer` value, no
+   * option object and no future call site that can make this DTO carry one.
    */
   static from(event: RegimentEvent, opts: EventDtoOptions): EventDto {
     const dto = new EventDto();
@@ -224,6 +240,18 @@ export class EventDto {
     // '' (a just-saved entity, a legacy row) is never a real binding.
     dto.hasServerName = !!event.serverName;
     dto.hasServerPassword = !!event.serverPassword;
+    // ── THE SERVER BINDING IS PUBLIC (T-0298) ────────────────────────────────
+    // Moved out of the `includeServer` branch below. `includeServer` is a single
+    // flag doing double duty — it gates turnout AND the server binding — so this
+    // could not be done by flipping it: that would have published RSVP counts
+    // and unit strength along with the server name.
+    //
+    // The PASSWORD does not move and cannot: it is not written into this DTO on
+    // any branch, on purpose. `RevealedPasswordDto` is the only projection that
+    // carries it, behind a session, the `reveal_event_passwords` capability AND
+    // a live non-declined RSVP.
+    dto.serverName = event.serverName || null;
+    dto.serverRegion = event.serverRegion || null;
 
     if (opts.includeServer) {
       // TURNOUT MOVED BEHIND THE MEMBER PROJECTION (T-0215). Now that the events
@@ -238,8 +266,6 @@ export class EventDto {
       dto.expectedAttendance = event.expectedAttendance;
       dto.attendanceGoal = event.attendanceGoal;
       dto.announceRoleId = event.announceRoleId;
-      dto.serverName = event.serverName || null;
-      dto.serverRegion = event.serverRegion || null;
       dto.recurrenceRule = event.recurrenceRule;
       dto.recurrenceCadence = event.recurrenceCadence;
       dto.recurrenceActive = event.recurrenceActive;

@@ -510,7 +510,7 @@ describe('EventsService', () => {
       );
     });
 
-    it('redacts the server binding in the public projection', async () => {
+    it('publishes the server binding but never the password (T-0298)', async () => {
       eventsQb.getManyAndCount.mockResolvedValue([[buildEvent()], 1]);
 
       const result = await service.listPublic({ page: 1, limit: 20, skip: 0 });
@@ -518,9 +518,12 @@ describe('EventsService', () => {
       expect(result.meta.total).toBe(1);
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('event-1');
-      // Server binding is redacted from the public view (never the real value).
-      expect(result.data[0].serverName).toBeUndefined();
-      expect(result.data[0].serverRegion).toBeUndefined();
+      // The name and region are how somebody turns up, so they are public. The
+      // password is not a field on this DTO at all — which is a stronger
+      // guarantee than any branch could be, because there is no `includeServer`
+      // value and no future call site that could put one there.
+      expect(result.data[0].serverName).toBe('LORDS-1');
+      expect(result.data[0].serverRegion).toBe('EU');
       expect(result.data[0]).not.toHaveProperty('serverPassword');
       // Turnout left the public projection in T-0215: on an indexed calendar,
       // RSVP tallies and attendance counts publish unit strength and turnout
@@ -546,13 +549,16 @@ describe('EventsService', () => {
 
       const result = await service.listPublic({ page: 1, limit: 20, skip: 0 });
 
-      // Without these the public calendar cannot distinguish a password-protected
-      // event from a plain one — the values themselves stay redacted.
+      // `hasServerPassword` is the flag that still matters: the password is the
+      // one thing a public caller does not get, so this is how the calendar
+      // badges a protected event without revealing anything. `hasServerName`
+      // survives alongside the now-public name to distinguish "nothing bound"
+      // from "bound to an empty string".
       expect(result.data[0].hasServerName).toBe(true);
       expect(result.data[0].hasServerPassword).toBe(true);
       expect(result.data[1].hasServerName).toBe(false);
       expect(result.data[1].hasServerPassword).toBe(false);
-      expect(result.data[0].serverName).toBeUndefined();
+      expect(result.data[1].serverName).toBeNull();
     });
 
     it('treats an empty stored server binding as unset, not as a bound server', async () => {
@@ -616,7 +622,7 @@ describe('EventsService', () => {
       expect(result.data[0].hasServerName).toBe(false);
     });
 
-    it('redacts the server binding for a non-enrolled caller (no memberId)', async () => {
+    it('gives a non-enrolled caller (no memberId) the public projection', async () => {
       eventsQb.getManyAndCount.mockResolvedValue([[buildEvent()], 1]);
 
       const result = await service.listForMember(user({ memberId: null }), {
@@ -625,12 +631,14 @@ describe('EventsService', () => {
         skip: 0,
       });
 
-      expect(result.data[0].serverName).toBeUndefined();
-      expect(result.data[0].serverRegion).toBeUndefined();
+      // An applicant sees exactly what an anonymous visitor sees: the server
+      // binding, because that is public now (T-0298), and none of the
+      // member-projection fields.
+      expect(result.data[0].serverName).toBe('LORDS-1');
+      expect(result.data[0].serverRegion).toBe('EU');
       expect(result.data[0].myRsvp).toBeUndefined();
+      expect(result.data[0].rsvpCounts).toBeUndefined();
       expect(result.data[0]).not.toHaveProperty('serverPassword');
-      // The presence flags survive redaction (T-0151) — they carry no secret and
-      // the SPA branches on them.
       expect(result.data[0].hasServerName).toBe(true);
       expect(result.data[0].hasServerPassword).toBe(true);
     });
@@ -711,8 +719,10 @@ describe('EventsService', () => {
 
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('event-1');
-      // History uses the server-redacted (public) projection.
-      expect(result[0].serverName).toBeUndefined();
+      // History uses the public projection: server binding yes (T-0298), turnout
+      // and the password no.
+      expect(result[0].serverName).toBe('LORDS-1');
+      expect(result[0].rsvpCounts).toBeUndefined();
       expect(result[0]).not.toHaveProperty('serverPassword');
     });
 
@@ -735,8 +745,9 @@ describe('EventsService', () => {
         status: RsvpStatus.Interested,
         reminderOffsetMinutes: 15,
       });
-      // Public projection — no server binding leaked.
-      expect(result[0].serverName).toBeUndefined();
+      // Public projection — turnout withheld, server binding public (T-0298).
+      expect(result[0].rsvpCounts).toBeUndefined();
+      expect(result[0].serverName).toBe('LORDS-1');
     });
   });
 
