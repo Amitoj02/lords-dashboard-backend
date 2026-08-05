@@ -564,23 +564,31 @@ describe('Post-MVP feature modules (e2e)', () => {
       expect(memberView.body).not.toHaveProperty('serverPassword');
 
       // An authenticated but non-enrolled caller (applicant, no memberId) gets
-      // the redacted projection — no server binding, no myRsvp.
+      // the public projection — the server binding, which is public since
+      // T-0298, and none of the member-only fields.
       const list = await request(server())
         .get('/api/events/mine')
         .set(bearer(applicantToken))
         .expect(200);
       const redacted = list.body.data.find((e: { id: string }) => e.id === eventId);
       expect(redacted).toBeDefined();
-      expect(redacted.serverName).toBeUndefined();
+      expect(redacted.serverName).toBe('HF | E2E Server');
       expect(redacted.myRsvp).toBeUndefined();
+      expect(redacted.rsvpCounts).toBeUndefined();
     });
 
-    it('redacts server binding + password on the public feed', async () => {
+    it('publishes the server binding but never the password on the public feed (T-0298)', async () => {
       const list = await request(server()).get('/api/events').expect(200); // @Public
       const mine = list.body.data.find((e: { id: string }) => e.id === eventId);
       expect(mine).toBeDefined();
+      // The name is how somebody turns up, so an anonymous visitor gets it.
+      expect(mine.serverName).toBe('HF | E2E Server');
+      // The password is on NO projection — the reveal endpoint is the only path,
+      // and it needs a session, the capability and a live RSVP.
       expect(mine.serverPassword).toBeUndefined();
-      expect(mine.serverName).toBeUndefined();
+      expect(mine.hasServerPassword).toBe(true);
+      // Turnout stayed behind the member projection (T-0215).
+      expect(mine.rsvpCounts).toBeUndefined();
     });
 
     it('gates password reveal on an RSVP, then returns the decrypted password WITHOUT auditing it', async () => {

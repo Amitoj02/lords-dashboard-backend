@@ -156,7 +156,7 @@
 	# unfurler renders as a broken preview.
 	@crawler {
 		path /u/* /roster /roster/* /events /events/* /gallery /gallery/* /home
-		header_regexp User-Agent "(?i)(discordbot|facebookexternalhit|twitterbot|whatsapp|slackbot|telegrambot|linkedinbot|redditbot|skypeuripreview|iframely|embedly|googlebot|bingbot|applebot|duckduckbot|yandexbot|mastodon|matrix|signal)"
+		header_regexp User-Agent "(?i)(discordbot|facebookexternalhit|twitterbot|whatsapp|slackbot|telegrambot|linkedinbot|redditbot|skypeuripreview|iframely|embedly|googlebot|google-inspectiontool|storebot-google|bingbot|applebot|duckduckbot|yandexbot|mastodon|matrix|signal)"
 	}
 	handle @crawler {
 		rewrite * /api/seo{uri}
