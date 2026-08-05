@@ -41,6 +41,13 @@ import {
   storedWallClock,
 } from './event-time';
 
+/**
+ * How far back the PUBLIC calendar reaches (T-0215). Ninety days keeps a season
+ * of results visible without handing an anonymous caller — or a crawler — the
+ * regiment's entire history. The member-facing calendar is not windowed.
+ */
+const PUBLIC_HISTORY_DAYS = 90;
+
 /** New arrays of child rows to REPLACE on an event (undefined = leave untouched). */
 interface ChildCollections {
   platforms?: Platform[];
@@ -125,6 +132,18 @@ export class EventsService {
       qb.andWhere('event.status = :status', { status: query.status });
     }
 
+    // A DATE WINDOW, NOT THE WHOLE ARCHIVE (T-0215). The public page has always
+    // been headed "Previous · Last 30 days" and that heading has always been a
+    // decoration — nothing enforced it, so an anonymous caller received the
+    // regiment's entire calendar history in one request. Now that the page is
+    // indexed, that is both a scraping surface and a pile of thin, stale URLs
+    // for a crawler to spend its budget on. Upcoming and ongoing events are
+    // never windowed; only the past is.
+    qb.andWhere('(event.status <> :previous OR event.startsAt >= :since)', {
+      previous: EventStatus.Previous,
+      since: this.publicHistoryCutoff(),
+    });
+
     const [rows, total] = await qb
       .orderBy('event.startsAt', 'ASC')
       .skip(query.skip)
@@ -133,6 +152,11 @@ export class EventsService {
 
     const data = await this.serialize(rows, { includeServer: false });
     return new PaginatedResponseDto(data, total, query.page, query.limit);
+  }
+
+  /** How far back the public calendar reaches. */
+  private publicHistoryCutoff(): Date {
+    return new Date(Date.now() - PUBLIC_HISTORY_DAYS * 24 * 60 * 60 * 1000);
   }
 
   /** A single published event, public view (404 for drafts/archived/deleted/missing). */

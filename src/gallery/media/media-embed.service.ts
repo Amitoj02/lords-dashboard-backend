@@ -280,7 +280,7 @@ export class MediaEmbedService {
   }
 
   /** Read a response body into a Buffer, aborting if it exceeds the size cap. */
-  private static async readCapped(res: Response): Promise<Buffer | null> {
+  static async readCapped(res: Response): Promise<Buffer | null> {
     const reader = res.body?.getReader();
     if (!reader) {
       return null;

@@ -31,6 +31,8 @@ import { AccountDeletionRequest } from './entities/account-deletion-request.enti
 import { ServiceRecordEntry } from './entities/service-record-entry.entity';
 import { Member } from './entities/member.entity';
 import { MembersService } from './members.service';
+import { MemberAvatarService } from './public/member-avatar.service';
+import { UsernameService } from './username.service';
 import {
   ACTION_CAPABILITY,
   DECORATION_ACTIONS,
@@ -161,6 +163,10 @@ describe('MembersService', () => {
   };
   const storage = {
     resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
+    // Account deletion purges the departed member's avatar/banner objects
+    // (T-0215) — the bytes stay publicly fetchable otherwise, and the path
+    // embeds the member id that is also the profile URL.
+    deleteObject: jest.fn().mockResolvedValue(undefined),
   };
   // Capability gate for self-OR-admin service-record reads (T-0101).
   const authz = { can: jest.fn() };
@@ -169,6 +175,17 @@ describe('MembersService', () => {
     listAttendedByMember: jest.fn(),
     listRsvpsByMember: jest.fn(),
   };
+  // Vanity-handle rules (T-0215). `claimFor` resolving to null is "no handle was
+  // released", which is what every test in this file needs.
+  const usernames = {
+    claimFor: jest.fn().mockResolvedValue(null),
+    check: jest.fn().mockResolvedValue({ available: true }),
+    holdAfterRelease: jest.fn().mockResolvedValue(undefined),
+    blockPermanently: jest.fn().mockResolvedValue(undefined),
+    isDuplicateHandleError: jest.fn().mockReturnValue(false),
+    renameCooldownFor: jest.fn().mockReturnValue(null),
+  };
+  const avatars = { invalidate: jest.fn(), pathFor: jest.fn(() => '/api/avatar') };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -217,6 +234,10 @@ describe('MembersService', () => {
         { provide: StorageService, useValue: storage },
         { provide: AuthzService, useValue: authz },
         { provide: EventsService, useValue: eventsService },
+        // Handle rules and the avatar proxy cache (T-0215). Neither is exercised
+        // by the admin-action tests below; UsernameService has its own spec.
+        { provide: UsernameService, useValue: usernames },
+        { provide: MemberAvatarService, useValue: avatars },
       ],
     }).compile();
 

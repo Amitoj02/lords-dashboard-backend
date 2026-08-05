@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "034462e1ac573dd632231d986193ca5216d0aad7",
-  "lastSyncedAt": "2026-08-04T00:30:00Z",
-  "notesForNextSession": "T-0213 is the live thread and it is HALF A TASK ON ITS OWN \u2014 the frontend half is lords-regiment-dashboard's companion commit, open as feat/why-join-required in BOTH repos (PRs into dev, not main). The optional \"Note to the recruiting officer\" is now the REQUIRED question \"Why do you want to join the Lords Regiment?\". Four things not to undo: (1) the property is still `representativeNote` and the column is still `representative_note` \u2014 the user explicitly chose a labels-only rename so there is NO migration, so do not \"finish the job\" by renaming it to whyJoin without asking; (2) the column stays NULLable even though intake requires it, because applications submitted before this have no answer \u2014 the admin page's @if guard and the embed composer's blank-field omission are what keep those rows renderable, and Discord rejects an empty field value (50035) so the omission is correctness, not polish; (3) UpdateMyApplicationDto is PartialType(CreateApplicationDto), so PATCH /applications/mine stays optional per-field \u2014 that is deliberate; (4) the READ models on the frontend keep `representativeNote?` for the same legacy-null reason, only CreateApplicationPayload went required. T-0214 is newly filed: SCHEMA.md section 3.5 still documents the PRE-T-0039 applications table (phantom why_join, platform, timezone, prior_experience, age_confirmed, how_found-as-enum; missing the four columns T-0039 added). T-0213 fixed only the one row it touched and left a drift warning. Local-env gotchas worth keeping: port 3000 is an unrelated capybara Grafana container, so run the API on 3001 and set DISCORD_CALLBACK_URL through the 4200 proxy or the OAuth state cookie is lost; `nest start` wipes dist but a stale tsconfig.build.tsbuildinfo then makes tsc emit nothing, so rm it before a dev start; the dev DB's Owner member is bound to a REAL Discord snowflake, so the mock `owner` persona is only an Applicant there \u2014 point the API at lords_dashboard_e2e to get a real mock owner. Still open from before: T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts `denyReason`); T-0209 left the resync fan-out with no batchId; T-0210 (suspension/unban vs Discord roles) still deferred and applyBanRoleOnBan still OFF in production; BACKUP_HEARTBEAT_URL in ~/lords/backup.env is still blank and the first unattended 03:30 UTC backup run is still unconfirmed; the live medal cabinet still has a medal whose description reads 'Please update the description'.",
-  "nextIdCounter": 215,
+  "lastSyncedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
+  "lastSyncedAt": "2026-08-04T22:10:00Z",
+  "notesForNextSession": "T-0215 is the live thread: the roster and member profiles are now PUBLIC, and the dashboard is staff-only. The frontend half is lords-regiment-dashboard T-0287, on branch feat/public-site-redesign in BOTH repos (PRs into dev, not main). FIVE things not to undo. (1) PublicMemberDto is a SEPARATE class with its own mapper, not MemberDto with conditional deletes \u2014 the sensitive fields are absent from the TYPE, and a spec asserts each one is missing from the serialized object; do not 'simplify' it back into one DTO. (2) ONE exclusion predicate (applyPublicPredicate) is shared by the roster, a profile, the sitemap and the crawler shell; splitting it would let a member stay indexed on a page they were removed from. (3) Only a deliberately DELETED account gets 410 \u2014 banned, suspended, applicant, pending and never-existed all collapse to an indistinguishable 404 so the endpoint cannot be used as an oracle for 'was this member disciplined?'. (4) The @ sigil in /u/@panda is MANDATORY: it is what keeps the vanity namespace disjoint from the 12-char short-id namespace, and it retires the reserved-word problem for routes. (5) og-html.ts must never regain its <meta http-equiv=refresh> \u2014 it pointed at the URL the crawler was rewritten FROM and looped for googlebot/bingbot/applebot. \u26a0\ufe0f NOTHING A CRAWLER CAN SEE IS LIVE UNTIL SOMEONE SSHes INTO THE BOX. lords-deploy only pins image tags; it never syncs the Caddyfile or the compose files. APEX_HOST must go into ~/lords/.env BEFORE the Caddyfile sync or caddy refuses to start (the :? default) and the site goes dark \u2014 caddy is the only container publishing ports. Full runbook in deploy/README.md ('Edge config is hand-synced'). Enable Authenticated Origin Pulls and TRUST_CF_CONNECTING_IP=true BEFORE submitting the sitemap, or a Googlebot burst 429s real members out of the shared 120/min bucket. Still open from before: T-0214 (SCHEMA.md \u00a73.5 documents the pre-T-0039 applications table); T-0211's self-promotion note (the SELF check must stay ABOVE the isDecorationAction short-circuit in member-hierarchy.ts); T-0209 left the resync fan-out with no batchId; T-0210 (suspension vs Discord roles) deferred and applyBanRoleOnBan still OFF in production; BACKUP_HEARTBEAT_URL still blank; the live medal cabinet still has a medal described 'Please update the description'.",
+  "nextIdCounter": 216,
   "connections": [],
   "tasks": [
     {
@@ -15157,6 +15157,105 @@
           "to": "planned",
           "by": "claude",
           "note": "discovered during T-0213 \u2014 SCHEMA.md documented a phantom why_join column"
+        }
+      ]
+    },
+    {
+      "id": "T-0215",
+      "title": "Public roster + member profiles, vanity handles, and the crawler surface",
+      "summary": "Opened the roster and every member profile to anonymous readers behind a structurally separate PublicMemberDto, added optional vanity handles (members.username + username_reservations) backing /u/@handle, proxied avatars so no Discord snowflake reaches public HTML, trimmed turnout out of the public event projection and windowed its history to 90 days, and added a crawler-facing HTML surface (/api/seo/*) plus a dynamic sitemap. Fixed a live redirect-loop bug in the gallery share shell along the way.",
+      "status": "review",
+      "type": "feature",
+      "size": "XL",
+      "sizeWeight": 8,
+      "area": "roster",
+      "feature": "public-profiles",
+      "subfeature": "anonymous-projection",
+      "repo": "",
+      "paths": [
+        "src/members/public/",
+        "src/members/dto/public-member.dto.ts",
+        "src/members/username.service.ts",
+        "src/members/entities/username-reservation.entity.ts",
+        "src/common/ids/username.ts",
+        "src/seo/",
+        "src/database/migrations/1784900005000-PublicProfilesAndUsernames.ts",
+        "Caddyfile",
+        "test/public-profile.e2e-spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PublicMemberDto omits every sensitive field on the SERIALIZED object",
+          "status": "passed"
+        },
+        {
+          "desc": "username validation, cooldown, reservation and ER_DUP_ENTRY handling",
+          "status": "passed"
+        },
+        {
+          "desc": "crawler shell escapes member-authored text and emits no meta refresh",
+          "status": "passed"
+        },
+        {
+          "desc": "e2e: anonymous roster/profile, @handle + shortId resolution, 404 vs 410, sitemap",
+          "status": "passed"
+        },
+        {
+          "desc": "live smoke: exclusion predicate against banned/suspended/applicant/pending rows",
+          "status": "passed"
+        },
+        {
+          "desc": "Caddy rewrite + sitemap route verified ON THE BOX after the manual sync",
+          "status": "pending"
+        },
+        {
+          "desc": "Search Console: submit sitemap AFTER Authenticated Origin Pulls is on",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "The public EventDto dropped rsvpCounts/attendeesCount/expectedAttendance/attendanceGoal. Any anonymous consumer that read them now sees undefined; the SPA was updated in the same change, but a third-party or cached client would not be.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        },
+        {
+          "desc": "og-html.ts no longer emits a meta refresh. A human who opens /api/share/gallery/:id directly now stays on the plain shell instead of bouncing to the SPA \u2014 deliberate, but it is a visible behaviour change on a route that is directly linkable.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        },
+        {
+          "desc": "members.username is UNIQUE under utf8mb4_unicode_ci, so uniqueness is case- AND accent-insensitive AND PAD SPACE. CI runs mysql:8.0 without the conf.d mount and lords_e2e_test is utf8mb4_0900_ai_ci (NO PAD), so a trailing-whitespace or accent uniqueness test can pass in CI and fail in prod.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        },
+        {
+          "desc": "Account deletion now purges the member's R2 avatar/banner objects. Best-effort and outside the transaction, but it is the first code path that deletes member media.",
+          "status": "open",
+          "notedAt": "2026-08-04T22:10:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did NOT move status/suspendedUntil/bannedAt behind view_audit_log for INTERNAL callers. Every enrolled member including a Mercenary still reads another member's discipline state on the authenticated roster. Out of scope here (the public projection simply never carries them) but worth its own task.",
+        "Did NOT wire the dead members.public_profile column. The owner chose no per-member opt-out, so the column stays unread \u2014 as does `standing`, which only the dev-owner seeder ever writes.",
+        "No username_history table, so a renamed handle's old URL 404s after the 30-day cooldown rather than redirecting forever.",
+        "The sitemap is a single document capped at 5000 profiles, not a sitemap index. Fine at regiment scale; it would need splitting at 50k URLs.",
+        "Cloudflare Authenticated Origin Pulls and TRUST_CF_CONNECTING_IP=true are documented in deploy/README.md but NOT enabled. Until they are, the whole internet shares one 120/min bucket keyed on Caddy's IP and a crawl burst can 429 real members.",
+        "Did not add a robots meta or noindex to /api/seo/* responses themselves \u2014 they are only ever reached through the Caddy UA rewrite, never linked."
+      ],
+      "lastTouchedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
+      "createdAt": "2026-08-04T22:10:00Z",
+      "updatedAt": "2026-08-04T22:10:00Z",
+      "history": [
+        {
+          "at": "2026-08-04T22:10:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "backend + Caddy/compose/docs shipped on feat/public-site-redesign; 1115 unit + 178 e2e green, live smoke-tested against a real MySQL"
         }
       ]
     }

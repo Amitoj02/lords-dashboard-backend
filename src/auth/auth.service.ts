@@ -223,6 +223,10 @@ export class AuthService {
     return {
       id: member.id,
       inGameName: member.inGameName,
+      // The caller's own vanity handle (T-0215). The SPA needs it to route "my
+      // profile" straight to /u/@handle rather than to the short-id URL that
+      // would only redirect off itself a moment later.
+      username: member.username ?? null,
       rank: member.rank?.name ?? null,
       role: member.role,
       discordTag: null,
@@ -245,6 +249,10 @@ export class AuthService {
     return {
       id: identity.id,
       inGameName: identity.globalName ?? identity.discordUsername ?? 'Recruit',
+      // An identity-only caller is not on the roster and so has no handle to
+      // claim yet — null, never the Discord username, which is a different
+      // namespace entirely.
+      username: null,
       rank: null,
       role: MemberRole.Applicant,
       discordTag: identity.discordTag,

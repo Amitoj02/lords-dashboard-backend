@@ -11,6 +11,14 @@ export class CurrentUserDto {
 
   @ApiProperty({
     nullable: true,
+    description:
+      'The vanity handle backing /u/@handle, or null when unclaimed. Always null for an ' +
+      'identity-only caller — they are not on the roster and have no handle to claim yet.',
+  })
+  username: string | null;
+
+  @ApiProperty({
+    nullable: true,
     description: 'Rank name; null for identity-only (not yet a member)',
   })
   rank: string | null;
