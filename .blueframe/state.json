@@ -1,7 +1,7 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
+  "lastSyncedCommit": "5050e5348068e1e8643ff2b2fb18b07e0e391b1a",
   "lastSyncedAt": "2026-08-05T04:20:00Z",
   "notesForNextSession": "T-0216 (member bio + linked accounts) is in REVIEW on branch feat/member-bio-and-socials, coupled to frontend T-0289..T-0292 on the same branch name. MERGE THIS REPO FIRST - the SPA reads member.bio and member.socialLinks and treats both as absent-means-empty, so a wrong deploy order is cosmetic.\n\nThe decision worth not relitigating: handles are stored, URLs are BUILT. src/members/social-platforms.ts owns the regex and the template for all seven networks; socialProfileUrl THROWS on an unregistered platform (the column is an open varchar), so every read path must filter through isSupportedSocialPlatform first - which is why MemberSocialLinkDto.fromMany does it once and both from() bodies go through it rather than each caller remembering. Discord is deliberately NOT one of the seven: it already exists as discordTag on the signed-in projection, and adding it here would publish it.\n\nThe stored `precedence` int is a snapshot of the registry order at INSERT time; display order comes from the live registry via fromMany, so retiring a platform reorders existing rows correctly without a backfill.\n\nGDPR: executeSelfDeletion soft-removes the member, so ON DELETE CASCADE never fires on member_social_links - the explicit delete beside `member.bio = null` is what actually clears them, and account-deletion.e2e-spec now asserts it against the real table.\n\nENVIRONMENT FOOTGUN found while verifying: the host `nest build` and the api container's `nest start --watch` share tsconfig.build.tsbuildinfo, and nest-cli.json sets deleteOutDir: true. A host build leaves the buildinfo current, the container then deletes dist/ and emits nothing, and the API stays down through any number of restarts with \"Cannot find module /app/dist/main\". Clear the buildinfo and restart, or build inside the container. Worth a CONTRIBUTING note or a per-environment tsBuildInfoFile.\n\nVerification: npm run lint:check, npm run build, npm test (54 suites / 1249 tests), npm run format:check and npm run test:e2e (10 suites / 188 tests) all green; the migration was applied, reverted and re-applied against real MySQL 8. The migration HAS been applied to the shared dev database (lords_dashboard) so the redesigned profile could be walked in a browser.",
   "nextIdCounter": 217,
@@ -15360,7 +15360,7 @@
         "Social links are not emitted as JSON-LD sameAs. The handles are unverified, and sameAs is a claim of identity.",
         "public-profile.e2e-spec.ts was left alone; the bio and rel=\"nofollow ugc\" crawler assertions went into the new member-bio-and-socials e2e suite instead of a shared spec owned by T-0215."
       ],
-      "lastTouchedCommit": "",
+      "lastTouchedCommit": "5050e5348068e1e8643ff2b2fb18b07e0e391b1a",
       "createdAt": "2026-08-05T04:20:00Z",
       "updatedAt": "2026-08-05T04:20:00Z",
       "history": [
@@ -15383,7 +15383,7 @@
           "from": "in_progress",
           "to": "review",
           "by": "claude",
-          "note": "opened for review; 1249 unit + 188 e2e green, lint/build/format clean, migration up-down-up verified on MySQL 8"
+          "note": "opened for review; 1249 unit + 188 e2e green, lint/build/format clean, migration up-down-up verified on MySQL 8 PRs: backend https://github.com/Amitoj02/lords-dashboard-backend/pull/81 and frontend https://github.com/Amitoj02/lords-regiment-dashboard/pull/67, both into dev; merge this repo first."
         }
       ]
     }
@@ -15407,7 +15407,7 @@
     {
       "at": "2026-08-05T04:20:00Z",
       "by": "claude",
-      "note": "T-0216 (member bio + handle-based linked accounts) implemented and opened for review, coupled to lords-regiment-dashboard T-0289..T-0292 on the matching branch feat/member-bio-and-socials. Merge THIS repo first."
+      "note": "T-0216 (member bio + handle-based linked accounts) implemented and opened for review, coupled to lords-regiment-dashboard T-0289..T-0292 on the matching branch feat/member-bio-and-socials. Merge THIS repo first. PRs: backend https://github.com/Amitoj02/lords-dashboard-backend/pull/81 and frontend https://github.com/Amitoj02/lords-regiment-dashboard/pull/67, both into dev; merge this repo first."
     }
   ]
 }
