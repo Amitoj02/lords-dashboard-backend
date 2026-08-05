@@ -294,8 +294,17 @@ describe('public roster + profiles (e2e)', () => {
       // was rewritten from, which Googlebot follows into a loop.
       expect(res.text).not.toContain('http-equiv="refresh"');
       // Equivalence: the crawler sees the same facts a human does, not a stub.
+      // `Events attended` used to be the sentinel here; it left every surface in
+      // T-0297, so the rank — which the SPA also shows in the particulars — is
+      // what stands in for "a real facts list, not a head full of meta tags".
       expect(res.text).toContain('<h1>');
-      expect(res.text).toContain('Events attended');
+      expect(res.text).toContain('<dt>Rank</dt>');
+      expect(res.text).not.toContain('Events attended');
+      // The oEmbed link is the only source of Discord's author line, and it is
+      // discoverable ONLY as this element — Discord ignores the `Link:` header
+      // form the spec also permits.
+      expect(res.text).toContain('type="application/json+oembed"');
+      expect(res.text).toContain('<meta property="profile:username" content="panda" />');
     });
 
     it('propagates the SAME status code the API gives, so a dead URL de-indexes', async () => {
