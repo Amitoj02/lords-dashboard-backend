@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "66f761add2143ef71722883fec34249a80ef6697",
-  "lastSyncedAt": "2026-08-05T19:45:00Z",
-  "notesForNextSession": "T-0301 is in REVIEW as PR #86, coupled to frontend PR 73. T-0297/T-0298 are merged into DEV (PR #84) but NOT on main.\n\n⚠️ NOTHING FROM THIS WORK IS IN PRODUCTION YET. main is the production branch; dev has to be promoted to main and the WEB image redeployed. The crawler routing now lives in the frontend's nginx.conf, so `deploy web <tag>` is what makes link previews start working — the API half has been correct and deployed since T-0293.\n\nVERIFY AFTER DEPLOY (the fast tell): a crawler-path response carrying `Vary: Accept-Encoding` + `Cache-Control: no-store` is the web nginx answering; the API sends `Vary: User-Agent` + `max-age=600`. As of the last check production still returns the former, i.e. the old build.\n\nTHE ROOT CAUSE nobody should re-diagnose: link previews were identical everywhere because production ran a Caddyfile predating even the T-0197 gallery unfurler. /api/seo/* was always correct. Cloudflare's certificate config is NOT involved — that was the first hypothesis and it was wrong (cf-cache-status was DYNAMIC throughout).\n\nTHE LESSON FROM THE REVIEW, worth keeping: the two bugs that mattered were both in code I had written careful comments about. /api/oembed declared `@Query('author') author: string | undefined` — Express does not honour that, `qs` yields string[] for a repeated key, and the global ValidationPipe coerces only Number and Boolean. That 500'd a @Public() route AND defeated a URL scheme check, because RegExp.test stringifies its argument. **Every other @Query typed `string` in this codebase has the same latent bug** and was NOT audited — that is the open regressionRisk on T-0301 and the most valuable thing to pick up next. Separately, describeEvents was changed without its seo-copy.ts twin, in the same PR whose comments warn three times about exactly that.\n\nSTILL NOT DONE. (a) Nothing pasted into a real Discord channel — the oEmbed author line is unit-tested only, and Discord caches an unfurl ~30min with no purge, so append a throwaway query string when re-testing. (b) The Caddyfile on the box is un-synced; it no longer blocks previews but still owns the www→apex 301, which nginx cannot do. (c) Search Console: the sitemap has never been submitted, and deploy/README.md is explicit that Authenticated Origin Pulls + TRUST_CF_CONNECTING_IP must land FIRST — until then every crawler shares one bucket per route, which is why the shell limit went 60→300 as a stopgap.",
-  "nextIdCounter": 302,
+  "lastSyncedCommit": "db548e722102dd359d00fcadd42b5226842666a4",
+  "lastSyncedAt": "2026-08-06T03:15:00Z",
+  "notesForNextSession": "T-0302 is in REVIEW as PR #87 against dev and is a COUPLED RELEASE with lords-regiment-dashboard:T-0311 — DEFAULT_CARD_IMAGE now names /assets/images/social-card.png, a file that only exists in the FRONTEND build. Deploy the web image first or ship both together.\n\nT-0301 is in REVIEW as PR #86, coupled to frontend PR 73. T-0297/T-0298 are merged into DEV (PR #84) but NOT on main.\n\n⚠️ NOTHING FROM THIS WORK IS IN PRODUCTION YET. main is the production branch; dev has to be promoted to main and the WEB image redeployed. The crawler routing now lives in the frontend's nginx.conf, so `deploy web <tag>` is what makes link previews start working — the API half has been correct and deployed since T-0293.\n\nVERIFY AFTER DEPLOY (the fast tell): a crawler-path response carrying `Vary: Accept-Encoding` + `Cache-Control: no-store` is the web nginx answering; the API sends `Vary: User-Agent` + `max-age=600`. As of the last check production still returns the former, i.e. the old build.\n\nTHE ROOT CAUSE nobody should re-diagnose: link previews were identical everywhere because production ran a Caddyfile predating even the T-0197 gallery unfurler. /api/seo/* was always correct. Cloudflare's certificate config is NOT involved — that was the first hypothesis and it was wrong (cf-cache-status was DYNAMIC throughout).\n\nTHE LESSON FROM THE REVIEW, worth keeping: the two bugs that mattered were both in code I had written careful comments about. /api/oembed declared `@Query('author') author: string | undefined` — Express does not honour that, `qs` yields string[] for a repeated key, and the global ValidationPipe coerces only Number and Boolean. That 500'd a @Public() route AND defeated a URL scheme check, because RegExp.test stringifies its argument. **Every other @Query typed `string` in this codebase has the same latent bug** and was NOT audited — that is the open regressionRisk on T-0301 and the most valuable thing to pick up next. Separately, describeEvents was changed without its seo-copy.ts twin, in the same PR whose comments warn three times about exactly that.\n\nSTILL NOT DONE. (a) Nothing pasted into a real Discord channel — the oEmbed author line is unit-tested only, and Discord caches an unfurl ~30min with no purge, so append a throwaway query string when re-testing. (b) The Caddyfile on the box is un-synced; it no longer blocks previews but still owns the www→apex 301, which nginx cannot do. (c) Search Console: the sitemap has never been submitted, and deploy/README.md is explicit that Authenticated Origin Pulls + TRUST_CF_CONNECTING_IP must land FIRST — until then every crawler shares one bucket per route, which is why the shell limit went 60→300 as a stopgap.",
+  "nextIdCounter": 303,
   "connections": [],
   "tasks": [
     {
@@ -15917,6 +15917,65 @@
           "note": "raised and fixed from the adversarial review; PR #86"
         }
       ]
+    },
+    {
+      "id": "T-0302",
+      "title": "Point the crawler shell's default card at the crest, not the site banner",
+      "summary": "The owner pasted https://lordsofholdfast.com/ into Discord and got a frame of Holdfast gameplay under the regiment's name — banner.png, the default card image on every public URL that has nothing of its own to show. Replaced it with social-card.png: the regiment crest centred on --ink-900 at 1200x630, composed from regiment-logo.png. Wide-card size on purpose — the crest is square on its own and Discord demotes a square image to a thumbnail whatever twitter:card claims, so the ink field is what keeps the large embed the owner already had. The title and the tagline are unchanged; only the picture is. This half is DEFAULT_CARD_IMAGE and its two declared dimensions (853x480 -> 1200x630), which every shell-rendered page falls through to: the roster, an empty calendar, the generic card, and a member with neither an avatar nor a banner. The asset itself lives in the frontend build and is served from this origin, so the constant is a cross-repo reference and the deploy is coupled. The precedence above it is untouched — an owner-set hero or regiment banner still wins on /home, because the crest is the answer for a page nobody has spoken for, not an override of one.",
+      "status": "review",
+      "type": "fix",
+      "size": "S",
+      "sizeWeight": 1,
+      "area": "seo",
+      "feature": "crawler-shell",
+      "subfeature": "card-image",
+      "repo": "",
+      "paths": [
+        "src/seo/seo.service.ts",
+        "src/seo/seo.service.spec.ts"
+      ],
+      "dependsOn": [
+        "lords-regiment-dashboard:T-0311"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "the seo suite asserts the crest card for a member with no avatar and no banner, and for a missing regiment row",
+          "status": "passed"
+        },
+        {
+          "desc": "a crawler-UA fetch of /roster and /u/<slug> emits og:image = <site>/assets/images/social-card.png and that URL 200s",
+          "status": "pending"
+        },
+        {
+          "desc": "an event with its own bannerUrl still cards that banner, not the crest",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "DEFAULT_CARD_IMAGE names a file that ships in lords-regiment-dashboard, so this API cannot verify the URL resolves. Deployed ahead of the web image it emits a 404 card on every default-image page — the roster, an empty calendar, avatarless profiles. banner.png is deliberately still present in the frontend so the reverse order is safe.",
+          "status": "open",
+          "notedAt": "2026-08-06T03:15:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not change the /home precedence (presentation.heroBannerUrl -> bannerUrl -> default). An owner-set hero is a deliberate statement about that page's card; only the unclaimed pages change.",
+        "Did not reconcile the pre-existing disagreement between the shell (prefers presentation.heroBannerUrl) and the SPA landing page (uses cardBannerUrl only). It predates this task and is a separate fix."
+      ],
+      "lastTouchedCommit": "",
+      "createdAt": "2026-08-06T03:15:00Z",
+      "updatedAt": "2026-08-06T03:15:00Z",
+      "history": [
+        {
+          "at": "2026-08-06T03:15:00Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "created and opened as a PR against dev, coupled to lords-regiment-dashboard:T-0311 (its PR #78)"
+        }
+      ]
     }
   ],
   "history": [
@@ -15949,6 +16008,11 @@
       "at": "2026-08-05T19:45:00Z",
       "by": "claude",
       "note": "T-0301 created from the adversarial review of #84; T-0297/T-0298 merged to dev"
+    },
+    {
+      "at": "2026-08-06T03:15:00Z",
+      "by": "claude",
+      "note": "T-0302 created (default crawler-shell card image -> composed crest card; coupled to frontend T-0311)"
     }
   ]
 }
