@@ -76,10 +76,25 @@ const PROFILE_DESCRIPTION_LIMIT = 160;
  * line of text — `twitter:card` degrades to `summary` when there is no image,
  * and the frontend's `SeoService` applies the identical fallback so the two
  * documents keep agreeing.
+ *
+ * THE CREST, NOT A SCREENSHOT (T-0302). This was `banner.png`, a frame of
+ * Holdfast gameplay. It filled the wide card, but a page with nothing of its own
+ * to show is exactly the page whose card has to identify the REGIMENT, and every
+ * one of them — the roster, an empty calendar, a member with no avatar — unfurled
+ * as the same anonymous battlefield. `social-card.png` is the crest centred on
+ * `--ink-900` at 1200x630, the wide card's canonical size, so the LAYOUT is
+ * unchanged and only the subject is. It is a composed asset rather than
+ * `regiment-logo.png` because the crest is square on its own and Discord demotes
+ * a square image to a thumbnail whatever the tag claims; the ink field is what
+ * buys the large card.
+ *
+ * ⚠️ Mirrored by `DEFAULT_IMAGE` in the frontend's `core/services/seo.service.ts`
+ * and by the static `og:image` in its `index.html`, and the file itself ships in
+ * that repo — so changing this is a coupled deploy in both directions.
  */
-const DEFAULT_CARD_IMAGE = '/assets/images/banner.png';
-const DEFAULT_CARD_WIDTH = 853;
-const DEFAULT_CARD_HEIGHT = 480;
+const DEFAULT_CARD_IMAGE = '/assets/images/social-card.png';
+const DEFAULT_CARD_WIDTH = 1200;
+const DEFAULT_CARD_HEIGHT = 630;
 
 /**
  * Renders the public pages as crawlable HTML (T-0215, widened in T-0293).
@@ -411,10 +426,14 @@ export class SeoService {
       'Roster, events and gallery for a Holdfast: Nations at War regiment.';
 
     // The admin-editable hero wins, then the regiment banner, then NULL — which
-    // `cardImageFor` turns into the shipped brand banner complete with its
+    // `cardImageFor` turns into the shipped crest card complete with its
     // dimensions. Naming `DEFAULT_CARD_IMAGE` here instead would route it
     // through the same branch as a CDN URL and silently drop the width/height
     // an unfurler lays the card out from.
+    //
+    // Note the order survives T-0302: an owner who has uploaded a hero in
+    // Settings has said what THIS page's card should be, and the crest is the
+    // answer for a page nobody has spoken for — not an override of one.
     const hero = profile?.presentation?.heroBannerUrl || profile?.bannerUrl || null;
 
     const established = profile?.establishedYear ?? null;
@@ -852,7 +871,7 @@ export class SeoService {
   // ── Card images ─────────────────────────────────────────────────────────────
 
   /**
-   * The shipped brand banner, for a page with no image of its own.
+   * The shipped crest card, for a page with no image of its own.
    *
    * Without this the roster, an empty calendar and the generic card would all
    * unfurl with `twitter:card: summary` and no picture — technically honest, and
