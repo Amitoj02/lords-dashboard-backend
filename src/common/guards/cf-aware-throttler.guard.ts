@@ -1,11 +1,6 @@
 import { ExecutionContext, Injectable } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
-
-/** The subset of the request we need; avoids an `any`-typed parameter. */
-interface ProxyAwareRequest {
-  headers?: Record<string, string | string[] | undefined>;
-  ip?: string;
-}
+import { ClientAddressedRequest, resolveClientAddress } from '../net/client-ip';
 
 /**
  * Rate-limits by the real client IP rather than the reverse proxy's.
@@ -34,11 +29,13 @@ interface ProxyAwareRequest {
  * operator sets exactly once the Cloudflare-only-ingress control is enforced.
  * Otherwise (default, and everywhere that control is not in place) the key is the
  * socket peer `req.ip`, which cannot be forged.
+ *
+ * The rule itself now lives in {@link resolveClientAddress} — the gallery view
+ * counter dedupes on the same address, and two copies of "who is this caller"
+ * could drift apart with only one of them visibly wrong.
  */
 @Injectable()
 export class CfAwareThrottlerGuard extends ThrottlerGuard {
-  private readonly trustCfHeader = process.env.TRUST_CF_CONNECTING_IP === 'true';
-
   /**
    * Disable rate limiting under NODE_ENV=test. The e2e suites drive many requests
    * from a single client IP into one shared bucket, so per-route limits (added for
@@ -49,12 +46,7 @@ export class CfAwareThrottlerGuard extends ThrottlerGuard {
     return Promise.resolve(process.env.NODE_ENV === 'test');
   }
 
-  protected getTracker(req: ProxyAwareRequest): Promise<string> {
-    const cfIp = req.headers?.['cf-connecting-ip'];
-    const tracker =
-      this.trustCfHeader && typeof cfIp === 'string' && cfIp.length > 0
-        ? cfIp
-        : (req.ip ?? 'unknown');
-    return Promise.resolve(tracker);
+  protected getTracker(req: ClientAddressedRequest): Promise<string> {
+    return Promise.resolve(resolveClientAddress(req));
   }
 }

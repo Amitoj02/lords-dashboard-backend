@@ -652,7 +652,8 @@ after the post succeeds, so a row's *presence* is the answer to "has this been a
 | `deleted_at` | timestamp NULL | soft-delete |
 
 Indexes: `INDEX(regiment_id, status)`, `INDEX(author_member_id)`, `INDEX(event_id)`.
-Derived: `likes` ← `COUNT(gallery_likes)`, `file_count` ← `COUNT(gallery_files)`.
+Derived: `likes` ← `COUNT(gallery_likes)`, `views` ← `COUNT(gallery_views)`,
+`file_count` ← `COUNT(gallery_files)`.
 
 #### `gallery_files` (child, 1—*)
 | Column | Type | Notes |
@@ -684,6 +685,40 @@ PK: `(gallery_item_id, member_id)`.
 | `liked_at` | timestamp | |
 
 PK: `(gallery_item_id, member_id)`.
+
+#### `gallery_views` (backs the `views` count — T-0302)
+| Column | Type | Notes |
+| --- | --- | --- |
+| `gallery_item_id` | char(12) FK | PK part, `ON DELETE CASCADE` |
+| `viewer_hash` | char(64) | PK part — `HMAC-SHA256(secret, item_id + '\n' + client_address)`, hex |
+| `viewed_at` | datetime(6) | first sighting; never refreshed on a repeat visit |
+
+PK: `(gallery_item_id, viewer_hash)` — this constraint IS the "one view per
+address" rule; the service upserts and lets the database decide.
+
+**Three deliberate departures from the conventions above, all for the same reason.**
+
+1. **No `member_id`, ever.** A signed-in member's view is recorded exactly like a
+   stranger's. Views are a fact about readership, not membership, and the product
+   rule is that nobody can see *who* viewed — a member column would make the row
+   identify a person.
+2. **The viewer column is a keyed hash, not an address.** The HMAC key
+   (`GALLERY_VIEW_HASH_SECRET`, derived from `ENCRYPTION_KEY` when unset) lives
+   only in the environment, so nobody holding this database can recover an IP. A
+   bare SHA-256 would not do: IPv4 is 2^32 candidates, i.e. an afternoon's brute
+   force. The **item id inside the HMAC message** is equally load-bearing — it
+   makes one visitor's hash on item A unrelated to their hash on item B, so no
+   query and no dump can reconstruct an individual's reading history.
+3. **No index on the trailing column**, against the junction convention. That
+   index exists to make reverse lookups fast; here "everything this viewer saw"
+   is the one query that must stay both meaningless and slow. Counting is
+   `GROUP BY gallery_item_id`, served by the PK's leading column.
+
+Related operational note: the address hashed here is resolved by
+`resolveClientAddress`, the same helper the rate limiter keys on. While
+`TRUST_CF_CONNECTING_IP=false` and a proxy fronts the origin, every visitor
+presents the proxy's address, so views collapse toward one per item. Enabling
+that flag (once Cloudflare-only ingress is enforced) corrects both at once.
 
 ---
 
@@ -893,6 +928,7 @@ events ─1:*─ gallery_items (optional link)
 
 gallery_items ─1:*─ gallery_files
 gallery_items ─*:*─ members     (via gallery_tagged_members, gallery_likes)
+gallery_items ─1:*─ gallery_views  (anonymous — no edge to members, by design)
 
 notifications ─*:*─ members     (via notification_reads)
 audit_log_entries ─*:0..1─ members (actor / target — soft polymorphic target)

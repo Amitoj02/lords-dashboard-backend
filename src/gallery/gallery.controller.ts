@@ -21,6 +21,7 @@ import {
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -28,9 +29,14 @@ import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
 import { RequireCapability } from '../authz/decorators/require-capability.decorator';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { Capability } from '../common/enums';
+import { resolveClientAddress } from '../common/net/client-ip';
 import { CreateGalleryItemDto } from './dto/create-gallery-item.dto';
 import { DeclineGalleryDto } from './dto/decline-gallery.dto';
-import { GalleryItemDto, GallerySubmissionSummaryDto } from './dto/gallery-item.dto';
+import {
+  GalleryItemDto,
+  GallerySubmissionSummaryDto,
+  GalleryViewStateDto,
+} from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
 import { UpdateGalleryItemDto } from './dto/update-gallery-item.dto';
 import { GalleryLikeState, GalleryService } from './gallery.service';
@@ -42,6 +48,15 @@ import { GalleryLikeState, GalleryService } from './gallery.service';
  * Delete is open to the post AUTHOR or a moderator (authorized in the service).
  * Likes are open to any authenticated member. Mutations are scoped + audited in
  * the service. The literal `moderation/queue` route is declared before `:id`.
+ *
+ * Likes and views (T-0302) split three ways on purpose, and the split IS the
+ * privacy policy:
+ *  - anyone may READ the totals — they ride along on every item projection;
+ *  - only a signed-in member may LIKE, and `GET :id/like` answers about the
+ *    caller and nobody else;
+ *  - anyone may be COUNTED as a viewer, signed in or not, and no route reports
+ *    who those viewers were. There is nothing to report: the stored viewer key
+ *    is a per-item HMAC of an address.
  */
 @ApiTags('gallery')
 @ApiBearerAuth('access-token')
@@ -140,6 +155,36 @@ export class GalleryController {
     @Req() req: Request,
   ): Promise<GalleryItemDto> {
     return this.galleryService.decline(user, id, dto, req.ip ?? null);
+  }
+
+  @Public()
+  @Post(':id/view')
+  @HttpCode(HttpStatus.OK)
+  // Its own bucket, well above a reader's pace and well below a refresh loop's.
+  // The convention every @Public() route here follows: anonymous traffic must
+  // not be able to drain the global 120/min the rest of the API shares.
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Record a view of a gallery item (public; once per address)' })
+  @ApiOkResponse({ type: GalleryViewStateDto, description: 'The fresh view count.' })
+  @ApiForbiddenResponse({ description: 'The gallery is private' })
+  recordView(
+    @Param('id', ParseShortIdPipe) id: string,
+    @Req() req: Request,
+  ): Promise<GalleryViewStateDto> {
+    // The SAME address the rate limiter keys on — one shared resolver, so the
+    // two can never disagree about who the caller is. It is HMAC'd with a server
+    // secret before it reaches the database, and is never stored or logged raw.
+    return this.galleryService.recordView(id, resolveClientAddress(req));
+  }
+
+  @Get(':id/like')
+  @ApiOperation({ summary: 'The caller’s own like state for an item (never anyone else’s)' })
+  @ApiOkResponse({ description: 'The caller’s like state { likesCount, liked }.' })
+  likeState(
+    @Param('id', ParseShortIdPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<GalleryLikeState> {
+    return this.galleryService.likeState(user, id);
   }
 
   @Post(':id/like')

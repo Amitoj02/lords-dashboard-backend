@@ -15,10 +15,11 @@ import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
 import { GalleryTag } from './entities/gallery-tag.entity';
+import { GalleryView } from './entities/gallery-view.entity';
 
 /**
- * Gallery module. Registers the item + its child tables (files, likes, tags),
- * the Member repo (author name resolution + decline-DM identity lookup) and
+ * Gallery module. Registers the item + its child tables (files, likes, views,
+ * tags), the Member repo (author name resolution + decline-DM identity lookup) and
  * RegimentSettings (public-visibility flag + submission limits). AuditService is
  * global and DataSource (used for the submit transaction) is provided by the
  * root TypeOrmModule. DiscordModule is imported for the decline DM and the
@@ -36,6 +37,7 @@ import { GalleryTag } from './entities/gallery-tag.entity';
       GalleryFile,
       GalleryLike,
       GalleryTag,
+      GalleryView,
       Member,
       RegimentSettings,
     ]),
