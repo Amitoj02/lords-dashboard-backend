@@ -71,6 +71,7 @@ export class GalleryFileDto {
 export interface GalleryItemProjection {
   files: GalleryFileDto[];
   likesCount: number;
+  viewsCount: number;
   tags: string[];
   author: GalleryMemberRefDto | null;
   /** Whether the current caller has liked the item; omitted for public (no user). */
@@ -129,6 +130,14 @@ export class GalleryItemDto {
   @ApiProperty({ description: 'Number of members who have liked this item' })
   likesCount: number;
 
+  @ApiProperty({
+    description:
+      'Number of distinct viewers of this item. Public to everyone, like the likes ' +
+      'count. WHO viewed is not derivable from any endpoint: the backing rows hold a ' +
+      'per-item keyed hash of the viewer address, never the address and never a member id.',
+  })
+  viewsCount: number;
+
   @ApiPropertyOptional({
     description: 'Whether the caller has liked it (authenticated views only)',
   })
@@ -176,6 +185,7 @@ export class GalleryItemDto {
     dto.files = projection.files;
     dto.tags = projection.tags;
     dto.likesCount = projection.likesCount;
+    dto.viewsCount = projection.viewsCount;
     dto.liked = projection.liked;
     dto.approvedBy = projection.approvedBy;
     dto.submittedAt = item.submittedAt.toISOString();
@@ -200,4 +210,15 @@ export class GallerySubmissionSummaryDto {
 
   @ApiProperty({ nullable: true, example: 'Jane Doe' })
   submitterUsername: string | null;
+}
+
+/**
+ * What recording a view returns (T-0302): the fresh public count, and nothing
+ * else. Deliberately NOT `{ counted: boolean }` — telling the caller whether
+ * their own view was new would confirm to anyone who asks whether that address
+ * had visited before, which is precisely the fact this feature does not disclose.
+ */
+export class GalleryViewStateDto {
+  @ApiProperty({ example: 1247, description: 'Distinct viewers of this item after the call' })
+  viewsCount: number;
 }

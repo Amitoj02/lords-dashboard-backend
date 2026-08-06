@@ -24,6 +24,7 @@ import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
 import { GalleryTag } from './entities/gallery-tag.entity';
+import { GalleryView } from './entities/gallery-view.entity';
 
 type MockRepo<T extends object> = Partial<Record<keyof Repository<T>, jest.Mock>>;
 
@@ -131,6 +132,15 @@ const makeSelectQb = (rawMany: unknown[] = []) => ({
   getRawMany: jest.fn().mockResolvedValue(rawMany),
 });
 
+/** A chainable insert query-builder stub, for the view upsert. */
+const makeInsertQb = () => ({
+  insert: jest.fn().mockReturnThis(),
+  into: jest.fn().mockReturnThis(),
+  values: jest.fn().mockReturnThis(),
+  orUpdate: jest.fn().mockReturnThis(),
+  execute: jest.fn().mockResolvedValue({ raw: [] }),
+});
+
 /** A chainable query-builder stub for the paginated item list. */
 const makeListQb = (rows: GalleryItem[] = [], total = 0) => ({
   leftJoinAndSelect: jest.fn().mockReturnThis(),
@@ -148,6 +158,9 @@ describe('GalleryService', () => {
   let files: MockRepo<GalleryFile>;
   let likes: MockRepo<GalleryLike>;
   let tags: MockRepo<GalleryTag>;
+  let views: MockRepo<GalleryView>;
+  /** The last insert builder handed out by `views.createQueryBuilder`. */
+  let viewInsertQb: ReturnType<typeof makeInsertQb>;
   let members: MockRepo<Member>;
   let settings: MockRepo<RegimentSettings>;
   let audit: { record: jest.Mock };
@@ -189,6 +202,17 @@ describe('GalleryService', () => {
       createQueryBuilder: jest.fn().mockReturnValue(makeSelectQb()),
     };
     tags = { find: jest.fn().mockResolvedValue([]) };
+    viewInsertQb = makeInsertQb();
+    views = {
+      // Two shapes off one repo: the grouped COUNT for the projection, and the
+      // upsert for recordView. `insert` on the returned object is what tells
+      // them apart, so the stub hands back a select builder by default and the
+      // insert builder only when a test reaches for it.
+      createQueryBuilder: jest.fn((alias?: string) =>
+        alias === 'gv' ? makeSelectQb() : viewInsertQb,
+      ),
+      count: jest.fn().mockResolvedValue(0),
+    };
     members = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn().mockResolvedValue(null) };
     settings = { find: jest.fn().mockResolvedValue([]), findOne: jest.fn() };
     audit = { record: jest.fn() };
@@ -206,8 +230,15 @@ describe('GalleryService', () => {
       resolveKeyToPublicUrl: jest.fn((_u: unknown, key: string) => `https://cdn.example/${key}`),
       deleteObject: jest.fn().mockResolvedValue(undefined),
     };
-    // Only `frontend.url` is read, to build the share link on a channel post.
-    config = { get: jest.fn(() => ({ url: 'https://lords.example' })) };
+    // Two namespaces are read: `frontend.url` to build the share link on a
+    // channel post, and `gallery.viewHashSecret` to key the viewer HMAC.
+    config = {
+      get: jest.fn((key: string) =>
+        key === 'gallery'
+          ? { viewHashSecret: 'test-view-hash-secret-0123456789abcdef' }
+          : { url: 'https://lords.example' },
+      ),
+    };
 
     txItems = {
       create: jest.fn((x: unknown) => x),
@@ -241,6 +272,7 @@ describe('GalleryService', () => {
         { provide: getRepositoryToken(GalleryFile), useValue: files },
         { provide: getRepositoryToken(GalleryLike), useValue: likes },
         { provide: getRepositoryToken(GalleryTag), useValue: tags },
+        { provide: getRepositoryToken(GalleryView), useValue: views },
         { provide: getRepositoryToken(Member), useValue: members },
         { provide: getRepositoryToken(RegimentSettings), useValue: settings },
         { provide: DataSource, useValue: dataSource },
@@ -765,6 +797,130 @@ describe('GalleryService', () => {
         memberId: 'member-1',
       });
       expect(result).toEqual({ likesCount: 0, liked: false });
+    });
+  });
+
+  describe('likeState (T-0302)', () => {
+    it('reports the caller’s own like without changing it', async () => {
+      items.findOne!.mockResolvedValue(buildItem());
+      likes.count!.mockResolvedValue(47);
+      likes.findOne!.mockResolvedValue({ galleryItemId: 'gallery-1', memberId: 'member-1' });
+
+      await expect(service.likeState(MEMBER_USER, 'gallery-1')).resolves.toEqual({
+        likesCount: 47,
+        liked: true,
+      });
+      // The whole point of a separate read: it must not create the like it reports.
+      expect(likes.save).not.toHaveBeenCalled();
+      expect(likes.delete).not.toHaveBeenCalled();
+    });
+
+    it('scopes the per-member lookup to the CALLER, never another member', async () => {
+      items.findOne!.mockResolvedValue(buildItem());
+      likes.count!.mockResolvedValue(3);
+      likes.findOne!.mockResolvedValue(null);
+
+      await expect(service.likeState(MEMBER_USER, 'gallery-1')).resolves.toEqual({
+        likesCount: 3,
+        liked: false,
+      });
+      expect(likes.findOne).toHaveBeenCalledWith({
+        where: { galleryItemId: 'gallery-1', memberId: MEMBER_USER.memberId },
+      });
+    });
+
+    it('forbids a caller who is not an enrolled member', async () => {
+      await expect(service.likeState(ANON_USER, 'gallery-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    });
+  });
+
+  describe('recordView (T-0302)', () => {
+    /** Pull the row the service handed to the insert builder. */
+    const insertedRow = () =>
+      (viewInsertQb.values.mock.calls[0]?.[0] ?? {}) as {
+        galleryItemId?: string;
+        viewerHash?: string;
+        viewedAt?: Date;
+      };
+
+    beforeEach(() => {
+      settings.find!.mockResolvedValue([buildSettings()]);
+      items.findOne!.mockResolvedValue({ id: 'gallery-1' });
+    });
+
+    it('records the view and returns the fresh count', async () => {
+      views.count!.mockResolvedValue(1248);
+
+      await expect(service.recordView('gallery-1', '203.0.113.9')).resolves.toEqual({
+        viewsCount: 1248,
+      });
+      expect(viewInsertQb.execute).toHaveBeenCalledTimes(1);
+      expect(insertedRow().galleryItemId).toBe('gallery-1');
+    });
+
+    it('never writes the address — the stored key is a 64-char hex digest', async () => {
+      await service.recordView('gallery-1', '203.0.113.9');
+
+      const { viewerHash } = insertedRow();
+      expect(viewerHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(JSON.stringify(insertedRow())).not.toContain('203.0.113.9');
+    });
+
+    it('gives the same address the same key on the same item, so the PK dedupes it', async () => {
+      await service.recordView('gallery-1', '203.0.113.9');
+      const first = insertedRow().viewerHash;
+      viewInsertQb.values.mockClear();
+      await service.recordView('gallery-1', '203.0.113.9');
+
+      expect(insertedRow().viewerHash).toBe(first);
+      // The dedupe is the constraint, not a read-then-write: a no-op upsert.
+      expect(viewInsertQb.orUpdate).toHaveBeenCalled();
+    });
+
+    it('gives the same address DIFFERENT keys on different items (no cross-item correlation)', async () => {
+      await service.recordView('gallery-1', '203.0.113.9');
+      const onItemOne = insertedRow().viewerHash;
+
+      viewInsertQb.values.mockClear();
+      items.findOne!.mockResolvedValue({ id: 'gallery-2' });
+      await service.recordView('gallery-2', '203.0.113.9');
+
+      expect(insertedRow().viewerHash).not.toBe(onItemOne);
+    });
+
+    it('gives two different addresses different keys on the same item', async () => {
+      await service.recordView('gallery-1', '203.0.113.9');
+      const first = insertedRow().viewerHash;
+      viewInsertQb.values.mockClear();
+      await service.recordView('gallery-1', '198.51.100.4');
+
+      expect(insertedRow().viewerHash).not.toBe(first);
+    });
+
+    it('404s an item that is not approved/visible, without writing anything', async () => {
+      items.findOne!.mockResolvedValue(null);
+
+      await expect(service.recordView('gallery-1', '203.0.113.9')).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(viewInsertQb.execute).not.toHaveBeenCalled();
+    });
+
+    it('403s (and writes nothing) when the regiment has turned the public gallery off', async () => {
+      settings.find!.mockResolvedValue([buildSettings({ publicGallery: false })]);
+
+      await expect(service.recordView('gallery-1', '203.0.113.9')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(items.findOne).not.toHaveBeenCalled();
+      expect(viewInsertQb.execute).not.toHaveBeenCalled();
+    });
+
+    it('never audits — an audit row would carry the real IP this feature hides', async () => {
+      await service.recordView('gallery-1', '203.0.113.9');
+      expect(audit.record).not.toHaveBeenCalled();
     });
   });
 

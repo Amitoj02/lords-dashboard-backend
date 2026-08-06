@@ -3,6 +3,7 @@
  * Consume via `ConfigService<AppConfig, true>` for end-to-end type safety, e.g.
  *   configService.get('discord', { infer: true }).clientId
  */
+import { createHash } from 'crypto';
 
 const toBool = (value: string | boolean | undefined, fallback = false): boolean => {
   if (typeof value === 'boolean') return value;
@@ -27,6 +28,7 @@ export interface AppConfig {
   frontend: FrontendConfig;
   storage: StorageConfig;
   integrations: IntegrationsConfig;
+  gallery: GalleryConfig;
 }
 
 export interface DatabaseConfig {
@@ -114,6 +116,44 @@ export interface IntegrationsConfig {
   youtubeApiKey: string;
 }
 
+export interface GalleryConfig {
+  /**
+   * HMAC key that turns a viewer's IP address into the opaque `viewer_hash`
+   * stored on `gallery_views` (T-0302). It is the ONLY thing standing between
+   * that table and a reversible log of who read what — IPv4 is 2^32 candidates,
+   * so an unkeyed hash of an address is not an anonymisation at all.
+   *
+   * Never null. When `GALLERY_VIEW_HASH_SECRET` is unset it is DERIVED from
+   * `ENCRYPTION_KEY` (see below) rather than defaulted to a constant, so no
+   * deployment can accidentally run with a publicly-known key.
+   */
+  viewHashSecret: string;
+}
+
+/**
+ * The view-hash key: the explicit secret when one is configured, otherwise a
+ * one-way derivation from `ENCRYPTION_KEY`.
+ *
+ * Deriving rather than requiring a new variable is deliberate. `ENCRYPTION_KEY`
+ * is already required, already 32 bytes of real entropy, and already present in
+ * every environment that boots this app (dev compose, CI, production) — so this
+ * feature ships without a migration of anyone's environment, and there is no
+ * window in which it silently runs on a weak key. The domain-separating prefix
+ * means the derived value cannot be used to attack the AES key it came from.
+ *
+ * Setting `GALLERY_VIEW_HASH_SECRET` explicitly is still worth doing, for one
+ * reason: it can then be ROTATED independently. Rotating it does not lose any
+ * recorded view — the rows stay — but every returning visitor looks new once,
+ * so counts step up slightly. That is the intended trade for forward secrecy.
+ */
+const viewHashSecret = (): string => {
+  const explicit = process.env.GALLERY_VIEW_HASH_SECRET?.trim();
+  if (explicit) return explicit;
+  return createHash('sha256')
+    .update(`gallery-view-hash:${process.env.ENCRYPTION_KEY ?? ''}`)
+    .digest('hex');
+};
+
 export default (): AppConfig => {
   const env = (process.env.NODE_ENV as AppConfig['env']) ?? 'development';
   const isProd = env === 'production';
@@ -187,6 +227,9 @@ export default (): AppConfig => {
     })(),
     integrations: {
       youtubeApiKey: process.env.YOUTUBE_API_KEY ?? '',
+    },
+    gallery: {
+      viewHashSecret: viewHashSecret(),
     },
   };
 };

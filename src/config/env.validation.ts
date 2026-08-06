@@ -120,6 +120,19 @@ export const envValidationSchema = Joi.object({
   S3_PRESIGN_EXPIRY_SECONDS: Joi.number().integer().min(60).max(3600).default(900),
   S3_MAX_UPLOAD_MB: Joi.number().integer().min(1).max(2048).default(100),
 
+  // Gallery view counting (T-0302). The HMAC key for the opaque `viewer_hash`
+  // on `gallery_views` — the one thing that keeps that column from being a
+  // reversible record of who read what (IPv4 is 2^32 candidates, so an unkeyed
+  // hash of an address is not an anonymisation).
+  //
+  // Optional on purpose, and NOT because a default is acceptable: when it is
+  // unset, configuration.ts DERIVES the key from the already-required
+  // ENCRYPTION_KEY, so no environment can boot on a publicly-known value. Set it
+  // explicitly (min 32 chars) only when you want to rotate it independently —
+  // rotating keeps every recorded view but makes each returning visitor look new
+  // once, so counts step up slightly.
+  GALLERY_VIEW_HASH_SECRET: Joi.string().min(32).allow('').default(''),
+
   // External integrations — optional third-party API keys. Allowed empty so the
   // app boots without them; the dependent feature degrades gracefully when unset.
   // YOUTUBE_API_KEY enables YouTube Data API enrichment (canonical title +
