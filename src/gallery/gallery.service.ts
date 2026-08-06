@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
+import { createHmac } from 'crypto';
 import { DataSource, FindOptionsWhere, In, Repository } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { AuthenticatedUser } from '../auth/types/authenticated-user.interface';
@@ -31,6 +32,7 @@ import {
   GalleryItemDto,
   GalleryMemberRefDto,
   GallerySubmissionSummaryDto,
+  GalleryViewStateDto,
 } from './dto/gallery-item.dto';
 import { GalleryQueryDto } from './dto/gallery-query.dto';
 import { UpdateGalleryItemDto } from './dto/update-gallery-item.dto';
@@ -38,6 +40,7 @@ import { GalleryFile } from './entities/gallery-file.entity';
 import { GalleryItem } from './entities/gallery-item.entity';
 import { GalleryLike } from './entities/gallery-like.entity';
 import { GalleryTag } from './entities/gallery-tag.entity';
+import { GalleryView } from './entities/gallery-view.entity';
 
 /** Fallbacks mirroring the regiment_settings column defaults (used when no row exists). */
 const DEFAULT_MAX_ITEMS_PER_SUBMISSION = 10;
@@ -60,8 +63,15 @@ export interface GalleryLikeState {
  * regiment and excludes soft-deleted rows. Submissions land in the moderation
  * queue unless the regiment auto-approves trusted staff. Multi-table writes
  * (item + files + tags) run in a transaction; every moderation mutation is
- * audited. List enrichment (files, like counts, tagged members) is batched into
- * grouped queries to avoid N+1.
+ * audited. List enrichment (files, like counts, view counts, tags) is batched
+ * into grouped queries to avoid N+1.
+ *
+ * PRIVACY BOUNDARY, worth stating once here because it is a product rule and not
+ * an accident: likes and views are PUBLIC as totals and PRIVATE as identities.
+ * `likesCount`/`viewsCount` go to everyone; the only per-person fact any
+ * endpoint returns is the caller's own `liked`. Nothing exposes who liked or
+ * who viewed, and `gallery_views` is shaped so that no future endpoint could —
+ * it stores a per-item keyed hash of an address, never a member id.
  */
 @Injectable()
 export class GalleryService {
@@ -76,6 +86,8 @@ export class GalleryService {
     private readonly likes: Repository<GalleryLike>,
     @InjectRepository(GalleryTag)
     private readonly tags: Repository<GalleryTag>,
+    @InjectRepository(GalleryView)
+    private readonly views: Repository<GalleryView>,
     @InjectRepository(Member)
     private readonly members: Repository<Member>,
     @InjectRepository(RegimentSettings)
@@ -481,6 +493,30 @@ export class GalleryService {
     return this.projectOne(item, user.memberId);
   }
 
+  /**
+   * The caller's own like state for an item, without changing it (T-0302).
+   *
+   * The detail page needs this to draw the heart filled or hollow on FIRST
+   * paint. It could not come from `GET /gallery/:id`, which is `@Public()` and
+   * therefore has no caller — and making that route caller-varying was the wrong
+   * fix, because the public feed is cacheable precisely because its body does
+   * not depend on who asked. An authenticated route that answers about YOURSELF
+   * only keeps both properties.
+   *
+   * Note what this deliberately cannot do: there is no endpoint, here or
+   * anywhere, that reports who ELSE liked an item. `memberId` below is always
+   * the caller's own.
+   */
+  async likeState(user: AuthenticatedUser, id: string): Promise<GalleryLikeState> {
+    const memberId = this.requireMember(user);
+    const item = await this.loadItem(id, user.regimentId, { onlyApproved: true });
+    const [likesCount, existing] = await Promise.all([
+      this.likes.count({ where: { galleryItemId: item.id } }),
+      this.likes.findOne({ where: { galleryItemId: item.id, memberId } }),
+    ]);
+    return { likesCount, liked: !!existing };
+  }
+
   /** Idempotently like an item for the caller. Returns the fresh like state. */
   async like(user: AuthenticatedUser, id: string): Promise<GalleryLikeState> {
     const memberId = this.requireMember(user);
@@ -509,6 +545,92 @@ export class GalleryService {
     await this.likes.delete({ galleryItemId: item.id, memberId });
     const likesCount = await this.likes.count({ where: { galleryItemId: item.id } });
     return { likesCount, liked: false };
+  }
+
+  // ── Views (T-0302) ───────────────────────────────────────────────────────────
+
+  /**
+   * Record that this address has seen an item, and return the fresh public count.
+   *
+   * ── UNAUTHENTICATED BY DESIGN ───────────────────────────────────────────────
+   * Every visitor counts, signed in or not — a view is a fact about readership,
+   * not about membership. So this resolves the item through the same public path
+   * `findOnePublic` uses (approved, non-draft, and 403 when the regiment has
+   * turned the public gallery off), rather than scoping to a caller's regiment.
+   * A private gallery must not even confirm that an id exists.
+   *
+   * ── ONCE PER ADDRESS, ENFORCED BY THE DATABASE ──────────────────────────────
+   * The insert is `INSERT … ON DUPLICATE KEY UPDATE` against the composite
+   * primary key, i.e. an upsert that changes nothing on collision. Read-then-
+   * write would race two concurrent requests from the same visitor into two
+   * rows, and a refresh loop is exactly the traffic pattern that would hit it.
+   * `viewed_at` is untouched on a repeat visit on purpose — see the entity.
+   *
+   * The address never reaches this table; {@link viewerHashFor} does. Nothing
+   * here is audited either: an audit row carries the actor's real IP, so logging
+   * anonymous reads would reintroduce, in a retained table, precisely the record
+   * this feature is built not to keep.
+   */
+  async recordView(id: string, clientAddress: string): Promise<GalleryViewStateDto> {
+    const settings = await this.resolveSettings();
+    if (!settings) {
+      throw new NotFoundException('Gallery item not found');
+    }
+    if (settings.publicGallery === false) {
+      throw new ForbiddenException('The gallery is private');
+    }
+
+    const item = await this.items.findOne({
+      where: {
+        id,
+        regimentId: settings.regimentId,
+        status: GalleryStatus.Approved,
+        isDraft: false,
+      },
+      select: { id: true },
+    });
+    if (!item) {
+      throw new NotFoundException('Gallery item not found');
+    }
+
+    await this.views
+      .createQueryBuilder()
+      .insert()
+      .into(GalleryView)
+      .values({
+        galleryItemId: item.id,
+        viewerHash: this.viewerHashFor(item.id, clientAddress),
+        viewedAt: new Date(),
+      })
+      // A no-op update: MySQL has no INSERT IGNORE in the QueryBuilder, and
+      // `orIgnore()` would also swallow a genuine FK failure. Re-asserting the
+      // key the row already has makes the collision a deliberate no-op and lets
+      // every other error surface.
+      .orUpdate(['gallery_item_id'], ['gallery_item_id', 'viewer_hash'])
+      .execute();
+
+    const viewsCount = await this.views.count({ where: { galleryItemId: item.id } });
+    return { viewsCount };
+  }
+
+  /**
+   * The opaque, per-item viewer key: `HMAC-SHA256(secret, itemId + '\n' + address)`.
+   *
+   * Three choices, each doing a specific job:
+   *  - HMAC rather than a bare hash, because IPv4 is 2^32 candidates — an
+   *    unkeyed digest of an address is a reversible record, not an anonymised
+   *    one. The key lives only in the environment.
+   *  - The ITEM ID in the message, so the same visitor's key differs per
+   *    dispatch. Without it, one dump of this table would reconstruct every
+   *    person's whole reading history; with it, cross-item correlation is not
+   *    merely unexposed, it is not computable.
+   *  - A `\n` separator, so `('ab', 'c')` and `('a', 'bc')` cannot collide. Short
+   *    ids are fixed-width today, which makes this belt and braces — and exactly
+   *    the assumption a future id scheme would break silently.
+   */
+  private viewerHashFor(itemId: string, clientAddress: string): string {
+    const secret = this.config.get('gallery', { infer: true }).viewHashSecret;
+    return createHmac('sha256', secret).update(`${itemId}\n${clientAddress}`).digest('hex');
   }
 
   /**
@@ -654,9 +776,10 @@ export class GalleryService {
       return [];
     }
     const itemIds = items.map((item) => item.id);
-    const [filesByItem, likeCounts, tagsByItem, likedSet] = await Promise.all([
+    const [filesByItem, likeCounts, viewCounts, tagsByItem, likedSet] = await Promise.all([
       this.filesFor(itemIds),
       this.likeCountsFor(itemIds),
+      this.viewCountsFor(itemIds),
       this.tagsFor(itemIds),
       viewerMemberId ? this.likedSetFor(itemIds, viewerMemberId) : Promise.resolve(null),
     ]);
@@ -665,6 +788,7 @@ export class GalleryService {
       GalleryItemDto.from(item, {
         files: filesByItem.get(item.id) ?? [],
         likesCount: likeCounts.get(item.id) ?? 0,
+        viewsCount: viewCounts.get(item.id) ?? 0,
         tags: tagsByItem.get(item.id) ?? [],
         author: item.author
           ? {
@@ -731,6 +855,27 @@ export class GalleryService {
       .addSelect('COUNT(*)', 'count')
       .where('gl.galleryItemId IN (:...itemIds)', { itemIds })
       .groupBy('gl.galleryItemId')
+      .getRawMany<{ itemId: string; count: string }>();
+    return new Map(rows.map((row) => [row.itemId, Number(row.count)]));
+  }
+
+  /**
+   * One grouped query mapping itemId -> distinct viewer count for the page.
+   *
+   * Mirrors {@link likeCountsFor} exactly, and stays a COUNT for the same reason
+   * a denormalised `views_count` column was rejected: the rows ARE the dedupe,
+   * so a cached total could disagree with the constraint that produced it.
+   */
+  private async viewCountsFor(itemIds: string[]): Promise<Map<string, number>> {
+    if (itemIds.length === 0) {
+      return new Map();
+    }
+    const rows = await this.views
+      .createQueryBuilder('gv')
+      .select('gv.galleryItemId', 'itemId')
+      .addSelect('COUNT(*)', 'count')
+      .where('gv.galleryItemId IN (:...itemIds)', { itemIds })
+      .groupBy('gv.galleryItemId')
       .getRawMany<{ itemId: string; count: string }>();
     return new Map(rows.map((row) => [row.itemId, Number(row.count)]));
   }

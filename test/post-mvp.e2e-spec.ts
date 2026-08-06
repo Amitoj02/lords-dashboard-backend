@@ -69,6 +69,8 @@ describe('Post-MVP feature modules (e2e)', () => {
   // Rows created during the run, torn down in afterAll.
   let eventId: string | undefined;
   let galleryId: string | undefined;
+  /** A second, never-approved submission — the negative case for view counting. */
+  let unapprovedGalleryId: string | undefined;
 
   beforeAll(async () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
@@ -100,7 +102,11 @@ describe('Post-MVP feature modules (e2e)', () => {
         .update({ role: MemberRole.Applicant, capability }, { granted: false });
     }
     if (eventId) await dataSource.getRepository(RegimentEvent).delete(eventId);
+    // Hard deletes — the FK cascade takes the files/likes/views rows with them.
     if (galleryId) await dataSource.getRepository(GalleryItem).delete(galleryId);
+    if (unapprovedGalleryId) {
+      await dataSource.getRepository(GalleryItem).delete(unapprovedGalleryId);
+    }
     await cleanupApplicant();
     await app.close();
   });
@@ -695,6 +701,66 @@ describe('Post-MVP feature modules (e2e)', () => {
         .set(bearer(ownerToken))
         .expect(200);
       expect(second.body.likesCount).toBe(1); // idempotent
+    });
+
+    // ── Likes + views: totals are public, identities are not (T-0302) ────────
+    it('reports the caller’s own like state without changing it', async () => {
+      const state = await request(server())
+        .get(`/api/gallery/${galleryId}/like`)
+        .set(bearer(ownerToken))
+        .expect(200);
+      expect(state.body).toEqual({ likesCount: 1, liked: true });
+    });
+
+    it('refuses to answer the like-state question without a session', async () => {
+      // "How many people liked this" is public (likesCount). "Has THIS PERSON
+      // liked it" is not a question an anonymous caller may ask about anybody.
+      await request(server()).get(`/api/gallery/${galleryId}/like`).expect(401);
+    });
+
+    it('counts a signed-out visitor’s view, and counts each address only once', async () => {
+      const first = await request(server()).post(`/api/gallery/${galleryId}/view`).expect(200);
+      expect(first.body.viewsCount).toBe(1);
+
+      // Same client, second call: the composite primary key absorbs it.
+      const second = await request(server()).post(`/api/gallery/${galleryId}/view`).expect(200);
+      expect(second.body.viewsCount).toBe(1);
+
+      // …and the total is on the public projection, for anyone.
+      const item = await request(server()).get(`/api/gallery/${galleryId}`).expect(200);
+      expect(item.body.viewsCount).toBe(1);
+    });
+
+    it('answers a view with the count and nothing that identifies a viewer', async () => {
+      const res = await request(server()).post(`/api/gallery/${galleryId}/view`).expect(200);
+      // Deliberately not `{ counted: true }`: telling a caller whether their own
+      // view was new confirms whether that address has been here before.
+      expect(Object.keys(res.body as object)).toEqual(['viewsCount']);
+    });
+
+    it('never exposes who liked or who viewed on the item projection', async () => {
+      const item = await request(server()).get(`/api/gallery/${galleryId}`).expect(200);
+      const body = item.body as Record<string, unknown>;
+      expect(typeof body.likesCount).toBe('number');
+      expect(typeof body.viewsCount).toBe('number');
+      // No roster of either, under any name such a field would plausibly take.
+      for (const leak of ['likedBy', 'likers', 'likes', 'viewedBy', 'viewers', 'views']) {
+        expect(body[leak]).toBeUndefined();
+      }
+      // And `liked` is absent entirely here — it is a fact about a caller, and
+      // an anonymous request has none.
+      expect(body.liked).toBeUndefined();
+    });
+
+    it('404s a view of an item that is not publicly visible', async () => {
+      const pending = await request(server())
+        .post('/api/gallery')
+        .set(bearer(ownerToken))
+        .send({ title: 'E2E Unapproved', type: 'image' })
+        .expect(201);
+      unapprovedGalleryId = pending.body.id as string;
+
+      await request(server()).post(`/api/gallery/${unapprovedGalleryId}/view`).expect(404);
     });
   });
 

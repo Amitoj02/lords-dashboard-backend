@@ -37,6 +37,7 @@ describe('GalleryShareService', () => {
     files: [],
     tags: [],
     likesCount: 0,
+    viewsCount: 0,
     submittedAt: '2026-07-01T10:00:00.000Z',
     approvedAt: null,
     createdAt: '2026-07-01T10:00:00.000Z',

@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "66f761add2143ef71722883fec34249a80ef6697",
-  "lastSyncedAt": "2026-08-05T19:45:00Z",
-  "notesForNextSession": "T-0301 is in REVIEW as PR #86, coupled to frontend PR 73. T-0297/T-0298 are merged into DEV (PR #84) but NOT on main.\n\n⚠️ NOTHING FROM THIS WORK IS IN PRODUCTION YET. main is the production branch; dev has to be promoted to main and the WEB image redeployed. The crawler routing now lives in the frontend's nginx.conf, so `deploy web <tag>` is what makes link previews start working — the API half has been correct and deployed since T-0293.\n\nVERIFY AFTER DEPLOY (the fast tell): a crawler-path response carrying `Vary: Accept-Encoding` + `Cache-Control: no-store` is the web nginx answering; the API sends `Vary: User-Agent` + `max-age=600`. As of the last check production still returns the former, i.e. the old build.\n\nTHE ROOT CAUSE nobody should re-diagnose: link previews were identical everywhere because production ran a Caddyfile predating even the T-0197 gallery unfurler. /api/seo/* was always correct. Cloudflare's certificate config is NOT involved — that was the first hypothesis and it was wrong (cf-cache-status was DYNAMIC throughout).\n\nTHE LESSON FROM THE REVIEW, worth keeping: the two bugs that mattered were both in code I had written careful comments about. /api/oembed declared `@Query('author') author: string | undefined` — Express does not honour that, `qs` yields string[] for a repeated key, and the global ValidationPipe coerces only Number and Boolean. That 500'd a @Public() route AND defeated a URL scheme check, because RegExp.test stringifies its argument. **Every other @Query typed `string` in this codebase has the same latent bug** and was NOT audited — that is the open regressionRisk on T-0301 and the most valuable thing to pick up next. Separately, describeEvents was changed without its seo-copy.ts twin, in the same PR whose comments warn three times about exactly that.\n\nSTILL NOT DONE. (a) Nothing pasted into a real Discord channel — the oEmbed author line is unit-tested only, and Discord caches an unfurl ~30min with no purge, so append a throwaway query string when re-testing. (b) The Caddyfile on the box is un-synced; it no longer blocks previews but still owns the www→apex 301, which nginx cannot do. (c) Search Console: the sitemap has never been submitted, and deploy/README.md is explicit that Authenticated Origin Pulls + TRUST_CF_CONNECTING_IP must land FIRST — until then every crawler shares one bucket per route, which is why the shell limit went 60→300 as a stopgap.",
-  "nextIdCounter": 302,
+  "lastSyncedCommit": "db548e722102dd359d00fcadd42b5226842666a4",
+  "lastSyncedAt": "2026-08-06T03:55:00Z",
+  "notesForNextSession": "T-0302 is in REVIEW as a PR against dev, COUPLED to lords-regiment-dashboard T-0311 (see https://github.com/Amitoj02/lords-regiment-dashboard). Ship the two together — the SPA calls POST /gallery/:id/view and GET /gallery/:id/like, neither of which exists on an older API.\n\nTHE ONE THING WORTH KNOWING about view counts: dedup keys on resolveClientAddress(), the SAME helper the rate limiter uses. While TRUST_CF_CONNECTING_IP=false and Caddy fronts the origin, req.ip is the PROXY on every request — so in production every visitor currently presents one address and views collapse toward one per item. That is not a bug in the counter; it is the rate limiter's long-standing property, now shared. Flipping TRUST_CF_CONNECTING_IP=true (which requires Cloudflare-only ingress: Authenticated Origin Pulls or a firewall pinning :443 to Cloudflare ranges — LDA-H2/H3) fixes both at once. Do NOT 'fix' it by enabling Express trust proxy; the codebase rejects that as forgeable.\n\nThe view-hash key derives from ENCRYPTION_KEY when GALLERY_VIEW_HASH_SECRET is unset, so no environment needed changing to deploy this. Setting it explicitly buys independent rotation; rotating keeps recorded views but makes each returning visitor look new once.\n\nStill true from before: NOTHING from the T-0293..T-0301 crawler/link-preview work is in PRODUCTION. main is the production branch; dev has to be promoted and the WEB image redeployed.",
+  "nextIdCounter": 303,
   "connections": [],
   "tasks": [
     {
@@ -15917,6 +15917,105 @@
           "note": "raised and fixed from the adversarial review; PR #86"
         }
       ]
+    },
+    {
+      "id": "T-0302",
+      "title": "Gallery view counts, with an IP the operator cannot read",
+      "summary": "Adds `gallery_views` and the public `POST /gallery/:id/view` behind it, plus `viewsCount` on every GalleryItemDto and a `GET /gallery/:id/like` that answers about the CALLER only. Product rule the shape encodes: totals are public to everyone, the act of liking is members-only, and nobody — including whoever operates the database — can see who liked or viewed. The viewer key is HMAC-SHA256(secret, itemId + '\\n' + address): keyed so an IPv4 address (2^32 candidates) cannot be brute-forced back out, and per-ITEM salted so one visitor's hashes on two dispatches are unrelated values and no dump can reconstruct a reading history. The composite PK (gallery_item_id, viewer_hash) is what enforces 'counted once', via an upsert rather than a read-then-write that two concurrent refreshes would race. Signing in is irrelevant to a view — every reader counts. Frontend twin: lords-regiment-dashboard T-0311.",
+      "status": "review",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 5,
+      "area": "gallery",
+      "feature": "engagement-counts",
+      "subfeature": "views",
+      "repo": "",
+      "paths": [
+        "src/gallery/entities/gallery-view.entity.ts",
+        "src/database/migrations/1784900007000-GalleryViewCounts.ts",
+        "src/gallery/gallery.service.ts",
+        "src/gallery/gallery.controller.ts",
+        "src/gallery/dto/gallery-item.dto.ts",
+        "src/gallery/gallery.module.ts",
+        "src/common/net/client-ip.ts",
+        "src/common/guards/cf-aware-throttler.guard.ts",
+        "src/config/configuration.ts",
+        "src/config/env.validation.ts",
+        "SCHEMA.md",
+        ".env.example"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "a signed-out visitor's view is counted, and a second call from the same address does not move the total",
+          "status": "passed"
+        },
+        {
+          "desc": "the same address hashes differently on two different items (no cross-item correlation)",
+          "status": "passed"
+        },
+        {
+          "desc": "the stored viewer key is 64 hex chars and the raw address appears nowhere in the row",
+          "status": "passed"
+        },
+        {
+          "desc": "a view of a pending/declined item 404s and writes nothing; a private gallery 403s",
+          "status": "passed"
+        },
+        {
+          "desc": "the item projection exposes likesCount + viewsCount and no roster of either",
+          "status": "passed"
+        },
+        {
+          "desc": "GET /gallery/:id/like is 401 anonymously and reports only the caller's own state",
+          "status": "passed"
+        },
+        {
+          "desc": "recording a view writes no audit row (an audit row would carry the real IP)",
+          "status": "passed"
+        },
+        {
+          "desc": "live: the dev stack records a real browser visit (4830 -> 4831) and the count reaches the SPA",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "CfAwareThrottlerGuard's tracker moved into the shared resolveClientAddress(). Behaviour is identical except the TRUST_CF_CONNECTING_IP env var is now read per call instead of captured at construction, so a runtime change takes effect. Every route in the API is rate-limited through this guard.",
+          "status": "open"
+        },
+        {
+          "desc": "GalleryItemDto gained a REQUIRED viewsCount, so every construction site must set it. The compiler catches this inside the repo (it did — gallery-share.service.spec), but any consumer deserialising the DTO shape independently would not be.",
+          "status": "open"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not denormalise a views_count column onto gallery_items — the rows ARE the dedupe, and a cached total could disagree with the constraint that produced it. Revisit only if COUNT(*) on gallery_views shows up in slow queries.",
+        "Did not add an optional-auth guard so the public GET /gallery/:id could carry `liked`. The codebase deliberately gives anonymous surfaces their own controller/service rather than caller-varying conditionals, and a caller-varying public feed also stops being cacheable. A separate authenticated GET :id/like keeps both properties.",
+        "Did not seed gallery_views in the dev seeder — a fresh dev DB shows zero views, which is honest.",
+        "Did not add a most-liked / most-viewed sort to the gallery, which the design doc offers as a follow-up."
+      ],
+      "lastTouchedCommit": "db548e722102dd359d00fcadd42b5226842666a4",
+      "createdAt": "2026-08-06T03:55:00Z",
+      "updatedAt": "2026-08-06T03:55:00Z",
+      "history": [
+        {
+          "at": "2026-08-06T03:55:00Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created from the owner's Claude Design brief 'Gallery Likes & Views' and its privacy answers (registered users may like; anyone may read totals; nobody may see identities; views by hashed IP, login-independent)"
+        },
+        {
+          "at": "2026-08-06T03:55:00Z",
+          "from": "planned",
+          "to": "review",
+          "by": "claude",
+          "note": "implemented on feat/gallery-view-counts; 1303 unit + 194 e2e green; verified live in Chrome against the dev stack; PR open against dev"
+        }
+      ]
     }
   ],
   "history": [
@@ -15949,6 +16048,11 @@
       "at": "2026-08-05T19:45:00Z",
       "by": "claude",
       "note": "T-0301 created from the adversarial review of #84; T-0297/T-0298 merged to dev"
+    },
+    {
+      "at": "2026-08-06T03:55:00Z",
+      "by": "claude",
+      "note": "T-0302 created and implemented: gallery view counts with a per-item keyed viewer hash; coupled to frontend T-0311"
     }
   ]
 }
