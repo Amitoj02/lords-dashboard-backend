@@ -338,11 +338,11 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
       expect(html).toContain('<meta name="twitter:card" content="summary_large_image" />');
     });
 
-    it('still shows the site banner for a member with neither', async () => {
+    it('still shows the site crest card for a member with neither', async () => {
       const html = await render(profile({ avatarUrl: null, bannerUrl: null }));
 
       expect(html).toContain(
-        `<meta property="og:image" content="${SITE}/assets/images/banner.png" />`,
+        `<meta property="og:image" content="${SITE}/assets/images/social-card.png" />`,
       );
     });
 
@@ -426,7 +426,7 @@ describe('SeoService — member-authored content on the profile shell (T-0216)',
 
       expect(html).toContain('<title>Lords Regiment</title>');
       expect(html).toContain(
-        `<meta property="og:image" content="${SITE}/assets/images/banner.png" />`,
+        `<meta property="og:image" content="${SITE}/assets/images/social-card.png" />`,
       );
     });
 
