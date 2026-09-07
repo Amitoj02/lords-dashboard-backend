@@ -505,6 +505,17 @@ CI (`.github/workflows/ci.yml`) runs two jobs on every branch push and every PR 
 
 Every value CI needs is a committed throwaway constant. The backend job references no repository secrets at all, and no workflow uses `pull_request_target`, so a fork PR can neither read nor leak anything.
 
+**Dependency updates are manual.** Dependabot was removed rather than left to open a weekly PR queue nobody drained. Refresh deliberately instead, and let the CI gate above judge the result:
+
+```bash
+npm outdated          # what has moved
+npm audit             # what has an advisory against it
+npm update            # everything inside the ranges in package.json
+npm audit fix         # transitive advisories, without breaking changes
+```
+
+Keep the `@nestjs/*` packages on one version — `@nestjs/core` and `@nestjs/common` disagreeing is a peer-dependency failure, not a bump — and move `typescript`, `ts-jest`, `ts-node` and `typescript-eslint` together, since each carries a peer range on the compiler.
+
 ---
 
 ## 📜 NPM scripts
