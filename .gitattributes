@@ -1,0 +1,20 @@
+# Normalize all text files to LF in the repository (Prettier also enforces LF).
+#
+# Without this, a Windows checkout with core.autocrlf=true materializes every
+# file with CRLF, and `npm run format:check` / `npm run lint:check` then report a
+# `Delete ␍` error on every single line — tens of thousands of them. CI never
+# sees it because ubuntu-latest checks out LF, so the breakage is invisible until
+# someone tries to lint on Windows. Mirrors the frontend repo's .gitattributes.
+* text=auto eol=lf
+
+# Treat binary assets as binary so git never touches their bytes.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
