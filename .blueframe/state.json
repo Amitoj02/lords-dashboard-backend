@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "db548e722102dd359d00fcadd42b5226842666a4",
-  "lastSyncedAt": "2026-08-06T03:55:00Z",
-  "notesForNextSession": "T-0302 is in REVIEW as a PR against dev, COUPLED to lords-regiment-dashboard T-0311 (see https://github.com/Amitoj02/lords-regiment-dashboard). Ship the two together — the SPA calls POST /gallery/:id/view and GET /gallery/:id/like, neither of which exists on an older API.\n\nTHE ONE THING WORTH KNOWING about view counts: dedup keys on resolveClientAddress(), the SAME helper the rate limiter uses. While TRUST_CF_CONNECTING_IP=false and Caddy fronts the origin, req.ip is the PROXY on every request — so in production every visitor currently presents one address and views collapse toward one per item. That is not a bug in the counter; it is the rate limiter's long-standing property, now shared. Flipping TRUST_CF_CONNECTING_IP=true (which requires Cloudflare-only ingress: Authenticated Origin Pulls or a firewall pinning :443 to Cloudflare ranges — LDA-H2/H3) fixes both at once. Do NOT 'fix' it by enabling Express trust proxy; the codebase rejects that as forgeable.\n\nThe view-hash key derives from ENCRYPTION_KEY when GALLERY_VIEW_HASH_SECRET is unset, so no environment needed changing to deploy this. Setting it explicitly buys independent rotation; rotating keeps recorded views but makes each returning visitor look new once.\n\nStill true from before: NOTHING from the T-0293..T-0301 crawler/link-preview work is in PRODUCTION. main is the production branch; dev has to be promoted and the WEB image redeployed.",
-  "nextIdCounter": 303,
+  "lastSyncedCommit": "8d6059fcd3d074c658d64e34a76105cd22d48b41",
+  "lastSyncedAt": "2026-09-07T18:12:09Z",
+  "notesForNextSession": "Dependabot is GONE from this repo (T-0303) but the bot does not actually stop until dev reaches main — GitHub reads .github/dependabot.yml from the DEFAULT BRANCH. Until that merge happens it will keep opening PRs against dev. All 12 previously-open Dependabot PRs across both repos were closed and their branches deleted.\n\nDependencies were refreshed within semver only; npm audit is 0 in both repos. The majors are all still waiting and are listed in T-0303 skippedByClaude: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18, TypeScript 7. Move TypeScript in both repos at once or not at all — the frontend is peer-locked to >=6.0 <6.1 by Angular 22.\n\nTHE ONE THING WORTH KNOWING: this repo was unlintable on Windows and nobody noticed, because CI runs on Ubuntu (T-0304). If format:check ever reports hundreds of files again, check .gitattributes before you touch a single line of code.",
+  "nextIdCounter": 305,
   "connections": [],
   "tasks": [
     {
@@ -16016,6 +16016,122 @@
           "note": "implemented on feat/gallery-view-counts; 1303 unit + 194 e2e green; verified live in Chrome against the dev stack; PR open against dev"
         }
       ]
+    },
+    {
+      "id": "T-0303",
+      "title": "Retire Dependabot and refresh dependencies by hand",
+      "summary": "Dependabot was opening a weekly queue nobody drained — ten PRs stood open against dev, the oldest the joi 17->18 bump that could never merge. Its alerts and automated security fixes were already disabled at the repo level, so .github/dependabot.yml was driving version updates only; deleting it stops them. npm audit reported 7 vulnerabilities (5 high, 2 moderate) — browserslist, five fast-uri advisories, js-yaml via @nestjs/swagger, qs, undici — every one transitive and every one already fixed inside the ranges package.json declares. `npm update` alone takes the count to 0 without touching a single range. NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 were deliberately left on the table: each is a migration, not a bump.",
+      "status": "review",
+      "type": "chore",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "dependency-hygiene",
+      "subfeature": "manual-updates",
+      "repo": "",
+      "paths": [
+        ".github/dependabot.yml",
+        "package-lock.json",
+        "README.md"
+      ],
+      "dependsOn": [
+        "lords-regiment-dashboard:T-0314"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "lint:check, format:check and build green after the bump",
+          "status": "passed"
+        },
+        {
+          "desc": "1303 unit specs green",
+          "status": "passed"
+        },
+        {
+          "desc": "194 e2e tests across 10 suites against real MySQL 8.4 on an isolated lords_dashboard_e2e database",
+          "status": "passed"
+        },
+        {
+          "desc": "npm audit reports 0 vulnerabilities",
+          "status": "passed"
+        },
+        {
+          "desc": "confirm Dependabot stops opening PRs once dev reaches main",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "the lockfile moved 157 transitive packages in one commit; anything that broke would surface at runtime rather than in the type checker, and mysql2 3.23->3.24 sits directly under every query the API makes",
+          "status": "open",
+          "note": "mitigated by the full e2e suite passing against a real MySQL, but production traffic is the real proof"
+        }
+      ],
+      "skippedByClaude": [
+        "Held NestJS 11 -> 12 across all 11 @nestjs/* packages: a framework major, out of scope for a within-semver refresh",
+        "Held TypeORM 0.3.31 -> 1.1.1 and typeorm-extension 3.9 -> 4.1: entity/migration API changes need their own task",
+        "Held joi 17 -> 18, which is what the oldest Dependabot PR had been stuck on since it needs config-schema review",
+        "Held TypeScript 6 -> 7 (the Go compiler) in both repos so the two halves stay on one compiler major",
+        "Did not disable Dependabot alerts or automated security fixes — both were already off at the repository level"
+      ],
+      "lastTouchedCommit": "8d6059fcd3d074c658d64e34a76105cd22d48b41",
+      "createdAt": "2026-09-07T18:12:09Z",
+      "updatedAt": "2026-09-07T18:12:09Z",
+      "history": [
+        {
+          "at": "2026-09-07T18:12:09Z",
+          "by": "claude",
+          "note": "created and implemented: dependabot.yml removed, dependencies refreshed within semver, audit clean"
+        }
+      ]
+    },
+    {
+      "id": "T-0304",
+      "title": "Normalize line endings so the repo is lintable on Windows",
+      "summary": "This repo had no .gitattributes while the frontend has carried one all along. With core.autocrlf=true — git default on Windows — every file materializes CRLF, and Prettier defaults endOfLine to lf, so `npm run format:check` reported style issues in 307 files and `npm run lint:check` failed with 57,445 `Delete CR` errors: one per line of the repository. Nothing was wrong with the code. CI never caught it because ubuntu-latest checks out LF, so the repo is unlintable on Windows and perfectly green on the runner. The stored blobs were already LF (`git add --renormalize .` staged no content change), so this only changes what lands in a working tree.",
+      "status": "review",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 1,
+      "area": "platform",
+      "feature": "dependency-hygiene",
+      "subfeature": "line-endings",
+      "repo": "",
+      "paths": [
+        ".gitattributes"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "format:check and lint:check pass on a Windows checkout after renormalizing",
+          "status": "passed"
+        },
+        {
+          "desc": "git add --renormalize stages no content change, proving blobs were already LF",
+          "status": "passed"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "anyone with an existing checkout keeps CRLF working-tree files until they re-checkout; their next commit is clean either way, but their local lint stays broken until they refresh",
+          "status": "open",
+          "note": "fix is `git rm --cached -r . && git reset --hard` on an otherwise clean tree"
+        }
+      ],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "8d6059fcd3d074c658d64e34a76105cd22d48b41",
+      "createdAt": "2026-09-07T18:12:09Z",
+      "updatedAt": "2026-09-07T18:12:09Z",
+      "history": [
+        {
+          "at": "2026-09-07T18:12:09Z",
+          "by": "claude",
+          "note": "created and implemented: .gitattributes added, working tree renormalized to LF"
+        }
+      ]
     }
   ],
   "history": [
@@ -16053,6 +16169,11 @@
       "at": "2026-08-06T03:55:00Z",
       "by": "claude",
       "note": "T-0302 created and implemented: gallery view counts with a per-item keyed viewer hash; coupled to frontend T-0311"
+    },
+    {
+      "at": "2026-09-07T18:12:09Z",
+      "by": "claude",
+      "note": "T-0303 and T-0304 created and implemented: Dependabot removed, dependencies refreshed within semver (audit 0), line endings normalized"
     }
   ]
 }
