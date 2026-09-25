@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "8d6059fcd3d074c658d64e34a76105cd22d48b41",
-  "lastSyncedAt": "2026-09-07T18:12:09Z",
-  "notesForNextSession": "Dependabot is GONE from this repo (T-0303) but the bot does not actually stop until dev reaches main — GitHub reads .github/dependabot.yml from the DEFAULT BRANCH. Until that merge happens it will keep opening PRs against dev. All 12 previously-open Dependabot PRs across both repos were closed and their branches deleted.\n\nDependencies were refreshed within semver only; npm audit is 0 in both repos. The majors are all still waiting and are listed in T-0303 skippedByClaude: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18, TypeScript 7. Move TypeScript in both repos at once or not at all — the frontend is peer-locked to >=6.0 <6.1 by Angular 22.\n\nTHE ONE THING WORTH KNOWING: this repo was unlintable on Windows and nobody noticed, because CI runs on Ubuntu (T-0304). If format:check ever reports hundreds of files again, check .gitattributes before you touch a single line of code.",
-  "nextIdCounter": 305,
+  "lastSyncedCommit": "08c3989fb4600176f0d6f2d243e755a90a727e7f",
+  "lastSyncedAt": "2026-09-25T18:34:44Z",
+  "notesForNextSession": "T-0305 (welcome on/off switch, welcome channel optional) is implemented on claude/eloquent-meitner-hqqsm1 and NOT merged. It is coupled with frontend T-0315: the web posts welcomeEnabled on every bot-settings save and this API runs forbidNonWhitelisted, so ship the API first or together, and roll back together. Migration 1784900008000 adds welcome_enabled DEFAULT 1, so production keeps greeting until an admin flips it.\n\nThis sync found dev fully merged to main, so every review task was advanced to deployed (each history note names the merge that landed it). T-0188 went to deployed too: 344937a (LDA-M6) had already pinned allowedMentions on every send.\n\nTHE ONE THING WORTH KNOWING: origin/fix/link-preview-logo-card holds a finished, never-merged fix (the crest, not banner.png, as the default card), filed there as T-0302, an id main had already given to view counts. It is re-recorded here as T-0306 (frontend T-0316). Merge its code, but resolve .blueframe/state.json by hand: the branch's copy would clobber main's T-0302.\n\nStill waiting: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 (move TS in both repos at once). Until T-0307 lands, delete the four unrelated constraint renames from any migration:generate output.",
+  "nextIdCounter": 308,
   "connections": [],
   "tasks": [
     {
@@ -11150,7 +11150,7 @@
       "id": "T-0163",
       "title": "Offer admins a one-click re-anchor for events stored with a pre-T-0156 instant",
       "summary": "T-0156 is forward-only, so events created before it keep their wrong starts_at/ends_at and a recurring template keeps generating occurrences from a wrong anchor. Rather than a risky bulk migration, give admins a per-event 're-anchor to this wall clock in the event timezone' action so the correction is explicit, reviewable and reversible.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -11179,7 +11179,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T19:10:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T19:10:00Z",
@@ -11194,6 +11194,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11319,7 +11326,7 @@
       "id": "T-0166",
       "title": "Expose guild membership + join invite on the session projection",
       "summary": "discord_identities.guild_member is already written at sign-in (T-0050) but is never surfaced to the client, so the frontend cannot tell a member who left the Discord guild from one who never joined. Add guildMember (and the regiment's discordInviteUrl, so the gate screen can render a working Join button) to CurrentUserDto and to the login response, without widening any OAuth scope.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -11364,7 +11371,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11379,6 +11386,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11386,7 +11400,7 @@
       "id": "T-0167",
       "title": "Cached guild-membership re-check service + GET /auth/guild-status",
       "summary": "Add a GuildMembershipService that resolves 'is this Discord user still in the regiment guild?' through the bot gateway, caches the verdict per identity (in-memory TTL + a persisted guild_checked_at column), and exposes it as a cheap GET /api/auth/guild-status the dashboard calls on entry. Deliberately NOT wired into JwtStrategy/SessionContextService, so no ordinary authenticated request ever pays for a Discord call.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -11458,7 +11472,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11473,6 +11487,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11480,7 +11501,7 @@
       "id": "T-0168",
       "title": "Fail-open policy + bounded gateway lookups for membership checks",
       "summary": "Today resolveGuildMembership() treats any bot error/timeout as 'not a member', which was harmless when the flag was informational but locks every user out of the dashboard once it gates access. Make the re-check path fail OPEN (keep the last known verdict, or allow when there is none) with bounded timeouts and a short circuit-breaker after repeated gateway failures, and decide the same question for the sign-in path.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -11536,7 +11557,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11551,6 +11572,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11558,7 +11586,7 @@
       "id": "T-0169",
       "title": "Flip the stored membership verdict on live guild join/leave events",
       "summary": "The bot already registers a GuildMemberAdd handler for onboarding. Register the matching GuildMemberRemove (and re-use Add) to write guildMember on the matching discord_identities row immediately, so a departure is enforced on the next dashboard visit rather than at the end of the TTL, and a re-join clears the gate without waiting.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -11606,7 +11634,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11621,6 +11649,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11628,7 +11663,7 @@
       "id": "T-0170",
       "title": "Retire the transfer-ownership capability and both transfer endpoints",
       "summary": "Remove the unused ownership-transfer and Discord-transfer surfaces end to end. Ownership: the Capability enum member, POST /settings/transfer-ownership, TransferOwnershipDto, the matrix floor-guard clause that requires the Owner to hold it, the seeded audit action and the role_permissions rows (migration). Discord: POST /settings/transfer-discord and TransferDiscordDto are a redundant second path to the guild binding that POST /discord/bind already owns (same ManageSettings gate, same regiment column) - delete them and keep /discord/bind as the single binder. POST /settings/dissolve is gated on TransferOwnership and must be re-gated before the capability can go.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "L",
       "sizeWeight": 5,
@@ -11748,7 +11783,7 @@
       ],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11770,6 +11805,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11777,7 +11819,7 @@
       "id": "T-0171",
       "title": "Document the Discord delivery matrix (bot posts + DMs, no webhooks)",
       "summary": "Confirmed during planning: every outbound Discord message goes through the Lord Adjutant bot - channel posts via gateway.sendChannelMessage (enlistments, event announcements, audit mirror, welcome) and direct messages via gateway.sendDirectMessage (application decisions, gallery moderation outcomes). No webhook is used anywhere. Write that matrix (event -> channel setting -> delivery mode) into the docs so it stops being tribal knowledge.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
@@ -11806,7 +11848,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11821,6 +11863,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11828,7 +11877,7 @@
       "id": "T-0172",
       "title": "Embed-capable outbox transport for bot messages",
       "summary": "Every notification is a plain markdown string today, capped at 2000 chars and composed inline. Widen DiscordGateway.sendChannelMessage/sendDirectMessage to accept a structured embed payload alongside (or instead of) content, carry the embed JSON in the sync-job payload, mirror it in the mock gateway, and keep content-only jobs already queued in the outbox working unchanged.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -11890,7 +11939,7 @@
       ],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11905,6 +11954,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11912,7 +11968,7 @@
       "id": "T-0173",
       "title": "Enlistment + decision embeds",
       "summary": "Replace buildEnlistmentMessage's bullet list with a proper embed: title, applicant thumbnail (Discord avatar), one field per answer (in-game name, current regiment, how they found us, preferred classes, skills to improve, representative note), regiment colour, and a submitted-at timestamp. Do the same for the approve/decline/hold DM and the gallery moderation-outcome DM, colour-coded by outcome.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -11956,7 +12012,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -11971,6 +12027,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -11978,7 +12041,7 @@
       "id": "T-0174",
       "title": "Event announcement + reminder embeds",
       "summary": "Turn the event announcement/reminder post into an embed: event name as title, description, fields for start time (Discord relative timestamp), duration, type and RSVP count, the event banner as the embed image, and a footer with the regiment name. Password-protected events must never leak the password into the embed.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -12021,7 +12084,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -12036,6 +12099,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12043,7 +12113,7 @@
       "id": "T-0175",
       "title": "Audit-mirror + welcome embeds",
       "summary": "Give the audit-log channel mirror a compact embed with a severity-driven colour, actor, action and target fields and the entry timestamp, and turn the welcome message into a branded embed with the regiment banner and a short next-steps section. The audit mirror is high-volume, so keep it terse.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -12077,7 +12147,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -12092,6 +12162,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12099,7 +12176,7 @@
       "id": "T-0176",
       "title": "Enforce a role hierarchy on every member admin action",
       "summary": "Member admin actions only guard the Owner (assertNotOwner) and self (assertNotSelf) today, so an Admin can still change the Owner's rank or revoke their medals, and a Moderator can act on an Admin. Add a single assertOutranks(actor, target) guard - Owner outranks all, Admin outranks Moderator and below, Moderator outranks Member and below - and apply it to changeRole, changeRank, medal award/revoke, profile patch, suspend, unsuspend, ban and unban.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "M",
       "sizeWeight": 3,
@@ -12168,7 +12245,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -12183,6 +12260,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12190,7 +12274,7 @@
       "id": "T-0177",
       "title": "Surface per-target permitted actions on the member projection",
       "summary": "So the roster and the admin-action modal can hide what the API would reject, add a small server-computed block to the member detail projection saying which admin actions the CALLER may perform on THAT member (role change, rank change, medals, suspend, ban). Derived from the same guard as T-0176 so the UI can never drift from the server rule.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -12237,7 +12321,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -12252,6 +12336,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12259,7 +12350,7 @@
       "id": "T-0178",
       "title": "Lock in the settings capability gating with regression tests",
       "summary": "Verified during planning that every /settings route already carries @RequireCapability (ManageSettings, or ManageRegimentDetails for presentation/legal), so the reported settings-page bug is frontend-only. Add the e2e coverage that keeps it that way: a member without each capability must get 403 on the matching read AND write routes, so the UI-side fix is never the only thing standing between a member and the panel.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "XS",
       "sizeWeight": 1,
@@ -12298,7 +12389,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-22T00:00:00Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-22T00:00:00Z",
@@ -12313,6 +12404,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/planned-tasks-t0163-t0178; local CI green (709 unit, 101 e2e); PR opened"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12320,7 +12418,7 @@
       "id": "T-0179",
       "title": "Stop a re-saved event resurrecting an already-fired reminder offset",
       "summary": "replaceChildren wipes and rewrites an event's notify offsets on every update, which would have cleared the new sent_at stamp and re-sent a reminder the members had already received, every time an author re-saved the same lead times mid-event. sent_at is now carried across the delete/insert.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "XS",
       "sizeWeight": 1,
@@ -12348,7 +12446,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-23T03:55:04Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T03:55:04Z",
@@ -12363,6 +12461,13 @@
           "to": "review",
           "by": "claude",
           "note": "fixed in the same branch"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12370,7 +12475,7 @@
       "id": "T-0180",
       "title": "Scope the bot member-join/leave handlers to the bound guild",
       "summary": "real-discord-gateway.ts registered GuildMemberAdd and DISCARDED member.guild.id, so a bot invited to two guilds fired onboarding for both - a join in a test guild would DM a production welcome and assign a production role, and vice versa. This was the KNOWN GAP recorded in the previous session's notes and the reason the bot had to be kept in exactly one guild. Both handlers now filter on the bound DISCORD_GUILD_ID, and drop events entirely when no guild is configured.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "XS",
       "sizeWeight": 1,
@@ -12402,7 +12507,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-23T03:55:04Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T03:55:04Z",
@@ -12417,6 +12522,13 @@
           "to": "review",
           "by": "claude",
           "note": "fixed in the same branch"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12424,7 +12536,7 @@
       "id": "T-0181",
       "title": "Build the missing event-reminder producer",
       "summary": "event_notify_offsets rows were persisted but NOTHING ever consumed them - the only enqueueEventAnnounce call site in the repo was the create path, so no event reminder had ever been sent. T-0174 asked for reminder embeds against a producer that did not exist, so the sweep was built: a bounded interval sweep in the style of the recurrence/status schedulers, made at-most-once across a restart by claiming event_notify_offsets.sent_at with a conditional UPDATE ... WHERE sent_at IS NULL.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -12468,7 +12580,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "abc55a3de4dde1058af1bad5b4f5799a6dfbfc6d",
       "createdAt": "2026-07-23T03:55:04Z",
-      "updatedAt": "2026-07-23T03:55:04Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T03:55:04Z",
@@ -12483,6 +12595,13 @@
           "to": "review",
           "by": "claude",
           "note": "fixed in the same branch"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via abc55a3 (PR #21); evidence abc55a3"
         }
       ]
     },
@@ -12490,7 +12609,7 @@
       "id": "T-0182",
       "title": "Stop leaking the staff-only moderator note into the applicant's decision DM",
       "summary": "decline() and hold() forward the officer's internal note (and decline reason) to DiscordSyncService as `reviewerNote`, and buildDecisionEmbed renders it to the applicant as a 'Note from the reviewing officer' field. The applicant must only ever receive the officer's User message (discordDmMessage) or the house default.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -12561,7 +12680,7 @@
       ],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-23T04:20:00Z",
-      "updatedAt": "2026-07-23T15:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T04:20:00Z",
@@ -12576,6 +12695,13 @@
           "to": "review",
           "by": "claude",
           "note": "reviewerNote deleted at the type level across all three hops; embed now has no fields"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f101c46 (PR #22); evidence 98f5885"
         }
       ]
     },
@@ -12583,7 +12709,7 @@
       "id": "T-0183",
       "title": "Regression guard: no staff-only field may reach any applicant-facing channel",
       "summary": "T-0154 fenced the staff-only columns out of the applicant API projection, but the Discord DM path bypassed that fence. Add a single explicit guard — a test that walks every applicant-facing surface (GET /api/applications/mine and the enqueued decision embed) and asserts moderatorNote / declineReason / internal audit detail never appear. IMPLEMENTED in test/discord.e2e-spec.ts, NOT the recorded test/applications.e2e-spec.ts (which does not exist). That choice is load-bearing: enqueueApplicationDecision runs inside guarded(), which no-ops when the bot is disabled — so the same assertions in a suite that never enables the bot would find zero jobs and pass while the leak was live. discord.e2e-spec is the only suite with the bot enabled and the mock gateway wired.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
@@ -12627,7 +12753,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-23T04:20:00Z",
-      "updatedAt": "2026-07-23T15:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T04:20:00Z",
@@ -12642,6 +12768,13 @@
           "to": "review",
           "by": "claude",
           "note": "four applicant-facing surfaces walked by one sentinel decline"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f101c46 (PR #22); evidence 98f5885"
         }
       ]
     },
@@ -12649,7 +12782,7 @@
       "id": "T-0184",
       "title": "Honour a blank welcome message (fall back to the house default) and trim on save",
       "summary": "DiscordSyncService uses `s.welcomeMessage ?? DEFAULT_WELCOME`, so an empty string saved from the settings editor produces a welcome embed with an empty description rather than the default. Normalise blank/whitespace-only input to null on update and treat blank as 'use the default' on send. FIXED ON BOTH SIDES. The PATCH normalises blank/whitespace/null to NULL and trims, and the SEND path independently reads `welcomeMessage?.trim() || DEFAULT` — because rows already written as '' are not repaired by the PATCH change and the bot-settings seeder is greenfield-only, so it will never re-run against production. The DTO also had to widen to `string | null`: the shipped settings editor round-trips the stored value and genuinely posts null, which @IsOptional() lets through, so a bare .trim() would have been a live TypeError.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -12706,7 +12839,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-23T04:20:00Z",
-      "updatedAt": "2026-07-23T15:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T04:20:00Z",
@@ -12721,6 +12854,13 @@
           "to": "review",
           "by": "claude",
           "note": "blank -> NULL on save AND blank -> default on send"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f101c46 (PR #22); evidence 98f5885"
         }
       ]
     },
@@ -12728,7 +12868,7 @@
       "id": "T-0185",
       "title": "Support placeholder tokens in the configurable welcome message",
       "summary": "So an admin-authored welcome can address the joiner, expand a small documented token set (e.g. {user} → a Discord mention, {regiment} → the regiment name) when composing the welcome embed. Unknown tokens are left as literal text, and the token list is surfaced in the settings API docs so the frontend editor can show the same hint.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -12793,7 +12933,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-23T04:20:00Z",
-      "updatedAt": "2026-07-23T15:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T04:20:00Z",
@@ -12808,6 +12948,13 @@
           "to": "review",
           "by": "claude",
           "note": "{user} + {regiment}, expanded inside the composer ahead of the clamp"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f101c46 (PR #22); evidence 98f5885"
         }
       ]
     },
@@ -12815,7 +12962,7 @@
       "id": "T-0186",
       "title": "Attribute a decision with the deciding officer's Discord avatar",
       "summary": "ApplicationDto read the decider's avatar from members.avatar_url alone, which is only ever written by an avatar UPLOAD - so for the common case of an officer who never uploaded one, decidedByAvatarUrl came back null and the console attribution fell back to bare initials while the same person's face rendered on their profile and in the sidebar. Resolve it the way MemberDto and the applicant's own currentAvatarUrl already do (uploaded avatar, else the linked Discord identity's), which needs the nested decidedByMember.discordIdentity relation loaded on all three paths a decision is read back through.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -12863,7 +13010,7 @@
       ],
       "lastTouchedCommit": "0d8d2f6aad51504aa340b9b21f356de2429a3637",
       "createdAt": "2026-07-23T05:25:13Z",
-      "updatedAt": "2026-07-23T05:25:13Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T05:25:13Z",
@@ -12878,6 +13025,13 @@
           "to": "review",
           "by": "claude",
           "note": "fixed on feat/planned-tasks-t0163-t0178, commit 0d8d2f6"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f101c46 (PR #22); evidence 0d8d2f6"
         }
       ]
     },
@@ -12945,9 +13099,9 @@
         }
       ],
       "skippedByClaude": [],
-      "lastTouchedCommit": null,
+      "lastTouchedCommit": "344937ad623b37de7df68f16629c00a0859f4866",
       "createdAt": "2026-07-23T15:45:00Z",
-      "updatedAt": "2026-07-23T15:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-23T15:45:00Z",
@@ -12955,12 +13109,19 @@
           "to": "planned",
           "by": "claude",
           "note": "created"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "planned",
+          "to": "deployed",
+          "by": "claude",
+          "note": "already landed: 344937a (LDA-M6 mention safety, the same day this was planned) pins allowedMentions parse [] on every channel send, DM and edit via toSendOptions; the per-producer widening came with 6867ef5 (T-0205). Now on main."
         }
       ],
       "id": "T-0188",
       "title": "Set allowed_mentions on every bot send so no stored payload can ping the guild",
       "summary": "Discovered while closing T-0185. The gateway's toSendOptions() sets no allowed_mentions at all, so anything that reaches a message CONTENT is parsed by Discord with the default permissive policy. Today nothing admin-authored gets there — every composed notification is embed-only with content '' — so the exposure is latent rather than live, and T-0185 pins it with tests. But the legacy content-only outbox path still exists for rows written before the embed change, and one future producer that puts text in content re-opens it. Setting allowed_mentions: { parse: [] } (widening deliberately per-producer where a ping is wanted) makes it unreachable by construction instead of by convention. NOT done here: it changes the shared gateway contract every notification type rides on, which is beyond the scope of the tasks in this branch.",
-      "status": "planned",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
@@ -13021,7 +13182,7 @@
       ],
       "lastTouchedCommit": null,
       "createdAt": "2026-07-26T18:00:00Z",
-      "updatedAt": "2026-07-26T18:00:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-26T18:00:00Z",
@@ -13036,12 +13197,19 @@
           "to": "review",
           "by": "claude",
           "note": "implemented + unit/e2e green on feat/privileged-role-link-warning; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f1d17c7 (PR #53); evidence 7daba2c"
         }
       ],
       "id": "T-0189",
       "title": "Warn instead of blocking when a rank or medal is linked to a privileged Discord role",
       "summary": "The LDA-H1 link validation rejected any Discord role carrying privileged permission bits (administrator, kick/ban, manage roles/channels/messages, moderate members, mention-everyone) with a 400. The owner asked for that to be advisory: the regiment should be able to link such a role with its eyes open. DiscordRolePolicyService splits into checkRoleLinkable (returns the privileged advisory, still throws for the three cases the bot physically cannot assign — not in guild, at/above the bot, integration-managed) and assertRoleLinkable (the strict wrapper, still used by the join-role and Ban-role settings where no admin is in the loop). Ranks and medals link anyway, return the advisory as discordRoleWarning on the link response, and raise the audit row to severity warn so the ledger — not a rejected request — is what records that someone handed out real Discord authority. The self-exclusion in the relink fan-out is untouched, so a one-click self-grant is still impossible.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -13053,7 +13221,7 @@
       "id": "T-0190",
       "title": "Freeze the entry rank against rename and delete",
       "summary": "ApplicationsService.approve resolves the entry rank BY NAME, so `Recruit` is a dependency and not a label: renaming or deleting it left the next approval with nothing to resolve (a bare EntityNotFoundError 500), and the holder-count guard did not cover it because the rank is empty exactly when the FK RESTRICT would not have bitten. PATCH now refuses a CHANGED name and DELETE refuses outright, both 403 for every caller including the Owner. The protected set is derived from the same ENTRY_RANK_NAME constant the enlistment path imports (src/ranks/protected-ranks.ts) rather than stored as a column, so it cannot drift and needs no migration. Case-insensitive to match MySQL collation. isProtected rides on every rank projection. Precedence, insignia and Discord role stay editable; nothing reserves the name, and a missing entry rank now fails with a 409 naming the rank to restore instead of a 500.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -13119,7 +13287,7 @@
       ],
       "lastTouchedCommit": "e568be6c90fdb111c42a7e4f158a73845f8e916a",
       "createdAt": "2026-07-26T23:55:00Z",
-      "updatedAt": "2026-07-26T23:55:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-26T23:55:00Z",
@@ -13134,6 +13302,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/protected-ranks; PR #52 open against dev, CI green"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via f1d17c7 (PR #53); evidence e568be6"
         }
       ]
     },
@@ -13141,7 +13316,7 @@
       "id": "T-0191",
       "title": "Replace the Join role with a roster-derived Membership role",
       "summary": "The join role was assigned by the GuildMemberAdd handler to EVERY account that entered the guild, which made it useless as the permission anchor the regiment wanted: a visitor who had never applied held exactly what an enlisted member held. It becomes `membershipRoleId`, granted from ROSTER STATE by DiscordSyncWorker.reconcileRoles (approved members yes; Mercenary and Applicant no; banned no) and no longer assigned on join. Renamed via migration rather than replaced with a new column, so the live row's already-correct value carries across; a new column would have shipped NULL. The reconcile now both grants AND strips it — the exact inverse of the old assign-only rule, and what makes the role mean 'enrolled'. Membership is decided by an allow-list predicate (src/discord/membership-role.ts) so a MemberRole added later defaults to NOT holding it.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -13205,7 +13380,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13220,6 +13395,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13227,7 +13409,7 @@
       "id": "T-0192",
       "title": "Mark an application in flight with the Applicant Discord role",
       "summary": "Submitting an application had no Discord side at all. The role linked to the `Applicant` RANK is now added on submit and removed on approve, decline and block. Resolved through the rank rather than a settings column so the admin configures it in the same Ranks & Medals screen as every other role link, with no second place for it to be half-configured — which is why the Applicant rank had to become protected. NOTHING is granted on the website: no member row, no rank. Submitting is not joining, and an applicant shown a rank has been told they are in when they are not. Entirely best-effort: a missing or unlinked Applicant rank is a silent no-op (the state production is in today).",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -13289,7 +13471,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13304,6 +13486,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13311,7 +13500,7 @@
       "id": "T-0193",
       "title": "Give a returning member their Discord roles back on rejoin",
       "summary": "Leaving a Discord guild strips every role it holds for you and rejoining restores none of them, so a veteran reappeared with the rank and medals the dashboard still credited them with and nothing to show for any of it. DiscordOnboardingService now resolves the joining snowflake to a roster member and enqueues a full reconcile. Order of the checks is the rule: not on the roster -> nothing at all (the case the retired join-role grant got wrong); banned -> the Ban role only, checked FIRST because a banned member is still a roster row and a reconcile would hand their whole managed set back; actively suspended -> nothing, since restoring at the door would quietly end the suspension early; otherwise a full reconcile.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -13373,7 +13562,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13388,6 +13577,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13395,7 +13591,7 @@
       "id": "T-0194",
       "title": "Fix enlistment never syncing the new member's Discord roles",
       "summary": "*** approve() wrote the member row at the entry rank and enqueued NOTHING. *** A newly approved recruit got the rank on the dashboard and no Discord role for it; it only ever landed later, by accident, on the next rank/role/medal change (MembersService.syncMemberRoles) or a manual POST /discord/resync. Enlistment was the single rank-assigning path in the app that did not sync. Fixed by enqueueing a role reconcile after the transaction commits, using the applicant's SNOWFLAKE — enqueueRoleSync returns null on a falsy third argument, and the member built in the transaction has only the FK column with no hydrated relation, so copying the members-module idiom would have been a silent no-op forever.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -13444,7 +13640,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13459,6 +13655,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13466,7 +13669,7 @@
       "id": "T-0195",
       "title": "Post gallery submissions and approvals to two configurable Discord channels",
       "summary": "Two new settings channels: a staff review channel a submission is posted to the moment it arrives, and a public showcase channel an approved item goes to. Both carry a branded embed with the media. The shape is dictated by what Discord will actually render: an image goes IN the embed, a video NEVER plays from inside one (Discord only builds a player from a bare media URL in the message CONTENT, so a playable item needs a second message), and an external link is left for Discord's own unfurl rather than scraped and re-rendered — which is also why no external host is ever fetched to build a post. Only the first file is shown; a multi-file submission says how many there are and links back.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -13532,7 +13735,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13547,6 +13750,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13554,7 +13764,7 @@
       "id": "T-0196",
       "title": "Show who approved a gallery item, to moderate_gallery holders only",
       "summary": "The moderator identity was stored (gallery_items.moderated_by_member_id) but never projected anywhere. It now appears on the gallery cards, the detail page and the moderation queue. The field is set to `undefined` rather than null for a caller without moderate_gallery, so the key is ABSENT from the response rather than present-and-empty — a null would tell an ordinary viewer that an approver exists and is being hidden, which is exactly what the gate is for. Resolved once per request and applied as a pure per-row function so a paginated page costs no extra query. The column is shared with decline, so the attribution is only rendered for an item whose status is actually Approved.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -13603,7 +13813,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13618,6 +13828,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13625,7 +13842,7 @@
       "id": "T-0197",
       "title": "Server-render Open Graph cards so a gallery share link unfurls",
       "summary": "https://lordsofholdfast.com/gallery/<id> is an SPA route and the SPA is a purely client-side build, so no unfurler — Discord, WhatsApp, Slack, Twitter — saw anything but one generic <head> for every item. A new @Public() route (/api/share/gallery/:id) renders per-item og:*/twitter:* tags, and a Caddy matcher routes ONLY known unfurler user-agents to it while every human still gets the real app. Image -> og:image; uploaded video -> og:video with its poster (never a player card without a still, which several unfurlers drop outright); YouTube/Medal -> the provider card built from the SAME pure extractors the in-app resolver uses; anything else -> metadata only, because the alternative is an unauthenticated route fetching arbitrary member-supplied URLs server-side and republishing them.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -13695,7 +13912,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13710,6 +13927,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13717,7 +13941,7 @@
       "id": "T-0198",
       "title": "Send only the configured welcome message, with nothing appended",
       "summary": "buildWelcomeEmbed appended a hardcoded three-bullet 'Next steps' field under whatever the admin wrote, so a regiment that had composed a complete welcome got it followed by copy they never asked for and had no setting to remove. The field is gone; the message box is the whole message.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "XS",
       "sizeWeight": 1,
@@ -13753,7 +13977,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13768,6 +13992,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13775,7 +14006,7 @@
       "id": "T-0199",
       "title": "Freeze the Applicant and Mercenary ranks alongside Recruit",
       "summary": "T-0190 froze the entry rank because approve() resolves it by name. Two more rows became load-bearing in the same way: the Applicant rank's linked role is how the server finds the Applicant marker (T-0192), and the Mercenary rank names the distinction the Membership role policy draws (T-0191). PROTECTED_RANKS now carries a `because` clause per row that the refusal message renders directly, so an admin who cannot rename a rank is told WHICH mechanism holds it rather than being told the ladder is arbitrary.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 2,
@@ -13821,7 +14052,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13836,6 +14067,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13843,7 +14081,7 @@
       "id": "T-0200",
       "title": "Validate a bot-settings role link only when it CHANGES",
       "summary": "Discovered during live verification. The settings editor posts the whole object on every save, and updateSettings re-ran the strict privileged-role check on membershipRoleId/banRoleId unconditionally — so one already-stored privileged role made the ENTIRE panel unsaveable: channels, welcome copy and every toggle refused along with it, with an error naming a field the admin had not touched. The bad value could not be cleared either, because the clear posts the same body. Only a changed id is validated now, the same rule the protected-rank rename guard uses; a genuinely new privileged role is still refused.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -13891,7 +14129,7 @@
       ],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13906,6 +14144,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13913,7 +14158,7 @@
       "id": "T-0201",
       "title": "Fix the share card missing every www.youtube.com URL",
       "summary": "Discovered during live verification. MediaEmbedService.resolve strips a leading `www.` before calling the id extractors, which match the bare `youtube.com`. The new share service passed parsed.hostname straight through, so every URL from YouTube's own share button fell through to the unrecognised-host branch and unfurled as plain text. Normalisation is now a shared MediaEmbedService.hostOf() both callers go through, and the YouTube case is parameterised over all four host forms.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "XS",
       "sizeWeight": 1,
@@ -13943,7 +14188,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "feca6e3345bf1d8d2266293951e97ccf6bf9789f",
       "createdAt": "2026-07-27T03:40:00Z",
-      "updatedAt": "2026-07-27T03:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T03:40:00Z",
@@ -13958,6 +14203,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/enlistment-roles-gallery-discord; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 15989dd (PR #55); evidence feca6e3"
         }
       ]
     },
@@ -13965,7 +14217,7 @@
       "id": "T-0202",
       "title": "Adopt an applicant's existing Discord rank and medals on approval",
       "summary": "*** APPROVAL WAS THE FIRST RECONCILE OF A MEMBER'S LIFE, AND IT WIPED THEM. *** The regiment ran on Discord for years before it ran on this dashboard, so a veteran's rank and medals exist ONLY as guild roles. reconcileRoles strips every MANAGED role (rank roles + medal roles + the Membership role) that the roster cannot account for, and a member row created fresh at the entry rank accounts for nothing — so the T-0194 sync that approve() now enqueues took years of decorations straight back off the person it had just admitted. Sign-in and submit were never implicated: AuthService touches Discord not at all and creates no member row, and the submit path is an additive role.assign. Fixed by making roles flow BOTH ways at this one point: a new DiscordRoleAdoptionService reads the applicant's current guild roles before the transaction opens and maps them back to rank/medal rows, and approve() writes those onto the member (rank) and into member_medals (awards) inside the enlistment transaction. The reconcile that follows then finds them DESIRED and leaves them alone. Protected ranks are never adopted (the entry rank is where enlistment starts, the Applicant role is the marker the applicant is wearing, and mercenary status is the approved track's call), and an entry-rank precedence floor keeps the carry-over a promotion mechanism rather than a possible demotion.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "M",
       "sizeWeight": 3,
@@ -14039,7 +14291,7 @@
       ],
       "lastTouchedCommit": "348f0aeb27f72821c912a5d3bde110e9d63801ff",
       "createdAt": "2026-07-27T10:30:00Z",
-      "updatedAt": "2026-07-27T10:30:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T10:30:00Z",
@@ -14054,6 +14306,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/adopt-existing-discord-roles-on-enlistment; unit + e2e green, e2e verified to fail without the fix"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via ae2dec7 (PR #57); evidence 348f0ae"
         }
       ]
     },
@@ -14061,7 +14320,7 @@
       "id": "T-0203",
       "title": "Let manage_roles appoint its own tier",
       "summary": "The grant ceiling on POST /members/:id/role capped the role handed out at STRICTLY below the caller (LDA-M4), so an Admin holding manage_roles could not appoint another Admin and a Moderator could not appoint another Moderator - the whole point of enabling \"Manage roles\" for a role in the permission matrix. Relaxed to at-or-below via a named canGrantRole() in member-hierarchy, mirrored client-side by assignableRolesFor(). ESCALATION STAYS SHUT: nobody mints a role above their own, and no chain of appointments can either, because every appointee is capped by the same ceiling - so a Moderator still cannot produce an Admin by any route. The TARGET hierarchy is untouched on purpose: appointing a peer is additive, moderating one is not, so the Admin who just promoted somebody to Admin can no longer demote, suspend or ban them - only the Owner can. Inert until an owner grants manage_roles to Admin/Moderator, which the seeded matrix (Owner-only, insert-only) does not do.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -14115,7 +14374,7 @@
       ],
       "lastTouchedCommit": "fc9bd335990e0466f7260d8d71600e746d2b9370",
       "createdAt": "2026-07-27T15:30:00Z",
-      "updatedAt": "2026-07-27T15:30:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T15:30:00Z",
@@ -14123,6 +14382,13 @@
           "to": "review",
           "by": "claude",
           "note": "owner request: \"Manage roles\" should let a role promote others to its own level. Implemented on feat/manage-roles-grant-own-tier; local CI green (886 unit, 126 e2e); PR opened against dev."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 43144ed (PR #61); evidence fc9bd33"
         }
       ]
     },
@@ -14130,7 +14396,7 @@
       "id": "T-0204",
       "title": "Derive an existing member's rank and medals from their Discord roles",
       "summary": "*** T-0202 FIXED ENLISTMENT GOING FORWARD AND NOTHING FOR THE PEOPLE ALREADY ON THE ROSTER. *** Anyone approved before it shipped - or while the gateway was unreachable, or before an admin had linked the rank/medal roles at all - was enlisted at the entry rank with no decorations, and the reconcile then stripped the guild roles that were the only record of them. This is the repair, run one member at a time by someone who can see the result: POST /members/:id/derive-from-discord reads that member's CURRENT guild roles through the same DiscordRoleAdoptionService the enlistment uses, and writes what it finds onto their record. PROMOTION-ONLY (their current rank is the floor, so a drifted guild can never demote), ADDITIVE-ONLY on medals (a missing role is not a retraction), and IDEMPOTENT (awards are diffed against member_medals, so a second press credits nothing twice and says so). NEVER ON YOURSELF: it is a ninth MEMBER_ADMIN_ACTION, so the shared hierarchy guard refuses self/owner/peer for free - which matters here because a derive hands out whatever the target's roles say, making a self-derive a self-promotion available to anyone who can get a role onto their own account (LDA-H1). The adoption service gained readGuildState(), a strict sibling of resolveFromGuild() that SAYS WHY it came back empty (not-linked / bot-disabled / not-in-guild / unreachable) - an enlistment is right to shrug a failed read off, but an admin pressing a button must not read a switched-off bot as \"this member earned nothing\". Finding nothing is a 200 with an empty result and a summary saying so; the reasons are 409 (fixable state) and 503 (Discord did not answer). The server authors one human sentence that is written to the audit detail AND returned for the client to show.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -14224,7 +14490,7 @@
       ],
       "lastTouchedCommit": "409720bd2db148f136b704916eda5cd6e5ce3348",
       "createdAt": "2026-07-27T16:40:00Z",
-      "updatedAt": "2026-07-27T16:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T16:40:00Z",
@@ -14232,6 +14498,13 @@
           "to": "review",
           "by": "claude",
           "note": "owner report: members missed ranks and medals because of earlier bugs. Implemented on feat/derive-member-data-from-discord; local CI green (909 unit, 133 e2e); verified in the running dev app (button, hint, refusal snackbar). PR opened against dev."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 43144ed (PR #61); evidence 409720b"
         }
       ]
     },
@@ -14239,7 +14512,7 @@
       "id": "T-0205",
       "title": "RSVP to an event from its Discord announcement (buttons, thread ping, one role ping)",
       "summary": "*** THE ANNOUNCEMENT STOPS BEING A NOTICE AND BECOMES THE RSVP SURFACE. *** The lifecycle the owner specified, end to end: event created (by hand or by the recurrence sweep) -> embed announcement, pinging the event's `announceRoleId` ONCE -> members press Attending / Tentative / Declined -> at the 'notify before' offset a THREAD opens on that same message and pings only the people who said they were coming -> the event ends and the buttons go dead. Four rules carry the design. (1) ONE PING, AT CREATION. The role is pinged by the announcement and by nothing else - not the reminder, not a re-render - so one event produces one notification; the recurrence sweep now announces every occurrence it materialises, so a weekly muster pings weekly. (2) THE THREAD REPLACES DMs. Discord's policy treats unsolicited mass DMs as abuse; a thread on the announcement reaches the same attendees with one message, chunked at 80 mentions because both the 2,000-character body and the 100-id allow_mentions cap would otherwise make Discord reject the whole thing and ping nobody. (3) COMPOSED AT DRAIN TIME, NOT ENQUEUE. This is the only re-rendered message in the app, so its Attending/Tentative/Declined sections are read from event_rsvps when the job runs - a frozen payload plus the refresh COALESCING (one pending refresh per event, so twenty presses in a minute are not twenty rate-limited edits) would have delivered whichever RSVP was first. (4) THE PRESS IS NOT A BACK DOOR. A press resolves the presser through SessionContextService - the same choke point every HTTP route uses, so a banned or suspended member is refused there rather than by a second, divergent check - then requires rsvp_to_events against their live role; a Discord account with no roster row is told to apply, and pressing a button never creates a member. Mentions stay off by default: every send pins allowed_mentions.parse: [] and the two messages that must notify carry an EXPLICIT list of snowflakes alongside it, while a message EDIT accepts no allow-list at all, which is why re-rendering on every RSVP cannot re-ping. Buttons deliberately stay LIVE after a press (changing your mind is the normal case) and are disabled only when the event ends, by a sweep hung off EventStatusScheduler so 'over' has one definition. Delivery state lives in a new event_announcements table (PK = FK): its presence answers 'has this been announced?', and its message/thread/closed_at are what make the re-render, the thread and the retirement all target the original message.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -14370,7 +14643,7 @@
       ],
       "lastTouchedCommit": "6867ef578e3d49f50f33dcfe06ec25909c181c59",
       "createdAt": "2026-07-27T18:20:00Z",
-      "updatedAt": "2026-07-27T18:20:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T18:20:00Z",
@@ -14378,6 +14651,13 @@
           "to": "review",
           "by": "claude",
           "note": "owner spec: role pinged only at creation, three RSVP sections + three buttons on the announcement, buttons stay live, thread + attendee ping at the notify-before offset instead of DMs, buttons disabled when the event ends. Implemented on feat/discord-event-rsvp-buttons-and-threads; local CI green (965 unit, 139 e2e), lint + prettier + tsc clean. PR opened against dev."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 43144ed (PR #61); evidence 6867ef5"
         }
       ]
     },
@@ -14455,7 +14735,7 @@
       "id": "T-0207",
       "title": "Keep the Discord event announcement in step with the event",
       "summary": "An announcement was written ONCE and never touched again, so the moment an author edited the event the channel started lying: the embed kept advertising the title, description, banner, start time and duration as they were at first announcement. That is worse than not announcing at all - it is confidently wrong about when to turn up. The machinery already existed (T-0205's EventAnnouncementRefresh recomposes the whole embed from the row at drain time), so this is mostly about calling it from the paths that change what the embed says: `update` (covers EVERY field an author can edit, banner included), and `reanchor` for every row it moved - the cascaded occurrences too, since each has its own announcement and an occurrence still showing last week's muster time is exactly the failure. ARCHIVE now CLOSES the announcement instead of leaving it live: nothing else would ever retire it, because the close sweep looks for ENDED events and an archived one never reaches `previous` (the status sweep skips it), so the channel would have kept working RSVP buttons forever for an event members can no longer see. The refresh enqueue now SHORT-CIRCUITS on 'never announced' and on 'already closed' - checked at enqueue rather than left to the worker, because a cascaded re-anchor asks per occurrence and most have no announcement, and because an edit to an ended event must never revive its buttons. Editing NEVER re-pings: it edits the existing message, and the edit path structurally accepts no mention allow-list.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -14522,7 +14802,7 @@
       ],
       "lastTouchedCommit": "f124324a1e6803a27b56c923ed0bedf53b6be956",
       "createdAt": "2026-07-27T20:10:00Z",
-      "updatedAt": "2026-07-27T20:10:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-27T20:10:00Z",
@@ -14530,6 +14810,13 @@
           "to": "review",
           "by": "claude",
           "note": "owner: 'include the event banner' (already wired - it just cannot render from a localhost MinIO URL) and 'editing the event should re-render its discord announcement'. Implemented on feat/event-announcement-resync; 977 unit + 140 e2e green."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via b0ab542 (PR #64); evidence f124324"
         }
       ]
     },
@@ -14537,7 +14824,7 @@
       "id": "T-0208",
       "title": "Restore the nightly backup: rclone was never on the timer's PATH",
       "summary": "Every nightly backup from go-live (2026-07-20) to 2026-07-27 failed and r2:lords-backups was EMPTY the whole time - the first backup this project has ever actually stored was taken during this session. rclone is installed to ~/bin because bootstrap.sh is not allowed to need root, and a systemd USER unit inherits PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin, which does not contain it; an interactive login shell DOES, because Debian's ~/.profile prepends ~/bin. So `rclone ls r2:lords-backups` typed by hand worked perfectly while the identical bare `rclone` under the timer was never found. What turned one bad night into seven was the error handling: `|| fail \"rclone upload failed\"` swallowed bash's 127 and blamed the upload, so the journal accused R2 while the credentials were fine the entire time (proved by a write probe: 0.3s, Copied (new)). The tell was in the timestamps all along - uploading -> FAILED in 737 MICROseconds, with --retries 3 set, far too fast for any network round-trip. Both scripts now resolve rclone explicitly (RCLONE_BIN, then PATH, then ~/bin/rclone) and refuse to start if it is not executable; lords-backup preflights the bucket BEFORE spending a mysqldump on it; the upload reports the exit code it actually got; and the unit sets Environment=PATH=%h/bin:... as a second lock. Separately, the drill's row-count list named `audit_logs`, a table this schema has never had (it is audit_log_entries), and `|| echo skip` passed over it in SILENCE on every run - the audit trail was the one table never verified. Same bug class as the swallowed 127, so a stale name now prints a `?` line instead of nothing.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -14613,7 +14900,7 @@
       ],
       "lastTouchedCommit": "28388a9eae45dfce03f3d972caa625f4d6ae424e",
       "createdAt": "2026-07-28T01:40:00Z",
-      "updatedAt": "2026-07-28T01:40:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-28T01:40:00Z",
@@ -14621,6 +14908,13 @@
           "to": "review",
           "by": "claude",
           "note": "found while the owner was checking whether backups worked at all; diagnosed, fixed, and verified against real R2 in the same session"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 797f41a (PR #66); evidence 28388a9"
         }
       ]
     },
@@ -14628,7 +14922,7 @@
       "id": "T-0209",
       "title": "Stop ordinary admin actions purging a member's Discord roles",
       "summary": "Owner report: 'the bot is randomly deleting people's discord roles which are correct' - reproduced by promoting a Moderator to Admin, which succeeded and took the member's decorations off. ROOT CAUSE: all five member mutations (changeRank/changeRole/awardMedal/removeMedal/deriveFromDiscord) funnelled into one `syncMemberRoles` helper enqueuing a RoleSync job whose payload carried {memberId, discordUserId} and nothing else. The DELTA was discarded at the enqueue boundary and unrecoverable at drain time, so the worker had no choice but to recompute the member's whole desired set and strip every MANAGED role (any role linked to any rank or medal, plus the membership role) the roster could not account for. For a regiment that lived on Discord before it had a dashboard that is every decoration handed out by hand - and a Moderator->Admin promotion cannot legitimately change a single rank or medal role, so 100% of what that job removed was collateral. FIX: convergence splits into three modes with disjoint reach. RoleGrant (wire value stays 'role.sync' so queued rows drain under the new rule with no pre-deploy SQL) adds and is structurally unable to remove - approval, rejoin and derive use it. RoleScopedSync converges ONLY the ids named in its payload, so a rank change is two roles, a medal award/removal is one, and an app-role change is the membership role alone; direction is decided at DRAIN time by re-deriving what the member should hold, which is what makes a repeatable medal's surviving duplicate award keep its role for free. RoleFullResync keeps the old destructive diff and is reachable ONLY from POST /api/discord/resync. Also: the blind sweep is gone (fetchMember returns null identically for 'left the guild' and 'Discord did not answer', so a transient failure escalated a diff into a catalogue-wide purge issued against a member nobody had read); every role job now re-checks botEnabled/syncRolesOnChange at drain time, so the switch means 'stop' rather than 'stop enqueuing'; resyncAll honours syncRolesOnChange; and RoleRelinkApply forwards incomingRoleId and drains as a two-id scoped sync. The 'Permission denied' half was NOT a 403: an Admin who promotes a Moderator to Admin can no longer moderate that peer, so the returned projection zeroes every permittedAction and the modal replaced its controls with 'You don't have permission to manage this member' in the same tick as the success toast. The notice now names the rule instead.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "M",
       "sizeWeight": 5,
@@ -14744,7 +15038,7 @@
       ],
       "lastTouchedCommit": "c5d347b93b7f0d63b22f9e1d8e3b22482a0c6d1a",
       "createdAt": "2026-07-28T14:45:00Z",
-      "updatedAt": "2026-07-28T14:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-28T14:45:00Z",
@@ -14752,6 +15046,13 @@
           "to": "review",
           "by": "claude",
           "note": "owner bug report: promoting a moderator to admin succeeded, showed 'Permission denied', and destroyed the member's Discord roles. Both halves diagnosed and fixed on fix/discord-role-scoped-sync (backend) + fix/admin-modal-peer-lockout-copy (frontend). 1000 unit + 140 e2e + 618 frontend tests green. Owner decisions this session: leave suspension alone this PR; never strip blind. PRs open and CI green: backend #67, frontend Amitoj02/lords-regiment-dashboard#57."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via e14345c (PR #68); evidence c5d347b"
         }
       ]
     },
@@ -14817,7 +15118,7 @@
       "id": "T-0211",
       "title": "Make rank and medal writes answer to edit_ranks_medals alone",
       "summary": "Owner report: a Moderator (and an Admin) granted the rank/medal capability still could not record a promotion for a peer, a senior or the Owner - every rank and medal write was behind the same target guard as a ban, so the dialog answered \"You don't have permission to manage this member.\" The member admin actions now split in two in member-hierarchy.ts. MODERATION (changeRole, suspend, unsuspend, ban, unban) keeps the whole rule unchanged: not yourself, not the regiments.owner_member_id pointer, and only strictly below you; canGrantRole's own-tier ceiling is untouched. DECORATION (changeRank, awardMedal, removeMedal, deriveFromDiscord) has NO target rule at all - `denyReason` returns null for them on its first line, before self, owner and standing are ever consulted. The capability grant is the whole control. Both SELF_REFUSALS and OWNER_REFUSALS are keyed on ModerationAction, so a decoration action cannot be given refusal wording it can never show; ModerationAction is Exclude<MemberAdminAction, DecorationAction>, so a tenth action is a moderation action by default and fails closed. permittedActions is computed per action, so one member's block can now mix true and false - the frontend half of the task exists because of exactly that, and the caller's OWN row is one of the targets that mixes.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 5,
@@ -14932,7 +15233,7 @@
       ],
       "lastTouchedCommit": "",
       "createdAt": "2026-07-28T16:45:00Z",
-      "updatedAt": "2026-07-28T19:10:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-28T16:45:00Z",
@@ -14954,6 +15255,13 @@
           "to": "review",
           "by": "claude",
           "note": "CI on #69 caught a flake I introduced: the widened permittedActions sweep exceeded Jest's 5s default on the slower runner (it passed on the pull_request run and failed on the push run for the same commit). Given an explicit 60s budget rather than fewer targets - the exhaustiveness is the test."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via e14345c (PR #68); evidence cfa494c"
         }
       ]
     },
@@ -14961,7 +15269,7 @@
       "id": "T-0212",
       "title": "Order a member's medals by the cabinet, and send the medal's own description",
       "summary": "Owner report: the roster, the profile's Honours & Decorations panel and the dashboard's Decorations strip listed a member's medals oldest-award-first, so the same five medals came out in a different order on every member and nothing lined up with the Medal Cabinet on /admin/ranks. `medalsByMember` was ordering `{ awardedAt: 'DESC' }`; it now orders `{ medal: { precedence: 'ASC' }, awardedAt: 'DESC', id: 'ASC' }` on the same `find` (TypeORM 0.3.31 reuses the join `relations: { medal: true }` already pushed, so it stays one LEFT JOIN and the unit spec's repository mock keeps working — a QueryBuilder rewrite would have broken every test that reaches `project()`). Both tiebreakers are load-bearing: `precedence` defaults to 0 and is rewritten wholesale by the drag-reorder, and medals are repeatable, so two awards of the SAME medal always tie. This is the only place a MemberMedalSummary is built, so the roster, profile, dashboard, admin dialog chips and the GDPR self-export all inherit it. MemberMedalSummary also gains `description` — the CATALOGUE text (what the medal is awarded FOR, identical for every holder, the same string /admin/ranks edits) — alongside the existing per-award `detail` citation. Both are sent; they are two fields, not a rename. `removeMedal`'s own `order: { awardedAt: 'DESC' }` is deliberately untouched: there it picks WHICH award to delete and is semantics, not display.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -15038,7 +15346,7 @@
       ],
       "lastTouchedCommit": "8375880b546f6337a863ee9b348af186a2e9b02e",
       "createdAt": "2026-07-29T22:20:00Z",
-      "updatedAt": "2026-07-29T22:20:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-07-29T22:20:00Z",
@@ -15046,6 +15354,13 @@
           "to": "review",
           "by": "claude",
           "note": "medal ordering + catalogue description on the award projection; PR into dev. PRs open into dev: this repo #70, frontend [lords-regiment-dashboard #60](https://github.com/Amitoj02/lords-regiment-dashboard/pull/60). Merge this one FIRST — the frontend renders a blank description until the API sends it."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via e14345c (PR #68); evidence 8375880"
         }
       ]
     },
@@ -15053,7 +15368,7 @@
       "id": "T-0213",
       "title": "Require \"Why do you want to join the Lords Regiment?\" at intake",
       "summary": "Renamed the optional \"Note to the recruiting officer\" to the required question \"Why do you want to join the Lords Regiment?\" on every surface: apply form, officer applicant page, the #new-enlistments Discord embed field, and the Swagger descriptions. Property stays representativeNote and the column stays representative_note varchar(500) NULL, so NO migration — nullable is deliberate so pre-T-0213 applications (which have no answer) still render. Only intake tightened: CreateApplicationDto @IsOptional -> @MinLength(1); PartialType keeps PATCH /applications/mine optional.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "S",
       "sizeWeight": 2,
@@ -15107,7 +15422,7 @@
       ],
       "lastTouchedCommit": "034462e1ac573dd632231d986193ca5216d0aad7",
       "createdAt": "2026-08-04T00:30:00Z",
-      "updatedAt": "2026-08-04T00:30:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-08-04T00:30:00Z",
@@ -15115,6 +15430,13 @@
           "to": "review",
           "by": "claude",
           "note": "label rename + required validation across both repos; unit 1050 + e2e 156 green, verified live against a mocked-Discord stack"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via b1ece64 (PR #79); evidence 034462e"
         }
       ]
     },
@@ -15164,7 +15486,7 @@
       "id": "T-0215",
       "title": "Public roster + member profiles, vanity handles, and the crawler surface",
       "summary": "Opened the roster and every member profile to anonymous readers behind a structurally separate PublicMemberDto, added optional vanity handles (members.username + username_reservations) backing /u/@handle, proxied avatars so no Discord snowflake reaches public HTML, trimmed turnout out of the public event projection and windowed its history to 90 days, and added a crawler-facing HTML surface (/api/seo/*) plus a dynamic sitemap. Fixed a live redirect-loop bug in the gallery share shell along the way.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "XL",
       "sizeWeight": 8,
@@ -15248,7 +15570,7 @@
       ],
       "lastTouchedCommit": "ee2615a44ec6112341668ceefaae28e1fcc6d9c8",
       "createdAt": "2026-08-04T22:10:00Z",
-      "updatedAt": "2026-08-04T22:10:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-08-04T22:10:00Z",
@@ -15256,6 +15578,13 @@
           "to": "review",
           "by": "claude",
           "note": "backend + Caddy/compose/docs shipped on feat/public-site-redesign; 1115 unit + 178 e2e green, live smoke-tested against a real MySQL"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 4b069b6 (PR #83); evidence ee2615a"
         }
       ]
     },
@@ -15263,7 +15592,7 @@
       "id": "T-0216",
       "title": "Member bio and linked accounts, stored as handles",
       "summary": "Added an optional `bio` (text NULL on members, capped at 280 in the DTO, trimmed in the service, whitespace-only folded to NULL) and a `member_social_links` child table carrying seven optional linked accounts (Twitch, YouTube, Instagram, TikTok, X, Steam, Medal.tv). Handles are stored, never URLs: src/members/social-platforms.ts owns the per-platform regex and the URL template, so the `url` on the wire always points at a host we chose and no member can publish an arbitrary outbound link on a crawlable page. Both fields are published on PublicMemberDto as a deliberate, documented decision. Self-edit goes through the existing PATCH /members/:id, which is applicant-proof for free because an applicant has no members row at all. The crawler shell renders the bio as body copy and the links as an Elsewhere section with rel=\"nofollow ugc\"; the meta description was deliberately left alone so the shell and the SPA keep agreeing.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -15362,7 +15691,7 @@
       ],
       "lastTouchedCommit": "5050e5348068e1e8643ff2b2fb18b07e0e391b1a",
       "createdAt": "2026-08-05T04:20:00Z",
-      "updatedAt": "2026-08-05T04:20:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-08-05T04:20:00Z",
@@ -15384,6 +15713,13 @@
           "to": "review",
           "by": "claude",
           "note": "opened for review; 1249 unit + 188 e2e green, lint/build/format clean, migration up-down-up verified on MySQL 8 PRs: backend https://github.com/Amitoj02/lords-dashboard-backend/pull/81 and frontend https://github.com/Amitoj02/lords-regiment-dashboard/pull/67, both into dev; merge this repo first."
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 4b069b6 (PR #83); evidence 5050e53"
         }
       ]
     },
@@ -15788,7 +16124,7 @@
       "id": "T-0299",
       "title": "Stop the crawler rewrite depending on a hand-synced Caddyfile",
       "summary": "Root cause of 'every link unfurls the same': production ran a Caddyfile predating even the T-0197 gallery unfurler, so nothing ever reached /api/seo/* despite the API serving correct HTML since T-0293. lords-deploy has no command that can write the Caddyfile and the manual scp step did not happen. The frontend's nginx.conf now carries the same routing so it ships inside the web image on any ordinary `deploy web`. Caddy still wins when synced (handle blocks are mutually exclusive, file-ordered), so the layers cannot disagree. Google-InspectionTool added to both UA lists; deploy/README.md carries the four-command diagnosis.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "L",
       "sizeWeight": 5,
@@ -15833,7 +16169,7 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "63e4b8ad67c4220363fbe2962e39d5ff83b77603",
       "createdAt": "2026-08-05T18:30:00Z",
-      "updatedAt": "2026-08-05T19:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-08-05T18:30:00Z",
@@ -15848,6 +16184,13 @@
           "to": "review",
           "by": "claude",
           "note": "merged into dev as PR #84; NOT yet on main, so not in production"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 8b021d6 (PR #85); evidence 63e4b8a"
         }
       ]
     },
@@ -15855,7 +16198,7 @@
       "id": "T-0301",
       "title": "Close the holes an adversarial review of #84 found",
       "summary": "Four review lenses over the merged T-0297..T-0299 diff, every finding adversarially verified: 26 raised, 17 survived. /api/oembed typed its @Query params `string | undefined`, which Express does not honour — a repeated key arrives as string[] and 500'd a @Public() route via clamp(), and the same array defeated the scheme check outright because RegExp.test stringifies its argument, after which the ARRAY (javascript: member included) was spread into the response. Every param is `unknown` now behind one narrowing point that REJECTS a non-string rather than joining it, and the URL check compares a parsed origin against siteUrl() instead of matching a prefix. describeEvents had been changed without its seo-copy.ts twin, so /events served two descriptions for one URL. memberOf/organizer were bare @id references to a node defined only in another document, so they dangled. The bio cut split UTF-16 surrogate pairs. Shell routes went 60->300 req/min because the throttler keys on req.ip and the whole internet shares one bucket per route now that the routing is live.",
-      "status": "review",
+      "status": "deployed",
       "type": "fix",
       "size": "M",
       "sizeWeight": 3,
@@ -15907,7 +16250,7 @@
       ],
       "lastTouchedCommit": "66f761add2143ef71722883fec34249a80ef6697",
       "createdAt": "2026-08-05T19:45:00Z",
-      "updatedAt": "2026-08-05T19:45:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-08-05T19:45:00Z",
@@ -15915,6 +16258,13 @@
           "to": "review",
           "by": "claude",
           "note": "raised and fixed from the adversarial review; PR #86"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 8b021d6 (PR #85); evidence 66f761a"
         }
       ]
     },
@@ -15922,7 +16272,7 @@
       "id": "T-0302",
       "title": "Gallery view counts, with an IP the operator cannot read",
       "summary": "Adds `gallery_views` and the public `POST /gallery/:id/view` behind it, plus `viewsCount` on every GalleryItemDto and a `GET /gallery/:id/like` that answers about the CALLER only. Product rule the shape encodes: totals are public to everyone, the act of liking is members-only, and nobody — including whoever operates the database — can see who liked or viewed. The viewer key is HMAC-SHA256(secret, itemId + '\\n' + address): keyed so an IPv4 address (2^32 candidates) cannot be brute-forced back out, and per-ITEM salted so one visitor's hashes on two dispatches are unrelated values and no dump can reconstruct a reading history. The composite PK (gallery_item_id, viewer_hash) is what enforces 'counted once', via an upsert rather than a read-then-write that two concurrent refreshes would race. Signing in is irrelevant to a view — every reader counts. Frontend twin: lords-regiment-dashboard T-0311.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 5,
@@ -15999,7 +16349,7 @@
       ],
       "lastTouchedCommit": "db548e722102dd359d00fcadd42b5226842666a4",
       "createdAt": "2026-08-06T03:55:00Z",
-      "updatedAt": "2026-08-06T03:55:00Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-08-06T03:55:00Z",
@@ -16014,6 +16364,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on feat/gallery-view-counts; 1303 unit + 194 e2e green; verified live in Chrome against the dev stack; PR open against dev"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 8b021d6 (PR #85); evidence db548e7"
         }
       ]
     },
@@ -16021,7 +16378,7 @@
       "id": "T-0303",
       "title": "Retire Dependabot and refresh dependencies by hand",
       "summary": "Dependabot was opening a weekly queue nobody drained — ten PRs stood open against dev, the oldest the joi 17->18 bump that could never merge. Its alerts and automated security fixes were already disabled at the repo level, so .github/dependabot.yml was driving version updates only; deleting it stops them. npm audit reported 7 vulnerabilities (5 high, 2 moderate) — browserslist, five fast-uri advisories, js-yaml via @nestjs/swagger, qs, undici — every one transitive and every one already fixed inside the ranges package.json declares. `npm update` alone takes the count to 0 without touching a single range. NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 were deliberately left on the table: each is a migration, not a bump.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "M",
       "sizeWeight": 3,
@@ -16077,12 +16434,19 @@
       ],
       "lastTouchedCommit": "8d6059fcd3d074c658d64e34a76105cd22d48b41",
       "createdAt": "2026-09-07T18:12:09Z",
-      "updatedAt": "2026-09-07T18:12:09Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-09-07T18:12:09Z",
           "by": "claude",
           "note": "created and implemented: dependabot.yml removed, dependencies refreshed within semver, audit clean"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 994e0b1 (Merge branch 'dev': retire Dependabot, refresh dependencies, clear all); evidence 8d6059f"
         }
       ]
     },
@@ -16090,7 +16454,7 @@
       "id": "T-0304",
       "title": "Normalize line endings so the repo is lintable on Windows",
       "summary": "This repo had no .gitattributes while the frontend has carried one all along. With core.autocrlf=true — git default on Windows — every file materializes CRLF, and Prettier defaults endOfLine to lf, so `npm run format:check` reported style issues in 307 files and `npm run lint:check` failed with 57,445 `Delete CR` errors: one per line of the repository. Nothing was wrong with the code. CI never caught it because ubuntu-latest checks out LF, so the repo is unlintable on Windows and perfectly green on the runner. The stored blobs were already LF (`git add --renormalize .` staged no content change), so this only changes what lands in a working tree.",
-      "status": "review",
+      "status": "deployed",
       "type": "chore",
       "size": "S",
       "sizeWeight": 1,
@@ -16124,12 +16488,228 @@
       "skippedByClaude": [],
       "lastTouchedCommit": "8d6059fcd3d074c658d64e34a76105cd22d48b41",
       "createdAt": "2026-09-07T18:12:09Z",
-      "updatedAt": "2026-09-07T18:12:09Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
       "history": [
         {
           "at": "2026-09-07T18:12:09Z",
           "by": "claude",
           "note": "created and implemented: .gitattributes added, working tree renormalized to LF"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 994e0b1 (Merge branch 'dev': retire Dependabot, refresh dependencies, clear all); evidence 8d6059f"
+        }
+      ]
+    },
+    {
+      "id": "T-0305",
+      "title": "Let admins switch the guild-join welcome off, with the welcome channel optional",
+      "summary": "There was no way to stop the bot greeting new guild members short of turning the whole bot off: clearing the welcome channel only moved the greeting into a DM, and clearing the message only swapped in the house default. discord_bot_settings.welcome_enabled (NOT NULL DEFAULT 1, so the live regiment keeps greeting) now gates enqueueWelcome, and the worker re-reads it at drain time so switching greetings off mid-raid also stops the queued backlog (T-0209's 'the switch means stop' rule). The switch is independent of welcome_channel_id — on with no channel still greets by DM, neither direction is refused for a missing channel — and a cleared channel is stored as NULL whether the client posts '' or null. The returning-member role restore runs either way.",
+      "status": "review",
+      "type": "feature",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "discord-bot",
+      "feature": "notifications",
+      "subfeature": "welcome-message",
+      "repo": "",
+      "paths": [
+        "src/database/migrations/1784900008000-WelcomeSwitch.ts",
+        "src/discord/entities/discord-bot-settings.entity.ts",
+        "src/discord/dto/discord-settings.dto.ts",
+        "src/discord/discord.service.ts",
+        "src/discord/discord-sync.service.ts",
+        "src/discord/discord-sync.worker.ts",
+        "src/discord/discord-onboarding.service.ts",
+        "src/database/seeds/discord-bot-settings.seed.ts",
+        "docs/INFRASTRUCTURE.md",
+        "src/discord/discord.service.spec.ts",
+        "src/discord/discord-sync.service.spec.ts",
+        "src/discord/discord-sync.worker.spec.ts",
+        "test/discord.e2e-spec.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [
+        "lords-regiment-dashboard:T-0315"
+      ],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "PATCH welcomeEnabled false with no welcome channel saves, and GET returns it",
+          "status": "passed"
+        },
+        {
+          "desc": "PATCH welcomeEnabled true with no welcome channel saves — the DM case, never a 400",
+          "status": "passed"
+        },
+        {
+          "desc": "a welcome channel cleared with '' or null is stored as NULL",
+          "status": "passed"
+        },
+        {
+          "desc": "switched off: a join enqueues no welcome, and nothing is posted to the channel or sent by DM",
+          "status": "passed"
+        },
+        {
+          "desc": "switched off: a returning member still gets the additive role grant",
+          "status": "passed"
+        },
+        {
+          "desc": "switched off (or bot disabled) after enqueue: a queued welcome is skipped at drain time",
+          "status": "passed"
+        },
+        {
+          "desc": "switched on: no channel greets by DM, a set channel is posted to",
+          "status": "passed"
+        },
+        {
+          "desc": "migration down + up over a seeded row backfills welcome_enabled = 1, and migration:generate shows no drift on discord_bot_settings",
+          "status": "passed"
+        },
+        {
+          "desc": "live guild: with greetings off, a real join produces no welcome and no failed operation",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "Adds welcomeEnabled to the shared discord_bot_settings PATCH body and GET projection. The API runs forbidNonWhitelisted and the web (frontend T-0315) posts the field on every bot-settings save, so an API rolled back past this while the web image stays refuses EVERY bot-settings save with a 400. Deploy the API first or together, and roll the two images back together.",
+          "status": "open",
+          "notedAt": "2026-09-25T18:34:44Z"
+        },
+        {
+          "desc": "The Welcome arm of the shared outbox worker now reads bot settings at drain time. A failed read throws into the normal retry path (safe: nothing was sent yet), and a welcome skipped because greetings were switched off is recorded in bot_operations as a succeeded no-op, like the existing role and ban-role skips.",
+          "status": "open",
+          "notedAt": "2026-09-25T18:34:44Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not add a drain-time re-check to the other notification jobs (announcements, decision DMs, gallery posts): only the welcome has a switch of its own.",
+        "Did not record a drain-time skip differently in bot_operations: it stays a succeeded no-op, matching the role and ban-role skips.",
+        "Did not clear the stored welcome channel or message when greetings are switched off, so switching back on restores the old greeting.",
+        "Did not fix the pre-existing migration:generate drift found while verifying this migration; recorded as T-0307."
+      ],
+      "lastTouchedCommit": "08c3989fb4600176f0d6f2d243e755a90a727e7f",
+      "createdAt": "2026-09-25T18:34:44Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
+      "history": [
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created from the owner's request: let the bot's welcome messages be turned off, without forcing a welcome channel"
+        },
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": "planned",
+          "to": "review",
+          "by": "claude",
+          "note": "implemented on claude/eloquent-meitner-hqqsm1; unit 1314/1314 and e2e 201/201 against MySQL 8.4"
+        }
+      ]
+    },
+    {
+      "id": "T-0306",
+      "title": "Point the crawler shell's default card at the crest, not the site banner",
+      "summary": "The default card image on every shell-rendered page with nothing of its own to show (the roster, an empty calendar, the generic card, a member with no avatar or banner) is banner.png, a frame of Holdfast gameplay. DEFAULT_CARD_IMAGE becomes social-card.png, the crest centred on --ink-900 at 1200x630, with its declared dimensions moved to match; the /home precedence above it is untouched. RECORDED BY SYNC: the fix is finished on origin/fix/link-preview-logo-card (c00109d) but was never merged, and that branch filed it as T-0302, an id main had already given to gallery view counts, so main's state never tracked it. main still emits banner.png.",
+      "status": "review",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "seo",
+      "feature": "crawler-shell",
+      "subfeature": "card-image",
+      "repo": "",
+      "paths": [
+        "src/seo/seo.service.ts",
+        "src/seo/seo.service.spec.ts"
+      ],
+      "dependsOn": [
+        "lords-regiment-dashboard:T-0316"
+      ],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "the seo suite asserts the crest card for a member with no avatar and no banner, and for a missing regiment row",
+          "status": "passed"
+        },
+        {
+          "desc": "a crawler-UA fetch of /roster and /u/<slug> emits og:image = <site>/assets/images/social-card.png and that URL 200s",
+          "status": "pending"
+        },
+        {
+          "desc": "an event with its own bannerUrl still cards that banner, not the crest",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "DEFAULT_CARD_IMAGE names a file that ships in lords-regiment-dashboard, so this API cannot verify the URL resolves. Deployed ahead of the web image it emits a 404 card on every default-image page — the roster, an empty calendar, avatarless profiles. banner.png is deliberately still present in the frontend so the reverse order is safe.",
+          "status": "open",
+          "notedAt": "2026-08-06T03:15:00Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not change the /home precedence (presentation.heroBannerUrl -> bannerUrl -> default). An owner-set hero is a deliberate statement about that page's card; only the unclaimed pages change.",
+        "Did not reconcile the pre-existing disagreement between the shell (prefers presentation.heroBannerUrl) and the SPA landing page (uses cardBannerUrl only). It predates this task and is a separate fix."
+      ],
+      "lastTouchedCommit": "c00109df13dc96f6225614f30d759ccf8c70643a",
+      "createdAt": "2026-09-25T18:34:44Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
+      "history": [
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": null,
+          "to": "review",
+          "by": "claude",
+          "note": "recorded by sync from the unmerged origin/fix/link-preview-logo-card (c00109d), where it was filed under the colliding id T-0302; the branch still needs merging, with .blueframe/state.json resolved by hand"
+        }
+      ]
+    },
+    {
+      "id": "T-0307",
+      "title": "Name the hand-written constraints in the entities so migration:generate stops emitting unrelated drift",
+      "summary": "On a freshly migrated database, migration:generate emits four statements unrelated to the change being generated: it drops and re-adds FK_member_social_links_member, FK_gallery_views_item and FK_event_announcements_event under TypeORM's hashed names, and swaps UQ_members_username for a hashed unique index. The hand-written migrations named those constraints and the entities do not, so the generator derives different names. Harmless at runtime, but every generated migration carries the four renames unless someone deletes them by hand. Name them in the entities (foreignKeyConstraintName on the JoinColumn, a named unique index on username).",
+      "status": "planned",
+      "type": "chore",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "database",
+      "subfeature": "migrations",
+      "repo": "",
+      "paths": [
+        "src/members/entities/member-social-link.entity.ts",
+        "src/gallery/entities/gallery-view.entity.ts",
+        "src/events/entities/event-announcement.entity.ts",
+        "src/members/entities/member.entity.ts"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "migration:generate on a freshly migrated database reports no changes",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": null,
+      "createdAt": "2026-09-25T18:34:44Z",
+      "updatedAt": "2026-09-25T18:34:44Z",
+      "history": [
+        {
+          "at": "2026-09-25T18:34:44Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "discovered while verifying T-0305's migration: migration:generate emitted these four renames and nothing for discord_bot_settings"
         }
       ]
     }
@@ -16174,6 +16754,21 @@
       "at": "2026-09-07T18:12:09Z",
       "by": "claude",
       "note": "T-0303 and T-0304 created and implemented: Dependabot removed, dependencies refreshed within semver (audit 0), line endings normalized"
+    },
+    {
+      "at": "2026-09-25T18:34:44Z",
+      "by": "claude",
+      "note": "sync: dev fully merged to main (PR merges through #89, then 994e0b1); every review task advanced to deployed; T-0188 deployed (landed in 344937a)"
+    },
+    {
+      "at": "2026-09-25T18:34:44Z",
+      "by": "claude",
+      "note": "T-0305 created and implemented: welcome on/off switch with the welcome channel optional; coupled with frontend T-0315"
+    },
+    {
+      "at": "2026-09-25T18:34:44Z",
+      "by": "claude",
+      "note": "T-0306 recorded from the unmerged origin/fix/link-preview-logo-card (filed there under a colliding id); T-0307 planned from migration:generate drift"
     }
   ]
 }
