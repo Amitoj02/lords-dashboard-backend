@@ -1,10 +1,10 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "08c3989fb4600176f0d6f2d243e755a90a727e7f",
-  "lastSyncedAt": "2026-09-25T18:34:44Z",
-  "notesForNextSession": "T-0305 (welcome on/off switch, welcome channel optional) is implemented on claude/eloquent-meitner-hqqsm1 and NOT merged. It is coupled with frontend T-0315: the web posts welcomeEnabled on every bot-settings save and this API runs forbidNonWhitelisted, so ship the API first or together, and roll back together. Migration 1784900008000 adds welcome_enabled DEFAULT 1, so production keeps greeting until an admin flips it.\n\nThis sync found dev fully merged to main, so every review task was advanced to deployed (each history note names the merge that landed it). T-0188 went to deployed too: 344937a (LDA-M6) had already pinned allowedMentions on every send.\n\nTHE ONE THING WORTH KNOWING: origin/fix/link-preview-logo-card holds a finished, never-merged fix (the crest, not banner.png, as the default card), filed there as T-0302, an id main had already given to view counts. It is re-recorded here as T-0306 (frontend T-0316). Merge its code, but resolve .blueframe/state.json by hand: the branch's copy would clobber main's T-0302.\n\nStill waiting: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 (move TS in both repos at once). Until T-0307 lands, delete the four unrelated constraint renames from any migration:generate output.",
-  "nextIdCounter": 308,
+  "lastSyncedCommit": "bf724c1dcf9fb635b8b30e1b897e7e964cc2549d",
+  "lastSyncedAt": "2026-09-25T20:27:01Z",
+  "notesForNextSession": "PRODUCTION DEPLOYS ARE BLOCKED UNTIL T-0308 IS ON THE BOX. The 2026-09-25 deploy died pulling minio/minio, which MinIO has withdrawn from Docker Hub; the pull failed before `up -d`, so production still runs the pre-T-0305 images, healthy. The fix (PR #106, fix/deploy-minio-pull) profiles MinIO out of the prod project, but docker-compose.prod.yml is hand-synced: merge, scp it to ~/lords, make sure APEX_HOST is in .env first (the box's copy may predate ee2615a), check `config --images` lists no minio/*, then re-run the deploy with latest/latest. T-0305 must ship together with frontend T-0315, and that pair is the next thing the deploy will roll.\n\nT-0309: the dev stack has the same problem, because a fresh `docker compose up -d db minio minio-init` cannot pull MinIO any more. The replacement image is an open question on the task.\n\nStill open from last session: origin/fix/link-preview-logo-card holds the finished, never-merged T-0306 (filed there under a colliding T-0302). Merge its code, but resolve .blueframe/state.json by hand. Still waiting: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 (move TS in both repos at once). Until T-0307 lands, delete the four unrelated constraint renames from any migration:generate output.",
+  "nextIdCounter": 310,
   "connections": [],
   "tasks": [
     {
@@ -16508,7 +16508,7 @@
       "id": "T-0305",
       "title": "Let admins switch the guild-join welcome off, with the welcome channel optional",
       "summary": "There was no way to stop the bot greeting new guild members short of turning the whole bot off: clearing the welcome channel only moved the greeting into a DM, and clearing the message only swapped in the house default. discord_bot_settings.welcome_enabled (NOT NULL DEFAULT 1, so the live regiment keeps greeting) now gates enqueueWelcome, and the worker re-reads it at drain time so switching greetings off mid-raid also stops the queued backlog (T-0209's 'the switch means stop' rule). The switch is independent of welcome_channel_id — on with no channel still greets by DM, neither direction is refused for a missing channel — and a cleared channel is stored as NULL whether the client posts '' or null. The returning-member role restore runs either way.",
-      "status": "review",
+      "status": "deployed",
       "type": "feature",
       "size": "M",
       "sizeWeight": 3,
@@ -16592,9 +16592,9 @@
         "Did not clear the stored welcome channel or message when greetings are switched off, so switching back on restores the old greeting.",
         "Did not fix the pre-existing migration:generate drift found while verifying this migration; recorded as T-0307."
       ],
-      "lastTouchedCommit": "08c3989fb4600176f0d6f2d243e755a90a727e7f",
+      "lastTouchedCommit": "263a3f9a9b5e9045b15b1787af0a5bf92bc980a2",
       "createdAt": "2026-09-25T18:34:44Z",
-      "updatedAt": "2026-09-25T18:34:44Z",
+      "updatedAt": "2026-09-25T20:27:01Z",
       "history": [
         {
           "at": "2026-09-25T18:34:44Z",
@@ -16609,6 +16609,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on claude/eloquent-meitner-hqqsm1; unit 1314/1314 and e2e 201/201 against MySQL 8.4"
+        },
+        {
+          "at": "2026-09-25T20:27:01Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 263a3f9 (PR #105); evidence 263a3f9. NOT live yet: the 2026-09-25 production deploy of it failed at the image pull (T-0308)"
         }
       ]
     },
@@ -16712,6 +16719,147 @@
           "note": "discovered while verifying T-0305's migration: migration:generate emitted these four renames and nothing for discord_bot_settings"
         }
       ]
+    },
+    {
+      "id": "T-0308",
+      "title": "Unblock production deploys: keep dev-only MinIO out of the prod project, not just at zero replicas",
+      "summary": "The 2026-09-25 production deploy (run 36184332508) died in lords-deploy's `compose pull` with 'pull access denied for minio/minio, repository does not exist'. MinIO has withdrawn minio/minio and minio/mc from Docker Hub and Quay. Production never runs MinIO, but the prod overlay only scaled minio and minio-init to `deploy: replicas: 0`, which stops a container being created (what T-0134 verified) while `compose pull` still fetches every service's image. They now carry `profiles: [dev]`, a profile nothing on the box activates, which removes both from the prod project outright; the dev stack never loads the overlay and is unchanged. The pull failed before `up -d`, so nothing live changed. The compose file is hand-synced, so merging alone does not unblock deploys.",
+      "status": "review",
+      "type": "bug",
+      "size": "S",
+      "sizeWeight": 2,
+      "area": "platform",
+      "feature": "deployment",
+      "subfeature": "release-automation",
+      "repo": "",
+      "paths": [
+        "docker-compose.prod.yml",
+        "deploy/README.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [],
+      "testPlan": [
+        {
+          "desc": "`compose pull --quiet` on origin/main's prod overlay, against a stub Engine API answering minio/* the way Docker Hub now does, requests six images and fails with the production error verbatim",
+          "status": "passed"
+        },
+        {
+          "desc": "the same pull on the fixed overlay requests only caddy, mysql, lords-api and lords-web, and exits 0",
+          "status": "passed"
+        },
+        {
+          "desc": "prod `config --services` is db/migrate/api/web/caddy, `--profile dev` is the only way minio comes back, and caddy is still the only service publishing ports",
+          "status": "passed"
+        },
+        {
+          "desc": "the dev stack (auto-merged override, no prod overlay) still lists minio and minio-init",
+          "status": "passed"
+        },
+        {
+          "desc": "POST-DEPLOY: docker-compose.prod.yml hand-synced to the box, and `config --images` there lists no minio/*",
+          "status": "pending"
+        },
+        {
+          "desc": "POST-DEPLOY: Deploy to production passes with latest/latest, shipping T-0305 with frontend T-0315",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [
+        {
+          "desc": "docker-compose.prod.yml is hand-synced (lords-deploy never writes it). Until the box's copy is replaced, every deploy keeps failing at 'pulling images'. A box copy that predates ee2615a also needs APEX_HOST in .env before the new file will interpolate — otherwise every compose command there refuses to run, the deploy and lords-backup included.",
+          "status": "open",
+          "notedAt": "2026-09-25T20:27:01Z"
+        },
+        {
+          "desc": "Any dev-only service added to the base compose file must get `profiles: [dev]` in the prod overlay. `replicas: 0` reintroduces a pull of an image production never runs, and with it a dependency on an upstream that can vanish.",
+          "status": "open",
+          "notedAt": "2026-09-25T20:27:01Z"
+        }
+      ],
+      "skippedByClaude": [
+        "Did not touch the production box or re-run the deploy workflow: the box's compose file is hand-synced and needs the owner's SSH access, and the deploy cannot pass until it is replaced.",
+        "Did not change lords-deploy (--ignore-pull-failures would also swallow a missing lords-api tag; a named pull list duplicates the compose file), because the profile fixes the project itself.",
+        "Did not move MinIO into docker-compose.override.yml: it would edit both hand-synced compose files instead of one.",
+        "Did not add a CI check that the prod project names only pullable images; worth doing, but not part of unblocking the deploy.",
+        "Did not replace MinIO in the dev stack; recorded as T-0309."
+      ],
+      "lastTouchedCommit": "bf724c1dcf9fb635b8b30e1b897e7e964cc2549d",
+      "createdAt": "2026-09-25T20:27:01Z",
+      "updatedAt": "2026-09-25T20:27:01Z",
+      "history": [
+        {
+          "at": "2026-09-25T20:27:01Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "created from the owner's request: find out why the latest production deploy failed, and fix it"
+        },
+        {
+          "at": "2026-09-25T20:27:01Z",
+          "from": "planned",
+          "to": "review",
+          "by": "claude",
+          "note": "implemented on fix/deploy-minio-pull (bf724c1), PR #106; box sync and a deploy re-run still owed"
+        }
+      ]
+    },
+    {
+      "id": "T-0309",
+      "title": "Replace the withdrawn MinIO images in the dev stack",
+      "summary": "minio/minio and minio/mc are gone from Docker Hub and Quay (checked 2026-09-25), so `docker compose up -d db minio minio-init`, and a bare `docker compose up`, cannot pull on any machine without them cached. Production is unaffected: it uses R2, and T-0308 profiled MinIO out of the prod project. Needs an S3-compatible dev server that handles presigned browser PUTs, path-style URLs and anonymous public reads (still published on 2026-09-25: pgsty/minio, a third-party rebuild of the same server; rustfs/rustfs; chrislusf/seaweedfs; dxflrs/garage; cgr.dev/chainguard/minio, which is distroless), plus a bucket bootstrap that does not depend on minio/mc (e.g. amazon/aws-cli put-bucket-policy, or rclone). Then update the compose comments, .env.example, and the setup docs in README, CONTRIBUTING and both CLAUDE.md files.",
+      "status": "planned",
+      "type": "bug",
+      "size": "M",
+      "sizeWeight": 3,
+      "area": "platform",
+      "feature": "storage",
+      "subfeature": "local-object-store",
+      "repo": "",
+      "paths": [
+        "docker-compose.yml",
+        "docker-compose.override.yml",
+        ".env.example",
+        "README.md",
+        "CONTRIBUTING.md"
+      ],
+      "dependsOn": [],
+      "blocks": [],
+      "questions": [
+        {
+          "q": "Replace with a MinIO rebuild (closest drop-in, but a third-party publisher) or move to a different S3-compatible server (RustFS, SeaweedFS, Garage)?",
+          "answer": null,
+          "askedAt": "2026-09-25T20:27:01Z"
+        }
+      ],
+      "testPlan": [
+        {
+          "desc": "on a machine with no cached images, `docker compose up -d` pulls, starts the store and creates the bucket idempotently",
+          "status": "pending"
+        },
+        {
+          "desc": "an avatar upload round-trips presign -> browser PUT -> anonymous GET against the dev store",
+          "status": "pending"
+        },
+        {
+          "desc": "S3_ENDPOINT and S3_PUBLIC_BASE_URL defaults (http://localhost:9100, .../lords-media) still resolve, or every doc that names them is updated",
+          "status": "pending"
+        }
+      ],
+      "regressionRisk": [],
+      "skippedByClaude": [],
+      "lastTouchedCommit": "bf724c1dcf9fb635b8b30e1b897e7e964cc2549d",
+      "createdAt": "2026-09-25T20:27:01Z",
+      "updatedAt": "2026-09-25T20:27:01Z",
+      "history": [
+        {
+          "at": "2026-09-25T20:27:01Z",
+          "from": null,
+          "to": "planned",
+          "by": "claude",
+          "note": "discovered while fixing T-0308: the same upstream withdrawal breaks the dev stack"
+        }
+      ]
     }
   ],
   "history": [
@@ -16769,6 +16917,21 @@
       "at": "2026-09-25T18:34:44Z",
       "by": "claude",
       "note": "T-0306 recorded from the unmerged origin/fix/link-preview-logo-card (filed there under a colliding id); T-0307 planned from migration:generate drift"
+    },
+    {
+      "at": "2026-09-25T20:27:01Z",
+      "by": "claude",
+      "note": "T-0308 created and implemented: the 2026-09-25 production deploy failed pulling minio/minio (withdrawn upstream); dev-only MinIO is now profiled out of the prod project; PR #106, box sync owed"
+    },
+    {
+      "at": "2026-09-25T20:27:01Z",
+      "by": "claude",
+      "note": "T-0305 advanced to deployed: landed on main via 263a3f9 (PR #105); not live until a deploy passes"
+    },
+    {
+      "at": "2026-09-25T20:27:01Z",
+      "by": "claude",
+      "note": "T-0309 planned: the dev stack's MinIO images are gone too"
     }
   ]
 }
