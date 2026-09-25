@@ -169,7 +169,7 @@ row's own channel/switch is set; otherwise the enqueue silently no-ops.
 | Event created | `event_announcement_channel_id` | channel embed | `announce` | `events.service.ts` `create` → `enqueueEventAnnounce` |
 | Event lead-time reminder | `event_announcement_channel_id` | channel embed | `event.reminder` | `event-reminder.scheduler.ts` sweep → `enqueueEventReminder` |
 | Audit entry mirrored | `audit_log_channel_id` | channel embed | `audit.log` | `audit.service.ts` `mirrorToDiscord` → `enqueueAuditLog` |
-| Member joined the guild — welcome | `welcome_channel_id`, **falls back to a DM when unset** | channel embed *or* DM embed | `welcome` | `discord-onboarding.service.ts` → `enqueueWelcome` |
+| Member joined the guild — welcome | `welcome_channel_id` (optional), **falls back to a DM when unset**; nothing at all when `welcome_enabled` is off | channel embed *or* DM embed | `welcome` | `discord-onboarding.service.ts` → `enqueueWelcome` |
 | Member joined the guild — role restore | — | role mutation (**additive**) | `role.sync` (or `member.ban_role`) | `discord-onboarding.service.ts` `restoreRoles` → `enqueueRoleGrant` |
 | Application submitted — Applicant marker | — (the `Applicant` rank's role link) | role mutation | `role.assign` | `applications.service.ts` `submit` → `enqueueApplicantRole` |
 | Application approved — enlistment | — (the `Applicant` rank's role link) | role mutation (**additive**) | `role.remove`, then `role.sync` | `applications.service.ts` `approve` → `enqueueApplicantRole` + `enqueueRoleGrant` |

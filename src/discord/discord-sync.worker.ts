@@ -460,6 +460,7 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
         return;
       case DiscordSyncJobType.Welcome: {
         const p = this.payloadOf(job, type);
+        if (!(await this.welcomeLive(job, p.discordUserId))) return;
         // The DM fallback is unchanged: no welcome channel ⇒ deliver privately.
         if (p.channelId) {
           await this.postToChannel({ channelId: p.channelId, content: p.content, embed: p.embed });
@@ -665,6 +666,22 @@ export class DiscordSyncWorker implements OnModuleInit, OnModuleDestroy {
     this.logger.warn(
       `Skipping queued ${job.jobType} for ${discordUserId}: ` +
         `botEnabled/syncRolesOnChange disabled since enqueue`,
+    );
+    return false;
+  }
+
+  /**
+   * Is the greeting still wanted for this job's regiment (T-0305)? Read at DRAIN
+   * time for the same reason as {@link roleSyncingLive}: a raid can queue a
+   * welcome per join faster than they drain, and an admin who switches greetings
+   * off — or the whole bot — mid-raid means "stop", not "stop enqueuing more".
+   * The welcome channel plays no part: with none set the greeting is a DM.
+   */
+  private async welcomeLive(job: DiscordSyncJob, discordUserId: string): Promise<boolean> {
+    const settings = await this.settings.findOne({ where: { regimentId: job.regimentId } });
+    if (settings?.botEnabled && settings.welcomeEnabled) return true;
+    this.logger.warn(
+      `Skipping queued welcome for ${discordUserId}: botEnabled/welcomeEnabled disabled since enqueue`,
     );
     return false;
   }

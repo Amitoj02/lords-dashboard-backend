@@ -1151,6 +1151,8 @@ describe('DiscordSyncWorker', () => {
     });
 
     it('keeps the welcome DM fallback when no channel is configured', async () => {
+      // The welcome re-reads its switch at drain time (T-0305), so say it is on.
+      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, welcomeEnabled: true });
       queue([
         job({
           jobType: DiscordSyncJobType.Welcome,
@@ -1221,6 +1223,53 @@ describe('DiscordSyncWorker', () => {
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({ action: 'discord.sync.failed' }),
       );
+    });
+  });
+
+  describe('welcome switch re-checked at drain time (T-0305)', () => {
+    const embed = { title: 'Welcome to The Lords', color: 0x2d6a4f };
+    const welcomeJob = (channelId: string | null) =>
+      job({
+        jobType: DiscordSyncJobType.Welcome,
+        payload: { discordUserId: 'u1', channelId, content: '', embed },
+      });
+
+    beforeEach(() => {
+      gateway.sendChannelMessage.mockResolvedValue({ messageId: 'm-1' });
+      gateway.sendDirectMessage.mockResolvedValue({ messageId: 'm-2' });
+    });
+
+    it('greets nobody once greetings were switched off after enqueue', async () => {
+      // A raid queues a welcome per join faster than they drain. Switching
+      // greetings off mid-raid has to stop that backlog, not only the next join.
+      const j = welcomeJob('wel-1');
+      queue([j]);
+      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, welcomeEnabled: false });
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).not.toHaveBeenCalled();
+      expect(gateway.sendDirectMessage).not.toHaveBeenCalled();
+      expect(j.status).toBe(DiscordSyncJobStatus.Succeeded); // resolved as a no-op
+    });
+
+    it('greets nobody once the bot was disabled after enqueue', async () => {
+      queue([welcomeJob(null)]);
+      settingsRepo.findOne.mockResolvedValue({ botEnabled: false, welcomeEnabled: true });
+
+      await worker.drain();
+
+      expect(gateway.sendDirectMessage).not.toHaveBeenCalled();
+    });
+
+    it('posts to the welcome channel while the switch is on', async () => {
+      queue([welcomeJob('wel-1')]);
+      settingsRepo.findOne.mockResolvedValue({ botEnabled: true, welcomeEnabled: true });
+
+      await worker.drain();
+
+      expect(gateway.sendChannelMessage).toHaveBeenCalledWith('wel-1', '', [embed]);
+      expect(gateway.sendDirectMessage).not.toHaveBeenCalled();
     });
   });
 

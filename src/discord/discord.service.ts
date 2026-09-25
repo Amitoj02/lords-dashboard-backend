@@ -200,7 +200,14 @@ export class DiscordService {
     }
 
     if (dto.botEnabled !== undefined) settings.botEnabled = dto.botEnabled;
-    if (dto.welcomeChannelId !== undefined) settings.welcomeChannelId = dto.welcomeChannelId;
+    // The greeting switch needs no channel in either direction (T-0305): off
+    // sends nothing, on with no channel sends a DM. So unlike applyBanRoleOnBan
+    // below, nothing here requires a companion field to be set first.
+    if (dto.welcomeEnabled !== undefined) settings.welcomeEnabled = dto.welcomeEnabled;
+    // `|| null` like every other channel column, so "no channel" is one stored
+    // value (NULL, which routes the greeting to a DM) whichever way it was cleared.
+    if (dto.welcomeChannelId !== undefined)
+      settings.welcomeChannelId = dto.welcomeChannelId || null;
     // Blank means "use the house default", so it is stored as NULL rather than
     // '' (T-0184). Every other optional string on this endpoint is only ever
     // read for truthiness (`if (!s.joinRoleId)`, `if (!s.auditLogChannelId)`),

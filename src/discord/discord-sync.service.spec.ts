@@ -19,6 +19,7 @@ const EVENT_ID = 'evt000000001';
 const settings = (overrides: Partial<DiscordBotSettings> = {}): DiscordBotSettings => ({
   regimentId: REGIMENT,
   botEnabled: true,
+  welcomeEnabled: true,
   welcomeChannelId: null,
   welcomeMessage: 'hi',
   enlistmentChannelId: null,
@@ -520,6 +521,47 @@ describe('DiscordSyncService', () => {
       settingsRepo.findOne.mockResolvedValue(settings({ eventAnnouncementChannelId: null }));
       expect(await service.enqueueEventAnnounce(REGIMENT, EVENT_ID)).toBeNull();
       expect(jobsRepo.create).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── T-0305: greetings can be switched off, and never need a channel ─────────
+  //
+  // The switch and the channel are independent, so the whole truth table is
+  // pinned: off greets nobody even with a channel set, and on greets somebody
+  // even with no channel — the one thing the welcome must not copy from the
+  // other producers is "no channel ⇒ no-op".
+  describe('welcome switch (T-0305)', () => {
+    it('greets nobody while greetings are switched off, even with a channel set', async () => {
+      settingsRepo.findOne.mockResolvedValue(
+        settings({ welcomeEnabled: false, welcomeChannelId: 'wel-1', welcomeMessage: 'Fall in!' }),
+      );
+
+      expect(await service.enqueueWelcome(REGIMENT, USER_ID)).toBeNull();
+      expect(jobsRepo.create).not.toHaveBeenCalled();
+      // Checked before the brand lookup, so an off switch costs nothing per join.
+      expect(regimentsRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('still greets with no channel set — routed to a DM, not dropped', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ welcomeChannelId: null }));
+
+      expect(await service.enqueueWelcome(REGIMENT, USER_ID)).not.toBeNull();
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobType: DiscordSyncJobType.Welcome,
+          payload: expect.objectContaining({ discordUserId: USER_ID, channelId: null }),
+        }),
+      );
+    });
+
+    it('posts to the welcome channel when one is set', async () => {
+      settingsRepo.findOne.mockResolvedValue(settings({ welcomeChannelId: 'wel-1' }));
+
+      await service.enqueueWelcome(REGIMENT, USER_ID);
+
+      expect(jobsRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ payload: expect.objectContaining({ channelId: 'wel-1' }) }),
+      );
     });
   });
 

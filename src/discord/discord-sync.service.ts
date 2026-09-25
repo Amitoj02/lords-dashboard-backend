@@ -460,9 +460,14 @@ export class DiscordSyncService {
    * an embed that had no body at all. `updateSettings` now normalises blank to
    * NULL on the way in, but rows written before that fix — and any written
    * around it — are handled here too, so the read is correct on its own.
+   *
+   * No-ops when the regiment has switched greetings off (T-0305). A missing
+   * welcome channel is NOT a reason to no-op — that is the DM fallback.
    */
   async enqueueWelcome(regimentId: string, discordUserId: string): Promise<DiscordSyncJob | null> {
     return this.guarded(regimentId, async (s) => {
+      // Before the brand lookup, so a regiment that greets nobody pays nothing per join.
+      if (!s.welcomeEnabled) return null;
       const brand = await this.resolveBrand(regimentId);
       const message = s.welcomeMessage?.trim() || DEFAULT_WELCOME;
       return this.insertJob(regimentId, DiscordSyncJobType.Welcome, {
