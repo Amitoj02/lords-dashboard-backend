@@ -1,9 +1,9 @@
 {
   "version": 1,
   "project": "lords-dashboard-backend",
-  "lastSyncedCommit": "bf724c1dcf9fb635b8b30e1b897e7e964cc2549d",
-  "lastSyncedAt": "2026-09-25T20:27:01Z",
-  "notesForNextSession": "PRODUCTION DEPLOYS ARE BLOCKED UNTIL T-0308 IS ON THE BOX. The 2026-09-25 deploy died pulling minio/minio, which MinIO has withdrawn from Docker Hub; the pull failed before `up -d`, so production still runs the pre-T-0305 images, healthy. The fix (PR #106, fix/deploy-minio-pull) profiles MinIO out of the prod project, but docker-compose.prod.yml is hand-synced: merge, scp it to ~/lords, make sure APEX_HOST is in .env first (the box's copy may predate ee2615a), check `config --images` lists no minio/*, then re-run the deploy with latest/latest. T-0305 must ship together with frontend T-0315, and that pair is the next thing the deploy will roll.\n\nT-0309: the dev stack has the same problem, because a fresh `docker compose up -d db minio minio-init` cannot pull MinIO any more. The replacement image is an open question on the task.\n\nStill open from last session: origin/fix/link-preview-logo-card holds the finished, never-merged T-0306 (filed there under a colliding T-0302). Merge its code, but resolve .blueframe/state.json by hand. Still waiting: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 (move TS in both repos at once). Until T-0307 lands, delete the four unrelated constraint renames from any migration:generate output.",
+  "lastSyncedCommit": "565117bdbbf20560c8f9156f78dcc6cfe14c4094",
+  "lastSyncedAt": "2026-09-25T22:55:38Z",
+  "notesForNextSession": "Production deploys work again (T-0308). Since 2026-09-25 22:50 UTC production runs lords-api:latest (built from 565117b, so T-0305's welcome switch is live) and lords-web:latest. ~/lords/docker-compose.prod.yml now matches main exactly. The deploy also recreated db on a rebuilt mysql:8.4 image (8.4.11, and no server-upgrade step was logged), because the tag floats and every deploy pulls it.\n\nThe box's Caddyfile is still the July 23 copy, which predates T-0215. APEX_HOST is now in .env and is passed to caddy, so deploy/README's T-0215 steps 2-4 (sync the Caddyfile, validate, verify) are all that remains of T-0299's pending item. Do not sync it blind: the README's ordering and checks matter.\n\nT-0309: the dev stack cannot pull MinIO any more (the image is withdrawn upstream). Pick a replacement; that is the open question on the task.\n\nStill open: origin/fix/link-preview-logo-card holds the finished, never-merged T-0306 (filed there under a colliding T-0302). Merge its code, but resolve .blueframe/state.json by hand. Still waiting: NestJS 12, TypeORM 1.x, typeorm-extension 4, joi 18 and TypeScript 7 (move TS in both repos at once). Until T-0307 lands, delete the four unrelated constraint renames from any migration:generate output.",
   "nextIdCounter": 310,
   "connections": [],
   "tasks": [
@@ -16724,7 +16724,7 @@
       "id": "T-0308",
       "title": "Unblock production deploys: keep dev-only MinIO out of the prod project, not just at zero replicas",
       "summary": "The 2026-09-25 production deploy (run 36184332508) died in lords-deploy's `compose pull` with 'pull access denied for minio/minio, repository does not exist'. MinIO has withdrawn minio/minio and minio/mc from Docker Hub and Quay. Production never runs MinIO, but the prod overlay only scaled minio and minio-init to `deploy: replicas: 0`, which stops a container being created (what T-0134 verified) while `compose pull` still fetches every service's image. They now carry `profiles: [dev]`, a profile nothing on the box activates, which removes both from the prod project outright; the dev stack never loads the overlay and is unchanged. The pull failed before `up -d`, so nothing live changed. The compose file is hand-synced, so merging alone does not unblock deploys.",
-      "status": "review",
+      "status": "deployed",
       "type": "bug",
       "size": "S",
       "sizeWeight": 2,
@@ -16758,18 +16758,21 @@
         },
         {
           "desc": "POST-DEPLOY: docker-compose.prod.yml hand-synced to the box, and `config --images` there lists no minio/*",
-          "status": "pending"
+          "status": "passed"
         },
         {
           "desc": "POST-DEPLOY: Deploy to production passes with latest/latest, shipping T-0305 with frontend T-0315",
-          "status": "pending"
+          "status": "passed"
         }
       ],
       "regressionRisk": [
         {
           "desc": "docker-compose.prod.yml is hand-synced (lords-deploy never writes it). Until the box's copy is replaced, every deploy keeps failing at 'pulling images'. A box copy that predates ee2615a also needs APEX_HOST in .env before the new file will interpolate — otherwise every compose command there refuses to run, the deploy and lords-backup included.",
-          "status": "open",
-          "notedAt": "2026-09-25T20:27:01Z"
+          "status": "resolved",
+          "notedAt": "2026-09-25T20:27:01Z",
+          "resolvedAt": "2026-09-25T22:55:38Z",
+          "resolvedBy": "claude",
+          "note": "Box synced 2026-09-25: ~/lords/docker-compose.prod.yml now matches main at 565117b (the old copy, a hand-assembled July file, is kept as docker-compose.prod.yml.bak-t0308), and APEX_HOST=lordsofholdfast.com was appended to .env first. `config` renders from .env alone and lists no minio/* image. Deploy run 36198553880 then passed."
         },
         {
           "desc": "Any dev-only service added to the base compose file must get `profiles: [dev]` in the prod overlay. `replicas: 0` reintroduces a pull of an image production never runs, and with it a dependency on an upstream that can vanish.",
@@ -16784,9 +16787,9 @@
         "Did not add a CI check that the prod project names only pullable images; worth doing, but not part of unblocking the deploy.",
         "Did not replace MinIO in the dev stack; recorded as T-0309."
       ],
-      "lastTouchedCommit": "bf724c1dcf9fb635b8b30e1b897e7e964cc2549d",
+      "lastTouchedCommit": "565117bdbbf20560c8f9156f78dcc6cfe14c4094",
       "createdAt": "2026-09-25T20:27:01Z",
-      "updatedAt": "2026-09-25T20:27:01Z",
+      "updatedAt": "2026-09-25T22:55:38Z",
       "history": [
         {
           "at": "2026-09-25T20:27:01Z",
@@ -16801,6 +16804,13 @@
           "to": "review",
           "by": "claude",
           "note": "implemented on fix/deploy-minio-pull (bf724c1), PR #106; box sync and a deploy re-run still owed"
+        },
+        {
+          "at": "2026-09-25T22:55:38Z",
+          "from": "review",
+          "to": "deployed",
+          "by": "claude",
+          "note": "landed on main via 565117b (PR #106); box synced, then deploy run 36198553880 green: pulled only mysql, caddy, lords-api, lords-web; migrate ran WelcomeSwitch1784900008000; readiness OK after ~10s"
         }
       ]
     },
@@ -16932,6 +16942,11 @@
       "at": "2026-09-25T20:27:01Z",
       "by": "claude",
       "note": "T-0309 planned: the dev stack's MinIO images are gone too"
+    },
+    {
+      "at": "2026-09-25T22:55:38Z",
+      "by": "claude",
+      "note": "T-0308 advanced to deployed: box compose synced to main, APEX_HOST added to .env, deploy run 36198553880 green"
     }
   ]
 }
