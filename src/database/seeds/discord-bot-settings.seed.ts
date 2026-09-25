@@ -15,6 +15,7 @@ export async function seedDiscordBotSettings(ds: DataSource): Promise<void> {
     {
       botEnabled: false,
       membershipRoleName: 'Member',
+      welcomeEnabled: true,
       welcomeMessage: 'Welcome to the Lords Regiment! An officer will be with you shortly.',
       syncRolesOnChange: true,
       applyBanRoleOnBan: false,

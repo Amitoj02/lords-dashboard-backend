@@ -382,4 +382,72 @@ describe('DiscordService — bulk re-link progress + cancel (T-0160)', () => {
       expect(row.banRoleName).toBe('Cashiered');
     });
   });
+
+  /**
+   * T-0305 — the greeting can be switched off, and neither direction of the
+   * switch asks for a welcome channel. That is the deliberate contrast with
+   * applyBanRoleOnBan, which refuses to turn on without its Ban role: the
+   * greeting has a delivery path (a DM) that needs no channel at all.
+   */
+  describe('welcome switch (T-0305)', () => {
+    const stored = (overrides: Partial<DiscordBotSettings> = {}) =>
+      ({
+        regimentId: REGIMENT,
+        botEnabled: true,
+        welcomeEnabled: true,
+        welcomeChannelId: null,
+        welcomeMessage: null,
+        banRoleId: null,
+        applyBanRoleOnBan: false,
+        guildGateEnabled: false,
+        ...overrides,
+      }) as DiscordBotSettings;
+
+    const saved = (): DiscordBotSettings =>
+      settingsRepo.save.mock.calls[0][0] as DiscordBotSettings;
+
+    const storedAs = (overrides: Partial<DiscordBotSettings>) =>
+      sync.getSettings.mockImplementation(() => Promise.resolve(stored(overrides)));
+
+    beforeEach(() => {
+      storedAs({});
+      settingsRepo.save.mockImplementation((s: DiscordBotSettings) => Promise.resolve(s));
+    });
+
+    it('switches greetings off with no welcome channel configured', async () => {
+      const res = await service.updateSettings(user(), { welcomeEnabled: false }, null);
+
+      expect(saved().welcomeEnabled).toBe(false);
+      expect(res.welcomeEnabled).toBe(false);
+      expect(res.welcomeChannelId).toBeNull();
+    });
+
+    it('switches greetings on with no welcome channel — the DM case, never a 400', async () => {
+      storedAs({ welcomeEnabled: false });
+
+      await service.updateSettings(user(), { welcomeEnabled: true, welcomeChannelId: null }, null);
+
+      expect(saved().welcomeEnabled).toBe(true);
+      expect(saved().welcomeChannelId).toBeNull();
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['null (what the editor posts for "no channel")', null],
+    ])('stores a welcome channel cleared with %s as NULL', async (_l, input) => {
+      storedAs({ welcomeChannelId: '910000000000000009' });
+
+      await service.updateSettings(user(), { welcomeChannelId: input }, null);
+
+      expect(saved().welcomeChannelId).toBeNull();
+    });
+
+    it('leaves the switch as stored when the field is omitted', async () => {
+      storedAs({ welcomeEnabled: false });
+
+      await service.updateSettings(user(), { welcomeMessage: 'Fall in!' }, null);
+
+      expect(saved().welcomeEnabled).toBe(false);
+    });
+  });
 });

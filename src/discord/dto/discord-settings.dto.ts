@@ -20,7 +20,19 @@ const WELCOME_TOKEN_HINT = WELCOME_TOKENS.map((t) => `\`${t.token}\` — ${t.ren
 /** The regiment's Discord bot configuration (read). */
 export class DiscordBotSettingsDto {
   @ApiProperty() botEnabled: boolean;
-  @ApiProperty({ nullable: true }) welcomeChannelId: string | null;
+  @ApiProperty({
+    description:
+      'Whether the bot greets someone who joins the guild at all. Default true. Independent ' +
+      'of welcomeChannelId: with no channel set, the greeting is sent as a DM instead.',
+  })
+  welcomeEnabled: boolean;
+  @ApiProperty({
+    nullable: true,
+    description:
+      'Optional channel the greeting is posted to. NULL means it is sent as a DM — a channel ' +
+      'is never required.',
+  })
+  welcomeChannelId: string | null;
   @ApiProperty({
     nullable: true,
     description:
@@ -77,6 +89,7 @@ export class DiscordBotSettingsDto {
   static from(s: DiscordBotSettings): DiscordBotSettingsDto {
     return {
       botEnabled: s.botEnabled,
+      welcomeEnabled: s.welcomeEnabled,
       welcomeChannelId: s.welcomeChannelId,
       welcomeMessage: s.welcomeMessage,
       enlistmentChannelId: s.enlistmentChannelId,
@@ -103,7 +116,26 @@ export class DiscordBotSettingsDto {
 /** Partial update of the Discord bot configuration. */
 export class UpdateDiscordSettingsDto {
   @ApiPropertyOptional() @IsOptional() @IsBoolean() botEnabled?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsString() @MaxLength(20) welcomeChannelId?: string;
+  @ApiPropertyOptional({
+    description:
+      'Turn the guild-join greeting on or off. Off sends nothing — no channel post and no DM — ' +
+      "while a returning member's roles are still restored. Needs no welcome channel either way.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  welcomeEnabled?: boolean;
+  // `| null` for the same reason as welcomeMessage below: the editor posts the
+  // stored value back, and "no channel" is stored as null.
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Optional channel the greeting is posted to. Empty or null clears it, and the greeting ' +
+      'is then sent as a DM.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  welcomeChannelId?: string | null;
   // `| null` is not decoration: the settings editor round-trips the stored value
   // and PATCHes it back, so it genuinely posts `welcomeMessage: null` whenever
   // no greeting is configured. `@IsOptional()` lets null through validation, so

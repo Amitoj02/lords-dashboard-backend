@@ -30,7 +30,23 @@ export class DiscordBotSettings {
   @Column({ default: false })
   botEnabled: boolean;
 
-  /** Channel snowflake welcome messages are posted to (falls back to a DM). */
+  /**
+   * Whether the bot greets someone who joins the guild at all (T-0305). ON by
+   * default: every regiment greeted new arrivals before this switch existed, and
+   * adding it must not silence a live greeting. Deliberately independent of
+   * {@link welcomeChannelId} — a channel is optional, and with none set the
+   * greeting still goes out as a DM. Off means no greeting of either kind; the
+   * rest of onboarding (a returning member's roles) is unaffected.
+   */
+  @Column({ default: true })
+  welcomeEnabled: boolean;
+
+  /**
+   * Channel snowflake welcome messages are posted to. OPTIONAL: with none set the
+   * greeting falls back to a DM, so no regiment has to pick a channel just to
+   * greet people — and turning the greeting off is {@link welcomeEnabled}'s job,
+   * not this column's.
+   */
   @Column({ type: 'varchar', length: 20, nullable: true })
   welcomeChannelId: string | null;
 

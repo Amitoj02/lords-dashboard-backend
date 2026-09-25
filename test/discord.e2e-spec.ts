@@ -145,6 +145,7 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
         membershipRoleId: null,
         gallerySubmissionChannelId: null,
         galleryApprovedChannelId: null,
+        welcomeEnabled: true,
         welcomeChannelId: null,
         welcomeMessage: null,
         enlistmentChannelId: null,
@@ -827,6 +828,146 @@ describe('Discord bot pipeline (e2e, mock gateway)', () => {
     it('rejects a message longer than the documented 512-character limit', async () => {
       await patchSettings({ welcomeMessage: 'x'.repeat(513) }).expect(400);
       await patchSettings({ welcomeMessage: 'x'.repeat(512) }).expect(200);
+    });
+  });
+
+  /**
+   * T-0305 — greetings can be switched off, and a channel is never required.
+   *
+   * Before the switch the only levers were the channel (clearing it just moved
+   * the greeting into a DM) and the message (clearing it swapped in the house
+   * default), so a regiment that wanted no greeting had to turn the whole bot
+   * off. The two are independent now: off sends nothing whatever the channel,
+   * on sends something whatever the channel.
+   */
+  describe('welcome switch (T-0305)', () => {
+    const WELCOME_CHANNEL = '910000000000000009';
+
+    const readSettings = async (): Promise<Record<string, unknown>> =>
+      (await request(server()).get('/api/discord/settings').set(bearer(ownerToken)).expect(200))
+        .body as Record<string, unknown>;
+
+    const patchSettings = (body: Record<string, unknown>) =>
+      request(server()).patch('/api/discord/settings').set(bearer(ownerToken)).send(body);
+
+    const join = (discordUserId: string) =>
+      request(server())
+        .post('/api/discord/simulate/member-join')
+        .set(bearer(ownerToken))
+        .send({ discordUserId })
+        .expect(200);
+
+    /** Everything the mock delivered to this user, or to the welcome channel. */
+    const greetingsFor = (discordUserId: string) =>
+      mockGateway.sentMessages.filter(
+        (m) => m.target === discordUserId || m.target === WELCOME_CHANNEL,
+      );
+
+    beforeEach(async () => {
+      await dataSource.getRepository(DiscordSyncJob).delete({ regimentId: REGIMENT_ID });
+      mockGateway.resetSentMessages();
+      await patchSettings({
+        botEnabled: true,
+        syncRolesOnChange: true,
+        welcomeEnabled: true,
+        welcomeChannelId: null,
+        welcomeMessage: null,
+      }).expect(200);
+    });
+
+    afterAll(async () => {
+      await patchSettings({ welcomeEnabled: true, welcomeChannelId: null }).expect(200);
+    });
+
+    it('ships ON, so a regiment that never touches the switch keeps greeting', async () => {
+      // The column default IS the backward-compatibility guarantee: every row
+      // that existed before the switch reads as "greet".
+      const [column] = await dataSource.query<{ def: string; nullable: string }[]>(
+        'SELECT COLUMN_DEFAULT AS def, IS_NULLABLE AS nullable FROM information_schema.COLUMNS ' +
+          'WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+        ['discord_bot_settings', 'welcome_enabled'],
+      );
+      expect(String(column.def)).toBe('1');
+      expect(column.nullable).toBe('NO');
+    });
+
+    it('round-trips the switch without asking for a channel in either direction', async () => {
+      await patchSettings({ welcomeEnabled: false }).expect(200);
+      expect(await readSettings()).toMatchObject({ welcomeEnabled: false, welcomeChannelId: null });
+
+      await patchSettings({ welcomeEnabled: true }).expect(200);
+      expect(await readSettings()).toMatchObject({ welcomeEnabled: true, welcomeChannelId: null });
+    });
+
+    it('stores a channel cleared with an empty string as NULL', async () => {
+      await patchSettings({ welcomeChannelId: WELCOME_CHANNEL }).expect(200);
+      await patchSettings({ welcomeChannelId: '' }).expect(200);
+
+      expect((await readSettings()).welcomeChannelId).toBeNull();
+    });
+
+    it('switched OFF: a join is greeted neither in the channel nor by DM', async () => {
+      await patchSettings({ welcomeEnabled: false, welcomeChannelId: WELCOME_CHANNEL }).expect(200);
+
+      await join('555000000000000005');
+      await drainAll();
+
+      expect(await jobsOfType(DiscordSyncJobType.Welcome)).toHaveLength(0);
+      expect(greetingsFor('555000000000000005')).toEqual([]);
+    });
+
+    it('switched OFF: a returning member still gets their roles back', async () => {
+      // The switch silences the greeting, not onboarding. The owner is a roster
+      // member no other case in this file has "joined", so the onboarding dedupe
+      // window cannot swallow this join.
+      await patchSettings({ welcomeEnabled: false }).expect(200);
+      const ownerIdentity = await dataSource
+        .getRepository(DiscordIdentity)
+        .findOne({ where: { discordUserId: ownerProfile.id } });
+      const owner = await dataSource
+        .getRepository(Member)
+        .findOne({ where: { discordIdentityId: ownerIdentity!.id } });
+
+      await join(ownerProfile.id);
+
+      expect(await jobsOfType(DiscordSyncJobType.Welcome)).toHaveLength(0);
+      const grants = await jobsOfType(DiscordSyncJobType.RoleGrant);
+      expect(grants).toHaveLength(1);
+      expect((grants[0].payload as { memberId: string }).memberId).toBe(owner!.id);
+    });
+
+    it('switched OFF: a greeting already queued is not delivered either', async () => {
+      // Written straight to the outbox, as it would sit behind a backlog when an
+      // admin switches greetings off mid-raid — the drain re-reads the switch.
+      await patchSettings({ welcomeEnabled: false }).expect(200);
+      const queued = await dataSource.getRepository(DiscordSyncJob).save({
+        regimentId: REGIMENT_ID,
+        jobType: DiscordSyncJobType.Welcome,
+        payload: {
+          discordUserId: '555000000000000006',
+          channelId: null,
+          content: '',
+          embed: { title: 'Welcome to Lords Regiment', description: 'Fall in!' },
+        },
+        scheduledAt: new Date(),
+      });
+
+      await drainAll();
+
+      expect(greetingsFor('555000000000000006')).toEqual([]);
+      const row = await dataSource.getRepository(DiscordSyncJob).findOneByOrFail({ id: queued.id });
+      expect(row.status).toBe(DiscordSyncJobStatus.Succeeded);
+    });
+
+    it('switched ON with no channel: the greeting arrives as a DM', async () => {
+      // Also the positive control for the OFF cases above: the same join, drain
+      // and filter DO see a greeting when one is sent, so theirs are not vacuous.
+      await join('555000000000000007');
+      await drainAll();
+
+      const sent = greetingsFor('555000000000000007');
+      expect(sent).toHaveLength(1);
+      expect(sent[0].kind).toBe('dm');
     });
   });
 

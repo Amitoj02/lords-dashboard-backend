@@ -21,6 +21,8 @@ const ONBOARD_DEDUPE_MS = 5 * 60_000;
  * Guild-join onboarding. On GuildMemberAdd the bot sends a welcome and, for
  * someone already on the roster, puts their Discord roles back — nothing else
  * (the owner decided the bot has NO slash commands; members use the webapp).
+ * A regiment can switch the welcome off (T-0305); the role restore runs either
+ * way.
  * Everything goes through the outbox, so a flood of joins is rate-limited and
  * failures are retried/surfaced. The real gateway wires this to discord.js
  * events; the mock exposes simulateMemberJoin so the flow is testable with no
