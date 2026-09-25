@@ -132,6 +132,13 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
    gateway connections on one bot token, and duplicate role grants and welcome
    DMs to real members. `stop_grace_period: 30s` gives discord.js time to
    `destroy()` cleanly.
+
+   The pull covers **every service in the prod project, including ones that
+   never start** — `replicas: 0` stops a container being created, not its image
+   being fetched. So a dev-only service is kept out of prod with a profile
+   nothing activates (`profiles: [dev]`, as `minio` is), never with
+   `replicas: 0`: a zero-replica MinIO failed the 2026-09-25 deploy when its
+   image vanished from Docker Hub (T-0308).
 4. `migrate` runs first as a one-shot and the API waits for it to exit 0, so two
    processes can never be mid-migration at once.
 5. Polls `/api/health/ready` from inside the container for up to 5 minutes.
@@ -455,6 +462,7 @@ ssh ovh-lords 'cd ~/lords && docker compose -f docker-compose.yml -f docker-comp
 | White screen after deploy | Cached `index.html`. Caddy sends `no-store`; check the Cloudflare Cache Rule bypasses `/` and `/index.html` |
 | Everyone shares one rate limit | The throttler reads `cf-connecting-ip`; check Caddy's `trusted_proxies` list is current (`cloudflare.com/ips-v4`) |
 | API can't reach the DB | `APP_DB_PASSWORD` changed after first boot — see the rotation note above |
+| Deploy dies at `pulling images`: `pull access denied for minio/minio` | The box's `docker-compose.prod.yml` predates T-0308 — sync it from `main`. MinIO's images are gone from Docker Hub, and only the `profiles: [dev]` version keeps `pull` away from them |
 
 ### Memory
 

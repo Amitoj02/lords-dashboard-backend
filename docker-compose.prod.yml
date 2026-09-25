@@ -53,13 +53,18 @@ services:
   # MinIO is DEV-ONLY. Production object storage is Cloudflare R2, which has no
   # ACL concept — the `mc anonymous set download` bootstrap has no R2 equivalent.
   # Public reads are served from a custom domain bound to the bucket instead.
-  # `replicas: 0` keeps these out of the prod stack without deleting the dev ones.
+  #
+  # A profile nothing on the box activates removes both from the prod project
+  # outright, so no command — `pull` included — touches their images (T-0308).
+  # This used to be `deploy: replicas: 0`, which stopped them STARTING but not
+  # being PULLED: lords-deploy's `compose pull` fetched both images on every
+  # deploy, until MinIO withdrew minio/minio and minio/mc from Docker Hub and
+  # Quay and the 2026-09-25 deploy died at "pulling images" on a service
+  # production never runs. Exclude any future dev-only service the same way.
   minio:
-    deploy:
-      replicas: 0
+    profiles: [dev]
   minio-init:
-    deploy:
-      replicas: 0
+    profiles: [dev]
 
   # One-shot: apply migrations + seed using the compiled JS (no ts-node), then
   # exit. The api waits for this to complete successfully before starting, so two
